@@ -183,8 +183,10 @@ KEY_EOF
   skip_ "created empty"
 else
   chmod 600 "$KEYS"
-  KN=$(grep -cE '^(AQ\.[A-Za-z0-9_-]{20,}|AIza[A-Za-z0-9_-]{20,})$' "$KEYS" 2>/dev/null || echo 0)
-  printf "%s accounts\n" "$KN"
+  KN="$(grep -cE '^(AQ\.[A-Za-z0-9_-]{20,}|AIza[A-Za-z0-9_-]{20,})$' "$KEYS" 2>/dev/null || true)"
+  KN="$(printf '%s' "$KN" | tr -dc '0-9')"
+  [ -z "$KN" ] && KN=0
+  if [ "$KN" -eq 0 ]; then skip_ "no keys in it yet"; else printf "%s accounts\n" "$KN"; fi
 fi
 
 # ---------------------------------------------------------------- the app

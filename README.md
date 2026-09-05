@@ -41,6 +41,7 @@ have not made one, and then runs the four tests against real keys.
 Two words are left behind:
 
     gtt          the menu, and the app on localhost:7311
+    gtts         the same thing; both names work
     gtt-update   fetch the newest installer from this repository and run it
 
 ## The keys, and never copying a file by hand

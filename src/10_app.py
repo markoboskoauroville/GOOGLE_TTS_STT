@@ -41,7 +41,7 @@ try:
 except Exception:
     PACIFIC = timezone(timedelta(hours=-8))
 
-VERSION = 4
+VERSION = 5
 PORT = int(os.environ.get("GTTS_PORT", "7311"))
 KEYFILE = os.environ.get("GEMINI_KEYS", os.path.expanduser("~/.gemini_keys"))
 HOME = os.path.expanduser("~/.google_tts_stt")
@@ -763,8 +763,20 @@ def budget():
 
 def run_tests():
     print("GOOGLE TTS AND STT v%d, four tests, real keys" % VERSION)
-    ok = 0
 
+    # Running four provider tests against an empty ring produces four failures
+    # that all mean one thing, and none of them says what that thing is. Say it
+    # once, here, and stop.
+    if not load_ring():
+        print("\n  The key ring is empty, so there is nothing to test.")
+        print("  %s holds no keys." % KEYFILE)
+        print("\n  Give it your key file, in whatever shape it was saved:")
+        print("      gtt import /sdcard/Download/your-keys.txt")
+        print("\n  A note, a .env, a JSON export, a CSV, a markdown table: it")
+        print("  finds the keys itself and never adds one twice.\n")
+        return 1
+
+    ok = 0
     print("1. key ring parses and at least one key is live")
     rows = test_all_keys()
     live = [r for r in rows if r["state"] == "live"]

@@ -238,3 +238,43 @@ that was just built, so the two cannot drift.
 The lesson is the one the manifest already has: anything outside the process
 needs a deadline and a second path, and the way to find out whether it has one
 is to run it, not to read it.
+
+---
+
+## 5.9.2026 — v5, two faults off a photograph of a phone
+
+### "1 of 4 green" on a phone with no keys in it
+
+The installer is supposed to notice an empty ring and skip the tests. It did
+not, and the reason is one of the oldest traps in shell:
+
+    KEYCOUNT=$(grep -cE '<pattern>' "$KEYS" 2>/dev/null || echo 0)
+
+**`grep -c` prints `0` and exits 1** when it matches nothing. The `|| echo 0`
+then appends a second zero, `KEYCOUNT` becomes the three characters `0\n0`,
+`[ "$KEYCOUNT" -lt 1 ]` errors with *illegal number*, the `if` is therefore
+false, and the else branch runs the whole gate against a ring with nothing in
+it. Four provider tests fail, one ledger test passes, and the phone says *a
+test failed* on a completely healthy install.
+
+`|| true` is enough, because grep prints its count whether or not it found
+anything, and the result is then stripped to digits before it is compared. The
+same construction was in the head, where it only made the summary line read
+`0 0 accounts`.
+
+Test 4 now installs into an empty home and asserts three things: that it says
+the ring is empty, that it does **not** run the provider tests, and that it does
+not report a failure. Those three would have caught this before it left.
+
+### The empty ring now says so once, not four times
+
+Four failures that all mean *there are no keys* is four chances to read the
+wrong reason. `gtt test` checks the ring first and stops with the one sentence
+that matters and the command that fixes it.
+
+### gtts
+
+The app is called Google TTS and STT, so `gtts` is what the hand types, and it
+was typed on the first day by the person who chose the name `gtt`. A command
+that exists under one name and is reached for under another has a bug in its
+name. Both now exist; `gtts` is two lines that exec `gtt`.

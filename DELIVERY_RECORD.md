@@ -1,16 +1,16 @@
 # DELIVERY RECORD
 
-**v4, 5.9.2026.** What was measured, and what was not tested.
+**v5, 5.9.2026.** What was measured, and what was not tested.
 
 ## The gate
 
-    build is fresh          4-google-tts-stt-v4.sh matches src/
+    build is fresh          5-google-tts-stt-v5.sh matches src/
     installer is whole      --verify passes
     TEST 1   mechanism       34 checks   0 failed
     TEST 1b  the parser      73 checks   0 failed
     TEST 3   ugly cases      44 checks   0 failed
-    TEST 4   upgrade         23 checks   0 failed
-                            174 checks   0 failed
+    TEST 4   upgrade         29 checks   0 failed
+                            180 checks   0 failed
 
 **TEST 2 was NOT run for v3.** It is the one test that spends real provider
 requests, and the keys used through v1 and v2 have been retired. It last ran

@@ -12,7 +12,7 @@ done_
 # its own name and renamed over the top: the rename swaps the directory entry,
 # the running shell keeps its open file and reads to the end undisturbed, and
 # nothing half written is ever reachable under the real name.
-rm -f "$BIN/gtt.new" "$BIN/gtt-update.new"
+rm -f "$BIN/gtt.new" "$BIN/gtts.new" "$BIN/gtt-update.new"
 
 step "gtt"
 cat > "$BIN/gtt.new" <<GTT_CMD_EOF
@@ -106,6 +106,19 @@ chmod +x "$BIN/gtt-update.new"
 mv -f "$BIN/gtt-update.new" "$BIN/gtt-update"
 done_
 
+step "gtts"
+# The app is called Google TTS and STT, so gtts is what the hand types. It was
+# typed on the first day. A command that exists under one name and is reached
+# for under another is a command with a bug in its name.
+cat > "$BIN/gtts.new" <<GTTS_ALIAS_EOF
+#!/usr/bin/env bash
+# gtts - the same thing as gtt. Both names work; gtt is the shorter one.
+exec "$BIN/gtt" "\$@"
+GTTS_ALIAS_EOF
+chmod +x "$BIN/gtts.new"
+mv -f "$BIN/gtts.new" "$BIN/gtts"
+done_
+
 # ---------------------------------------------------------------- PATH
 case ":$PATH:" in
   *":$BIN:"*) : ;;
@@ -132,12 +145,24 @@ fi
 
 # ---------------------------------------------------------------- the gate
 blank
-KEYCOUNT=$(grep -cE '^(AQ\.[A-Za-z0-9_-]{20,}|AIza[A-Za-z0-9_-]{20,})$' "$KEYS" 2>/dev/null || echo 0)
+# grep -c PRINTS 0 and EXITS 1 when it matches nothing. So `|| echo 0` appends
+# a second zero and KEYCOUNT becomes the two characters "0\n0", which is not a
+# number, so [ -lt ] errors, the if is false, and the else branch runs the gate
+# against an empty ring. That is what "1 of 4 green" on a fresh phone was.
+# grep always prints a count when the file exists, so || true is enough, and
+# the tr guards against anything else arriving with a newline in it.
+KEYCOUNT="$(grep -cE '^(AQ\.[A-Za-z0-9_-]{20,}|AIza[A-Za-z0-9_-]{20,})$' "$KEYS" 2>/dev/null || true)"
+KEYCOUNT="$(printf '%s' "$KEYCOUNT" | tr -dc '0-9')"
+[ -z "$KEYCOUNT" ] && KEYCOUNT=0
 if [ "$QUIET" = "1" ]; then
   say "${DIM}tests skipped by --quiet${OFF}"
   RC=0
 elif [ "$KEYCOUNT" -lt 1 ]; then
-  say "${WARN}no keys yet.${OFF} Put them in $KEYS, then run:  ${SAND}gtt test${OFF}"
+  say "${WARN}the ring is empty, so there is nothing to test yet.${OFF}"
+  blank
+  say "Give it your key file, in whatever shape it was saved:"
+  say "  ${SAND}gtt import /sdcard/Download/your-keys.txt${OFF}"
+  say "then ${SAND}gtt test${OFF}"
   RC=0
 else
   say "${DIM}four tests, real keys, no mocks${OFF}"
@@ -150,6 +175,7 @@ fi
 if [ "$RC" -eq 0 ]; then
   say "${OK}installed${OFF} $GTT_VERSION"
   say "  ${SAND}gtt${OFF}          the menu, and the app on localhost:7311"
+  say "  ${DIM}gtts${OFF}         the same thing, for when that is what you type"
   say "  ${SAND}gtt test${OFF}     the four tests"
   say "  ${SAND}gtt import F${OFF} add accounts from any file, without duplicating"
   say "  ${SAND}gtt-update${OFF}   fetch the next version"

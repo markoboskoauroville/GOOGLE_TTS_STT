@@ -151,6 +151,31 @@ cksum < "$L" > "$SANDBOX/l2"
 cmp -s "$SANDBOX/l1" "$SANDBOX/l2" && ok "installing a third time changes nothing" \
   || bad "installing a third time changes nothing"
 
+# THE EMPTY RING BRANCH. This is what "1 of 4 green" on a fresh phone was:
+# grep -c prints 0 and exits 1, so `|| echo 0` made the count "0\n0", the
+# numeric test errored, and the installer ran the gate against no keys at all.
+EMPTY="$(mktemp -d)"
+HOME="$EMPTY" bash "$INSTALLER" > "$EMPTY/out.txt" 2>&1
+grep -q "ring is empty" "$EMPTY/out.txt" \
+  && ok "an install with no keys says the ring is empty" \
+  || bad "an install with no keys says the ring is empty"
+grep -q "of 4 green" "$EMPTY/out.txt" \
+  && bad "an install with no keys must NOT run the provider tests" \
+  || ok "an install with no keys does not run the provider tests"
+grep -q "a test failed" "$EMPTY/out.txt" \
+  && bad "an install with no keys must not report a failure" \
+  || ok "an install with no keys does not report a failure"
+[ -x "$EMPTY/bin/gtts" ] && ok "gtts is installed beside gtt" || bad "gtts is installed beside gtt"
+if [ -x "$EMPTY/bin/gtts" ]; then
+  HOME="$EMPTY" "$EMPTY/bin/gtts" out >/dev/null 2>&1 \
+    && ok "gtts runs the same thing as gtt" || bad "gtts runs the same thing as gtt"
+fi
+HOME="$EMPTY" "$PY" "$EMPTY/.google_tts_stt/app.py" test > "$EMPTY/t.txt" 2>&1
+grep -q "ring is empty" "$EMPTY/t.txt" \
+  && ok "gtt test on an empty ring says why, once" \
+  || bad "gtt test on an empty ring says why, once"
+rm -rf "$EMPTY"
+
 # the generated installer must match its sources
 if $PY "$ROOT/tools/build_installer.py" --check >/dev/null 2>&1; then
   ok "the shipped installer matches src/"

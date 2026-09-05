@@ -135,6 +135,7 @@ filename carries it at both ends.
 ## Commands
 
     gtt              menu
+    gtts             the same thing, because that is what gets typed
     gtt run          the server
     gtt test         the four tests
     gtt keys         edit the ring
