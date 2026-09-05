@@ -163,9 +163,8 @@ cmp -s "$SANDBOX/l1" "$SANDBOX/l2" && ok "installing a third time changes nothin
 # numeric test errored, and the installer ran the gate against no keys at all.
 EMPTY="$(mktemp -d)"
 HOME="$EMPTY" bash "$INSTALLER" > "$EMPTY/out.txt" 2>&1
-grep -q "ring is empty" "$EMPTY/out.txt" \
-  && ok "an install with no keys says the ring is empty" \
-  || bad "an install with no keys says the ring is empty"
+grep -q "No keys yet" "$EMPTY/out.txt" \
+  && ok "an install with no keys says so" || bad "an install with no keys says so"
 grep -q "of 4 green" "$EMPTY/out.txt" \
   && bad "an install with no keys must NOT run the provider tests" \
   || ok "an install with no keys does not run the provider tests"
@@ -211,6 +210,26 @@ grep -q "ring is empty" "$EMPTY/t.txt" \
   && ok "gtt test on an empty ring says why, once" \
   || bad "gtt test on an empty ring says why, once"
 rm -rf "$EMPTY"
+
+# INSTALLING MUST NOT SPEND A KEY. This is the sharpest one on the list: the
+# four tests make real calls, a TTS account has ten a day, and an install that
+# quietly takes some of them has decided something on the person's behalf.
+SPEND="$(mktemp -d)"
+printf 'a key\nAQ.Ab8RN6SPENDCHECKSPENDCHECKSPE\n' > "$SPEND/.gemini_keys"
+HOME="$SPEND" bash "$INSTALLER" > "$SPEND/out.txt" 2>&1
+grep -q "of 4 green" "$SPEND/out.txt" \
+  && bad "an install with keys in the ring must still not test them" \
+  || ok "an install with keys in the ring does not test them"
+grep -qi "no mocks" "$SPEND/out.txt" \
+  && bad "and does not announce a test run" || ok "and does not announce a test run"
+[ -f "$SPEND/.google_tts_stt/ledger.json" ] \
+  && bad "and writes no ledger, because it spent nothing" \
+  || ok "and writes no ledger, because it spent nothing"
+HOME="$SPEND" bash "$INSTALLER" --test > "$SPEND/out2.txt" 2>&1
+grep -q "because you asked" "$SPEND/out2.txt" \
+  && ok "--test still runs them, because asking is different" \
+  || bad "--test still runs them, because asking is different"
+rm -rf "$SPEND"
 
 # THE VENDORED APP. It must arrive whole, and it must arrive with its engine
 # swapped: shipping the upstream page untouched would leave it calling

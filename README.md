@@ -18,6 +18,10 @@ wrong by the evening.
 
     pkg install -y curl && curl -fsSL https://raw.githubusercontent.com/markoboskoauroville/GOOGLE_TTS_STT/main/get.sh -o get.sh && bash get.sh
 
+**Installing spends nothing.** The four tests make real calls against a real
+ring, and a TTS account has ten requests a day, so they run when you ask for
+them: `bash get.sh --test`, or `gtt test`, any time.
+
 Python and ffmpeg are installed by the installer itself with `pkg` if they are
 not already there, and skipped with a word if they are. The command lands in
 `$PREFIX/bin`, which is already on the PATH, so no rc file is touched.

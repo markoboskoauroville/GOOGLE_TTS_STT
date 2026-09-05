@@ -13,10 +13,14 @@
 # ledgers, and two ledgers that each think they own the daily budget are both
 # wrong by dinner time.
 #
-#   bash @@FILENAME@@                 install, then run the tests
+#   bash @@FILENAME@@                 install
 #   bash @@FILENAME@@ --keys FILE     install, and take the keys out of FILE
-#   bash @@FILENAME@@ --quiet         install, no tests
+#   bash @@FILENAME@@ --test          install, then run the four tests
 #   bash @@FILENAME@@ --verify        check this file is whole, change nothing
+#
+# INSTALLING SPENDS NOTHING. The four tests make real calls against a real
+# ring, and a TTS account has ten requests a day, so they run when you ask for
+# them and not before. gtt test, any time.
 #
 # --keys takes ANY file: a note, a .env, a JSON export, a CSV, a markdown
 # table. It finds the keys, keeps the account names where they are there, and
@@ -54,6 +58,7 @@ OUT="$APPHOME/out"
 
 VERIFY_ONLY=0
 QUIET=0
+RUNTESTS=0
 IMPORT=""
 NEXT_IS_KEYS=0
 for a in "$@"; do
@@ -61,10 +66,11 @@ for a in "$@"; do
   case "$a" in
     --verify) VERIFY_ONLY=1 ;;
     --quiet|--no-test) QUIET=1 ;;
+    --test|--tests) RUNTESTS=1 ;;
     --keys) NEXT_IS_KEYS=1 ;;
     --keys=*) IMPORT="${a#--keys=}" ;;
     -h|--help)
-      printf 'usage: bash %s [--keys FILE] [--quiet] [--verify]\n' "$GTT_FILE"; exit 0 ;;
+      printf 'usage: bash %s [--keys FILE] [--test] [--verify]\n' "$GTT_FILE"; exit 0 ;;
   esac
 done
 

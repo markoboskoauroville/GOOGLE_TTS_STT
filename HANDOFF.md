@@ -282,7 +282,7 @@ filename carries it at both ends.
     gtt              menu
     gtts             the same thing, because that is what gets typed
     gtt run          the server
-    gtt test         the four tests
+    gtt test         the four tests, when you ask for them
     gtt keys         edit the ring
     gtt import FILE  add accounts from any file, without duplicating
     gtt out          list what Speak has made

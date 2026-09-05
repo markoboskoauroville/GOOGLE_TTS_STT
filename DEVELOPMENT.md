@@ -470,3 +470,29 @@ with their own accuracy and their own ways of being wrong.
 That is a decision rather than an implementation detail, so it is written down
 here and in DELIVERY_RECORD rather than guessed at. Vendoring the reader without
 an engine would put a reader in the repository that cannot read.
+
+---
+
+## 5.9.2026 — v10, installing stops spending keys
+
+Baba: *please stop testing my keys during installation.*
+
+He is right and it should not have taken being asked. The four tests are real
+calls to a real provider against a real ring — that is what makes them worth
+having, and it is exactly why they must not run behind somebody's back. A TTS
+account has **ten requests a day**. An install that quietly takes a few of them
+has decided something on his behalf, and it did that on every install and every
+`gtt-update` since v1.
+
+The reasoning that put them there was the delivery gate: nothing ships
+unverified. But the gate belongs to me, before the artefact leaves, not to him,
+on his phone, with his quota. Running it at install time moved my cost onto his
+budget and called it diligence.
+
+`bash <installer> --test` still runs them, because asking for them is a
+different act from having them happen. `gtt test` any time.
+
+Test 4 now installs into a home with a key in the ring and asserts three things:
+no test run, no announcement of one, and **no ledger file**, which is the
+evidence that nothing was spent. Then it runs `--test` and asserts that one does
+still work.

@@ -179,45 +179,49 @@ if [ -n "$IMPORT" ]; then
   fi
 fi
 
-# ---------------------------------------------------------------- the gate
+# --------------------------------------------------------------- finished
 blank
-# grep -c PRINTS 0 and EXITS 1 when it matches nothing. So `|| echo 0` appends
-# a second zero and KEYCOUNT becomes the two characters "0\n0", which is not a
-# number, so [ -lt ] errors, the if is false, and the else branch runs the gate
-# against an empty ring. That is what "1 of 4 green" on a fresh phone was.
-# grep always prints a count when the file exists, so || true is enough, and
-# the tr guards against anything else arriving with a newline in it.
+# INSTALLING DOES NOT SPEND YOUR KEYS. The tests are real calls to a real
+# provider against a real ring, which is what makes them worth having and
+# exactly why they must not run behind your back: a TTS account has ten
+# requests a day, and an install that quietly takes a few of them has decided
+# something on your behalf. Baba, 5.9.2026.
+#
+# `bash <installer> --test` still runs them, because asking for them is
+# different from having them happen.
 KEYCOUNT="$(grep -cE '^AQ\.[A-Za-z0-9_-]{20,}$' "$KEYS" 2>/dev/null || true)"
 KEYCOUNT="$(printf '%s' "$KEYCOUNT" | tr -dc '0-9')"
 [ -z "$KEYCOUNT" ] && KEYCOUNT=0
-if [ "$QUIET" = "1" ]; then
-  say "${DIM}tests skipped by --quiet${OFF}"
-  RC=0
-elif [ "$KEYCOUNT" -lt 1 ]; then
-  say "${WARN}the ring is empty, so there is nothing to test yet.${OFF}"
-  blank
-  say "Run ${SAND}gtt${OFF}. It opens the page, and the Keys tab has the file"
-  say "picker — that is where the keys go. Or from here if you prefer:"
-  say "  ${DIM}gtt import /sdcard/Download/your-keys.txt${OFF}"
-  RC=0
-else
-  say "${DIM}four tests, real keys, no mocks${OFF}"
-  blank
-  "$PY" "$APP" test
-  RC=$?
-  blank
+RC=0
+if [ "$RUNTESTS" = "1" ]; then
+  if [ "$KEYCOUNT" -lt 1 ]; then
+    say "${WARN}--test was asked for, but the ring is empty.${OFF}"
+  else
+    say "${DIM}four tests, real keys, no mocks, because you asked${OFF}"
+    blank
+    "$PY" "$APP" test
+    RC=$?
+    blank
+  fi
 fi
 
-if [ "$RC" -eq 0 ]; then
-  say "${OK}installed${OFF} $GTT_VERSION"
-  say "  ${SAND}gtt${OFF}          starts it and opens the browser"
-  say "  ${DIM}gtts${OFF}         the same thing, for when that is what you type"
-  say "  ${DIM}gtt menu${OFF}     the panel, if you want it"
-  say "  ${SAND}gtt test${OFF}     the four tests"
-  say "  ${SAND}gtt import F${OFF} add accounts from any file, without duplicating"
-  say "  ${SAND}gtt-update${OFF}   fetch the next version"
-else
-  say "${BAD}a test failed.${OFF} The app is installed. Fix the ring and run ${SAND}gtt test${OFF}"
+say "${OK}installed${OFF} $GTT_VERSION"
+if [ "$KEYCOUNT" -lt 1 ]; then
+  blank
+  say "${WARN}No keys yet.${OFF} Run ${SAND}gtt${OFF} — it opens the page, and the KEYS"
+  say "tab has the file picker. That is where they go. Or from here:"
+  say "  ${DIM}gtt import /sdcard/Download/your-keys.txt${OFF}"
+fi
+blank
+say "  ${SAND}gtt${OFF}          starts it and opens the browser"
+say "  ${DIM}gtts${OFF}         the same thing, for when that is what you type"
+say "  ${DIM}gtt menu${OFF}     the panel, if you want it"
+say "  ${DIM}gtt test${OFF}     the four tests, when YOU want them"
+say "  ${SAND}gtt import F${OFF} add accounts from any file, without duplicating"
+say "  ${SAND}gtt-update${OFF}   fetch the next version"
+if [ "$RC" -ne 0 ]; then
+  blank
+  say "${BAD}a test failed.${OFF} The app is installed either way."
 fi
 blank
 exit 0
