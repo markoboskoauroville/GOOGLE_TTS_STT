@@ -278,3 +278,60 @@ The app is called Google TTS and STT, so `gtts` is what the hand types, and it
 was typed on the first day by the person who chose the name `gtt`. A command
 that exists under one name and is reached for under another has a bug in its
 name. Both now exist; `gtts` is two lines that exec `gtt`.
+
+---
+
+## 5.9.2026 — v6, the browser is the app
+
+### `gtt` starts it, and the panel is a picture
+
+Baba, off a photograph of the phone: *this server is a bit different than Maha
+Commute. It just needs to start the app automatically inside the browser.*
+
+MAHA COMMUTE's panel is a launcher for four separate servers and the keys are
+one of its verbs. This has one server and one page, and every setting on it, so
+a menu in front of the page is a door in front of a door. `gtt` now prints the
+panel once as a splash and starts the app; the app opens the browser. `gtt menu`
+still gives the interactive panel for when the terminal is where your hands are.
+
+`webbrowser.open` does not work on Termux — it looks for desktop browsers and
+desktop environment variables, finds neither, returns False and says nothing —
+so the chain is `am start`, `termux-open-url`, `xdg-open`/`open`, `webbrowser`.
+And `am start` prints its failure and still exits zero, so its output is read
+rather than its exit code.
+
+### An empty ring stopped blocking the start
+
+v5 exited with *no keys found in ~/.gemini_keys* and never opened anything.
+The picker that fixes an empty ring is on the page, so refusing to open the page
+is refusing to let anybody fix it. The photograph showed exactly that: the error,
+then the menu, and no way forward from either. The server now starts whatever
+the ring holds and says what it found.
+
+### AIza is gone, and I was told twice
+
+`modules/keyring.md`: *no tool, script or detector in this project looks for the
+old prefix. Not as a fallback, not as a second guess, not in a comment as an
+example.* Baba, 3.9.2026, and the module records that he has had to say it in
+every chat. v3 read that instruction and kept AIza anyway, on the reasoning that
+dropping a format still in use loses working accounts silently.
+
+The reasoning was not wrong; it was answering a question nobody asked. The rule
+about never dropping a key for its shape is about IMPORTING, and it is honoured
+by the maybes list: an old token is reported as an unknown shape and left for a
+person to decide about. It is not honoured by hard-coding a retired prefix into
+the detector. Both rules hold at once and v6 holds both.
+
+### The key tester rewritten around five words
+
+Ported from `modules/keyring.md` §2d and §2e rather than invented, because the
+distinction is the expensive part. Calling *no credit* working sends the ring at
+a wall. Calling it *refused* has somebody delete a live account they only needed
+to top up. And the retry hint is checked before the money words, because Google
+answers a spent account and an impatient one with the same status and the same
+word — match on *quota* and you tell somebody to delete a live key because they
+pressed Test twice in one second.
+
+Delete removes the refused and only the refused. Busy is never deleted. Nothing
+is destroyed: removed keys go to a file, chmod 600, and Put back returns them
+through the same merge the picker uses, so restoring cannot double a key.

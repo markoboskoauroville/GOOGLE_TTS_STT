@@ -41,7 +41,7 @@ BIN="$HOME/bin"
 # Fabricated keys, on purpose. This test proves that what is on disk survives
 # an install; it never calls the provider, so a real key here would be spent
 # for nothing.
-printf 'old label\nAQ.Ab8RN6TESTKEYTESTKEYTESTKEYTEST\n\nlegacy one\nAIzaSyTESTTESTTESTTESTTESTTESTTESTTEST\n' > "$HOME/.gemini_keys"
+printf 'old label\nAQ.Ab8RN6TESTKEYTESTKEYTESTKEYTEST\n' > "$HOME/.gemini_keys"
 chmod 600 "$HOME/.gemini_keys"
 KEYSUM_BEFORE="$(cksum < "$HOME/.gemini_keys")"
 
@@ -74,6 +74,9 @@ printf 'my own note\n' > "$APPHOME/notes.txt"
 IMPKEY="AQ.Ab8RN6UPGRADEUPGRADEUPGRADEUPGRADE"
 printf 'imported before the upgrade\n%s\n' "$IMPKEY" > "$SANDBOX/oldimport.txt"
 "$PY" "$APPHOME/app.py" import "$SANDBOX/oldimport.txt" >/dev/null 2>&1
+# something in the graveyard, which the upgrade must not lose either
+mkdir -p "$APPHOME"
+printf '# refused, before the upgrade\na deleted one\nAQ.Ab8RN6GRAVEGRAVEGRAVEGRAVEGRAV\n\n' > "$APPHOME/removed_keys"
 KEYSUM_BEFORE="$(cksum < "$HOME/.gemini_keys")"
 grep -q "$IMPKEY" "$HOME/.gemini_keys" && ok "the old version imported a key" \
   || bad "the old version imported a key"
@@ -94,8 +97,8 @@ want "the upgrade exits clean" "$RC" "0"
 
 # --- 5. check everything ---------------------------------------------------
 want "the key file is byte for byte the same" "$(cksum < "$HOME/.gemini_keys")" "$KEYSUM_BEFORE"
-want "a legacy AIza key in the ring is still there after the upgrade" \
-     "$(grep -c '^AIzaSyTESTTESTTESTTESTTESTTESTTESTTEST$' "$HOME/.gemini_keys")" "1"
+want "a key deleted before the upgrade is still recoverable after it" \
+     "$(grep -c 'AQ.Ab8RN6GRAVEGRAVEGRAVEGRAVEGRAV' "$APPHOME/removed_keys" 2>/dev/null || true)" "1"
 want "the key file is still 600" "$(ls -l "$HOME/.gemini_keys" | cut -c1-10)" "-rw-------"
 
 L="$APPHOME/ledger.json"
@@ -166,6 +169,13 @@ grep -q "a test failed" "$EMPTY/out.txt" \
   && bad "an install with no keys must not report a failure" \
   || ok "an install with no keys does not report a failure"
 [ -x "$EMPTY/bin/gtts" ] && ok "gtts is installed beside gtt" || bad "gtts is installed beside gtt"
+# gtt with no argument must START the app, not sit at a menu waiting for a key
+# press. v5 sat, and on an empty ring it refused to start at all, which put the
+# picker that fixes an empty ring behind the empty ring.
+grep -q 'exec "\$PY" "\$APP"$' "$EMPTY/bin/gtt" \
+  && ok "gtt with no argument runs the app" || bad "gtt with no argument runs the app"
+grep -q 'menu)   MENU=1' "$EMPTY/bin/gtt" \
+  && ok "the panel is still reachable as gtt menu" || bad "the panel is still reachable as gtt menu"
 if [ -x "$EMPTY/bin/gtts" ]; then
   HOME="$EMPTY" "$EMPTY/bin/gtts" out >/dev/null 2>&1 \
     && ok "gtts runs the same thing as gtt" || bad "gtts runs the same thing as gtt"

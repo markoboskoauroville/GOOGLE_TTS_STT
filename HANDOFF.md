@@ -4,18 +4,78 @@
 
 ## What it is
 
-A Flask server on `localhost:7311` with three tabs, installed by one file and
-started by one word. Speak makes audio from text. Listen makes text from audio.
-Keys tests every account and shows what is left of today.
+A server on `localhost:7311` with three tabs, installed by one file and started
+by one word. `gtt` starts it and **opens the browser itself**. Everything is
+done on the page: the keys, the testing, the deleting, all of it. The panel the
+terminal draws is a picture of what the app does, not a place anything is set.
+
+Speak makes audio from text. Listen makes text from audio. Keys imports, tests
+and prunes the ring.
+
+`gtt menu` still gives the old panel with keys on it, for when the terminal is
+where your hands already are.
+
+## Opening the browser
+
+`webbrowser.open` DOES NOT WORK on Termux: it looks for desktop browsers and
+desktop environment variables, finds none, returns False and says nothing. The
+chain that does work, in order: `am start`, `termux-open-url`, `xdg-open` or
+`open`, and `webbrowser` last as a courtesy.
+
+`am start` prints its failure and still exits zero — asking for a package that
+is not installed writes *unable to resolve Intent* and returns success — so its
+OUTPUT is read, never its exit code.
+
+## An empty ring never blocks the start
+
+v5 refused to start without keys, which put the picker that fixes an empty ring
+behind the empty ring. The server starts either way and says how many accounts
+it found.
 
 ## Key formats
 
-`AQ.` is what Google issues. `AIza` is legacy, no longer handed out, still read,
-and flagged as old format on the Keys tab and in every import report. Reading is
-not issuing: dropping a format that still authenticates loses working accounts
-without saying so.
+**`AQ.` and nothing else.** `modules/keyring.md` is explicit: no tool, script or
+detector in this project looks for the retired `AIza` prefix, not as a fallback,
+not as a second guess, not in a comment as an example, because a detector that
+knows both keeps the dead form alive in everybody's memory. v3 to v5 of this app
+read `AIza` and were wrong to.
+
+That does not break the other rule, NEVER DROP A KEY FOR ITS SHAPE. Shape only
+decides what is imported. Anything else long and opaque, an old `AIza` token
+included, comes back as an unknown shape and is reported, so nothing is lost in
+silence.
 
 One `KEY_RE`, defined above `load_ring`, used by the reader and the picker both.
+
+## The five answers a key can give
+
+Ported from `modules/keyring.md` §2d and §2e, order included.
+
+| verdict | what it means | what happens |
+|---|---|---|
+| working | it did the work | use it |
+| busy | throttled this minute | wait. **Never deleted.** |
+| no credit | real key, live account, no money | top up, or delete on purpose |
+| refused | revoked, mistyped, not a Gemini key | this is what Delete removes |
+| unknown | the answer says nothing about the key | try again |
+
+**The retry hint is checked first and wins.** Google answers a spent account and
+an impatient one with the same status and the same word, so matching on *quota*
+alone tells somebody to delete a live key because they pressed Test twice in one
+second. `retryDelay`, `Retry-After`, `RetryInfo`, `QuotaFailure`, *per minute*,
+*try again in* — any of those and it is a throttle whatever else the body says.
+Only then the money words, and only the unambiguous ones: credit, balance,
+depleted, insufficient, billing, payment, prepayment.
+
+## Deleting, and undoing it
+
+Test every account, then Delete removes the **refused** ones and only those. A
+busy account is never deleted and neither is an unknown one.
+
+Nothing is destroyed. Deleted entries move to `~/.google_tts_stt/removed_keys`,
+chmod 600, and **Put back** returns them through the same merge the picker uses,
+so a key cannot be doubled by being restored. A permanent condemnation that
+cannot be undone is a bug wearing a rule's clothing.
 
 ## The file picker
 

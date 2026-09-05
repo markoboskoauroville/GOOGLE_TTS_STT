@@ -50,7 +50,10 @@ TWO_KEYS = """# a comment line
 tribal
 AQ.Ab8RN6AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
 
-old format
+svaram
+AQ.Ab8RN6BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB
+
+the retired shape, which is not a key here
 AIzaSyAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
 
 label with no key
@@ -60,8 +63,11 @@ hello world
 """
 open(os.environ["GEMINI_KEYS"], "w").write(TWO_KEYS)
 ring = app.load_ring()
-check("ring finds both key formats", [l for l, _ in ring], ["tribal", "old format"])
-check("a label with no key is dropped", len(ring), 2)
+check("the ring reads its keys", [l for l, _ in ring], ["tribal", "svaram"])
+# modules/keyring.md: nothing here looks for the retired AIza prefix, not as a
+# fallback and not as a second guess.
+check("the retired AIza shape is not read as a key", len(ring), 2)
+check("a label with no key is dropped", "label with no key" in [l for l, _ in ring], False)
 check("a line with a space is not a key", any(" " in k for _, k in ring), False)
 # the reader and the picker must agree, or an import succeeds into a ring that
 # then reads back empty. This is the check that binds them together.
@@ -95,6 +101,37 @@ check("PerDay is daily", app.is_daily("GenerateRequestsPerDayPerProjectPerModel-
 check("PerMinute is not daily", app.is_daily("GenerateRequestsPerMinutePerProjectPerModel-FreeTier"), False)
 check("an empty quota id is not daily", app.is_daily(""), False)
 
+# ------------------------------------------------------------- the verdict
+# Five words, and they are not interchangeable. Calling "no credit" working
+# sends the ring at a wall; calling it refused has somebody delete a live
+# account they only needed to top up.
+Q = ('{"error":{"message":"Quota exceeded for metric: x, limit: 3, model: m",'
+     '"details":[{"violations":[{"quotaId":"%s"}]},'
+     '{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"31s"}]}}')
+check("200 is working", app.verdict_for(200, ""), "working")
+check("401 is refused", app.verdict_for(401, "invalid authentication"), "refused")
+check("403 is refused", app.verdict_for(403, "forbidden"), "refused")
+check("503 is unknown, never the key's fault", app.verdict_for(503, "high demand"), "unknown")
+check("404 is unknown, because a retired model says nothing about the key",
+      app.verdict_for(404, "no longer available"), "unknown")
+check("no network at all is unknown", app.verdict_for(-1, "timed out"), "unknown")
+check("a 429 with a retry hint is busy",
+      app.verdict_for(429, Q % "GenerateRequestsPerMinutePerProjectPerModel-FreeTier"), "busy")
+check("a 429 saying prepayment depleted is no credit",
+      app.verdict_for(429, '{"error":{"message":"Your prepayment credits are depleted."}}'),
+      "no credit")
+# THE RETRY HINT WINS. Google answers a spent account and an impatient one with
+# the same status and the same word, so a body carrying both is a throttle.
+check("a 429 with BOTH a retry hint and a money word is busy, not no credit",
+      app.verdict_for(429, '{"error":{"message":"quota exhausted, balance",'
+                           '"details":[{"@type":"...RetryInfo","retryDelay":"31s"}]}}'), "busy")
+check("a bare 429 with no hint and no money word is busy, not refused",
+      app.verdict_for(429, "resource exhausted"), "busy")
+check("busy is never deletable", "busy" in app.DELETABLE, False)
+check("unknown is never deletable", "unknown" in app.DELETABLE, False)
+check("no credit is not deleted automatically", "no credit" in app.DELETABLE, False)
+check("refused is what gets deleted", app.DELETABLE, ("refused",))
+
 # ------------------------------------------------------------- the ledger
 app.write_ledger({"day": app.pacific_day(), "spend": {}, "seen": {},
                   "audio_out": 0.0, "audio_in": 0.0, "dead": {}})
@@ -104,7 +141,7 @@ d = app.read_ledger()
 check("two spends on one key are counted", d["spend"]["tribal|gemini-2.5-flash-preview-tts"], 2)
 check("audio seconds accumulate", d["audio_out"], 20.0)
 check("spent() reads the same number", app.spent("tribal", "gemini-2.5-flash-preview-tts"), 2)
-check("an untouched key is at zero", app.spent("old format", "gemini-2.5-flash-preview-tts"), 0)
+check("an untouched key is at zero", app.spent("svaram", "gemini-2.5-flash-preview-tts"), 0)
 
 # ------------------------------------------------- the boundary at midnight
 # The whole point of the ledger is that it is wiped the first time it is read
@@ -142,7 +179,7 @@ check("a key at its wall removes exactly its own share", tts["left"], 10)
 # ------------------------------------------------------ fallback ordering
 # candidates() decides who is asked next. The most budget first, dead keys
 # never, and a key with nothing left never appears at all.
-app.mark_dead("old format", "401")
+app.mark_dead("svaram", "401")
 order = app.candidates(["gemini-2.5-flash-preview-tts"])
 check("a dead key is not offered", [l for l, _, _ in order], [])
 app.write_ledger({"day": app.pacific_day(), "spend": {}, "seen": {},
@@ -150,10 +187,10 @@ app.write_ledger({"day": app.pacific_day(), "spend": {}, "seen": {},
 app.spend("tribal", "gemini-2.5-flash-preview-tts", 9)
 order = app.candidates(["gemini-2.5-flash-preview-tts"])
 check("the key with more left is asked first", [l for l, _, _ in order],
-      ["old format", "tribal"])
+      ["svaram", "tribal"])
 app.spend("tribal", "gemini-2.5-flash-preview-tts", 1)
 order = app.candidates(["gemini-2.5-flash-preview-tts"])
-check("a spent-out key drops off the list", [l for l, _, _ in order], ["old format"])
+check("a spent-out key drops off the list", [l for l, _, _ in order], ["svaram"])
 
 # ------------------------------------------------------------------ audio
 # 25 tokens a second, measured. The WAV header is written by hand because

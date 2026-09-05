@@ -174,16 +174,15 @@ step "key ring"
 if [ ! -f "$KEYS" ]; then
   cat > "$KEYS" <<'KEY_EOF'
 # One account per pair of lines: the label, then the key, then a blank line.
-# Keys from AI Studio start with AQ. — that is the format Google issues now.
-# Old AIza keys are still read if you have any; they are simply not made any
-# more. You do not have to edit this file by hand: gtt import <file> takes
-# whatever shape your keys were saved in.
+# Keys from AI Studio start with AQ. — that is the only format there is.
+# You do not have to edit this file by hand. Run gtt, go to the Keys tab, and
+# pick your key file: it reads any shape and never adds the same key twice.
 KEY_EOF
   chmod 600 "$KEYS"
   skip_ "created empty"
 else
   chmod 600 "$KEYS"
-  KN="$(grep -cE '^(AQ\.[A-Za-z0-9_-]{20,}|AIza[A-Za-z0-9_-]{20,})$' "$KEYS" 2>/dev/null || true)"
+  KN="$(grep -cE '^AQ\.[A-Za-z0-9_-]{20,}$' "$KEYS" 2>/dev/null || true)"
   KN="$(printf '%s' "$KN" | tr -dc '0-9')"
   [ -z "$KN" ] && KN=0
   if [ "$KN" -eq 0 ]; then skip_ "no keys in it yet"; else printf "%s accounts\n" "$KN"; fi

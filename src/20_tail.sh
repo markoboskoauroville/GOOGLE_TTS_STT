@@ -24,15 +24,18 @@ KEYS="$KEYS"
 OUT="$OUT"
 if [ -t 1 ]; then AM="\033[38;5;214m"; SAND="\033[38;5;223m"; DIM="\033[0;90m"; OFF="\033[0m"
 else AM=""; SAND=""; DIM=""; OFF=""; fi
-case "\${1:-menu}" in
-  run|"") ;;
+case "\${1:-run}" in
+  run|"") MENU=0 ;;
+  menu)   MENU=1 ;;
   test)   exec "\$PY" "\$APP" test ;;
   keys)   exec \${EDITOR:-nano} "\$KEYS" ;;
   import) shift; exec "\$PY" "\$APP" import "\$@" ;;
   out)    exec ls -la "\$OUT" ;;
   update) exec gtt-update ;;
+  *)      MENU=0 ;;
 esac
-while true; do
+
+panel() {
   printf "\n"
   printf "  \${AM}GOOGLE TTS AND STT\${OFF} $GTT_VERSION\n"
   printf "  +---------------------+---------------------+\n"
@@ -41,23 +44,35 @@ while true; do
   printf "  |  thirty voices      |  any format ffmpeg  |\n"
   printf "  +---------------------+---------------------+\n"
   printf "  |3 Keys               |4 free               |\n"
-  printf "  |  test every account |                     |\n"
+  printf "  |  import and test    |                     |\n"
   printf "  |  what is left today |  room for a fourth  |\n"
   printf "  +---------------------+---------------------+\n"
-  printf "  \${DIM}1 2 3 all open the same page on localhost:7311\${OFF}\n\n"
-  printf "  1 run      2 test     3 keys     4 output\n"
-  printf "  5 update   6 import   0 quit\n\n  > "
-  read -rsn1 k; printf "\n\n"
-  case "\$k" in
-    1|r|R) "\$PY" "\$APP" ;;
-    2|t|T) "\$PY" "\$APP" test ;;
-    3|k|K) \${EDITOR:-nano} "\$KEYS" ;;
-    4|o|O) ls -la "\$OUT" ;;
-    5|u|U) gtt-update ;;
-    6|i|I) printf "  path to the key file: "; read -r f; [ -n "\$f" ] && "\$PY" "\$APP" import "\$f" ;;
-    0|q|Q) exit 0 ;;
-  esac
-done
+  printf "  \${DIM}all four are tabs on the page, and the page is where\n"
+  printf "  everything is done. This is the picture of it.\${OFF}\n"
+}
+
+if [ "\$MENU" = "1" ]; then
+  while true; do
+    panel
+    printf "\n  1 run      2 test     3 keys     4 output\n"
+    printf "  5 update   6 import   0 quit\n\n  > "
+    read -rsn1 k; printf "\n\n"
+    case "\$k" in
+      1|r|R) "\$PY" "\$APP" ;;
+      2|t|T) "\$PY" "\$APP" test ;;
+      3|k|K) \${EDITOR:-nano} "\$KEYS" ;;
+      4|o|O) ls -la "\$OUT" ;;
+      5|u|U) gtt-update ;;
+      6|i|I) printf "  path to the key file: "; read -r f; [ -n "\$f" ] && "\$PY" "\$APP" import "\$f" ;;
+      0|q|Q) exit 0 ;;
+    esac
+  done
+fi
+
+# The plain word starts the app and lets the app open the browser. Everything
+# is done on the page, keys included, so there is nothing to choose here first.
+panel
+exec "\$PY" "\$APP"
 GTT_CMD_EOF
 chmod +x "$BIN/gtt.new"
 mv -f "$BIN/gtt.new" "$BIN/gtt"
@@ -151,7 +166,7 @@ blank
 # against an empty ring. That is what "1 of 4 green" on a fresh phone was.
 # grep always prints a count when the file exists, so || true is enough, and
 # the tr guards against anything else arriving with a newline in it.
-KEYCOUNT="$(grep -cE '^(AQ\.[A-Za-z0-9_-]{20,}|AIza[A-Za-z0-9_-]{20,})$' "$KEYS" 2>/dev/null || true)"
+KEYCOUNT="$(grep -cE '^AQ\.[A-Za-z0-9_-]{20,}$' "$KEYS" 2>/dev/null || true)"
 KEYCOUNT="$(printf '%s' "$KEYCOUNT" | tr -dc '0-9')"
 [ -z "$KEYCOUNT" ] && KEYCOUNT=0
 if [ "$QUIET" = "1" ]; then
@@ -160,9 +175,9 @@ if [ "$QUIET" = "1" ]; then
 elif [ "$KEYCOUNT" -lt 1 ]; then
   say "${WARN}the ring is empty, so there is nothing to test yet.${OFF}"
   blank
-  say "Give it your key file, in whatever shape it was saved:"
-  say "  ${SAND}gtt import /sdcard/Download/your-keys.txt${OFF}"
-  say "then ${SAND}gtt test${OFF}"
+  say "Run ${SAND}gtt${OFF}. It opens the page, and the Keys tab has the file"
+  say "picker — that is where the keys go. Or from here if you prefer:"
+  say "  ${DIM}gtt import /sdcard/Download/your-keys.txt${OFF}"
   RC=0
 else
   say "${DIM}four tests, real keys, no mocks${OFF}"
@@ -174,8 +189,9 @@ fi
 
 if [ "$RC" -eq 0 ]; then
   say "${OK}installed${OFF} $GTT_VERSION"
-  say "  ${SAND}gtt${OFF}          the menu, and the app on localhost:7311"
+  say "  ${SAND}gtt${OFF}          starts it and opens the browser"
   say "  ${DIM}gtts${OFF}         the same thing, for when that is what you type"
+  say "  ${DIM}gtt menu${OFF}     the panel, if you want it"
   say "  ${SAND}gtt test${OFF}     the four tests"
   say "  ${SAND}gtt import F${OFF} add accounts from any file, without duplicating"
   say "  ${SAND}gtt-update${OFF}   fetch the next version"

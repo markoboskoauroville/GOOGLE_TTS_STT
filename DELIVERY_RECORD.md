@@ -1,16 +1,16 @@
 # DELIVERY RECORD
 
-**v5, 5.9.2026.** What was measured, and what was not tested.
+**v6, 5.9.2026.** What was measured, and what was not tested.
 
 ## The gate
 
-    build is fresh          5-google-tts-stt-v5.sh matches src/
+    build is fresh          6-google-tts-stt-v6.sh matches src/
     installer is whole      --verify passes
-    TEST 1   mechanism       34 checks   0 failed
+    TEST 1   mechanism       49 checks   0 failed
     TEST 1b  the parser      73 checks   0 failed
-    TEST 3   ugly cases      44 checks   0 failed
-    TEST 4   upgrade         29 checks   0 failed
-                            180 checks   0 failed
+    TEST 3   ugly cases      59 checks   0 failed
+    TEST 4   upgrade         31 checks   0 failed
+                            212 checks   0 failed
 
 **TEST 2 was NOT run for v3.** It is the one test that spends real provider
 requests, and the keys used through v1 and v2 have been retired. It last ran
@@ -63,6 +63,15 @@ Both would have passed any hand test against the real API. Written up in
   read back empty
 - JSON exports with the name in a sibling field were labelled with fragments of
   JSON
+
+## Measured at v6, without a live account
+
+    verdict_for            eleven cases, including a 429 carrying BOTH a retry
+                           hint and a money word, which must be busy
+    delete and put back    a comment in the ring survives the rewrite, the file
+                           stays 600, remove-restore twice does not duplicate
+    the browser chain      written from modules/termux-app.md, unproven on a phone
+    an empty ring          the server starts, the page serves, the picker works
 
 ## NOT TESTED
 

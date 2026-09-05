@@ -41,11 +41,12 @@ try:
 except Exception:
     PACIFIC = timezone(timedelta(hours=-8))
 
-VERSION = 5
+VERSION = 6
 PORT = int(os.environ.get("GTTS_PORT", "7311"))
 KEYFILE = os.environ.get("GEMINI_KEYS", os.path.expanduser("~/.gemini_keys"))
 HOME = os.path.expanduser("~/.google_tts_stt")
 LEDGER = os.path.join(HOME, "ledger.json")
+GRAVEYARD = os.path.join(HOME, "removed_keys")
 OUTDIR = os.path.join(HOME, "out")
 BASE = "https://generativelanguage.googleapis.com/v1beta/models/%s:%s"
 
@@ -78,12 +79,17 @@ _lock = threading.Lock()
 # file picker. v2 had two, twenty characters apart, and a key that fell between
 # them imported successfully into a ring that then read back empty.
 #
-# AQ. is the format Google issues now. AIza is legacy and no longer handed out,
-# but it is still READ: a ring assembled over two years holds AIza keys that
-# still authenticate, and a filter that drops them loses working accounts in
-# silence, which is worse than failing loudly. Reading is not issuing.
-KEY_RE = re.compile(r"(AQ\.[A-Za-z0-9_\-]{20,}|AIza[A-Za-z0-9_\-]{20,})")
-LEGACY_RE = re.compile(r"^AIza")
+# `AQ.` AND NOTHING ELSE. modules/keyring.md, "GEMINI KEYS START WITH AQ.":
+# no tool, script or detector in this project looks for the old `AIza` prefix,
+# not as a fallback, not as a second guess, not in a comment as an example,
+# because a detector that knows both keeps the dead form alive in everybody's
+# memory. v3 to v5 of this app kept reading AIza and were wrong to.
+#
+# This does not break the other rule, NEVER DROP A KEY FOR ITS SHAPE. Shape
+# only decides what is IMPORTED. Anything else long and opaque is reported as
+# a maybe rather than swallowed, so nothing is ever lost in silence — including
+# an old AIza key, which is now shown as an unknown shape and left to you.
+KEY_RE = re.compile(r"(AQ\.[A-Za-z0-9_\-]{20,})")
 
 
 def load_ring():
@@ -119,16 +125,19 @@ def mask(key):
 # key still works and the label can be edited. Keeping the two apart means a
 # clever labelling idea can never lose a key.
 
-# A filter written for AIza alone finds NOTHING in a file full of AQ. keys,
-# which is how a key once ended up printed in full — and it happened again on
-# the first command of the session that built this app. KEY_RE is defined once,
-# above load_ring, and both halves use that one.
+# KEY_RE is defined once, above load_ring, and both halves of this file use
+# that one. Getting the prefix wrong is not a small mistake: a redaction filter
+# that does not match the key it is redacting prints the key, which is how one
+# ended up in a chat transcript on the first command of the session that built
+# this app.
 
 # Google has changed the format once and will change it again. This catches a
 # line that is nothing but one long opaque token, so a third format is
 # REPORTED rather than silently dropped. It is never imported on its own.
 MAYBE_RE = re.compile(r"^[A-Za-z0-9_\-\.]{32,}$")
 NOT_A_KEY = re.compile(r"^(?:[0-9a-f]{32,}|[A-Za-z0-9+/]+={1,2}|https?[:/].*)$", re.I)
+# An old-format key is now an unknown shape like any other: reported, never
+# imported, never silently dropped.
 
 LABEL_SEP = re.compile(r"^\s*[\"'\[\|\-\*\d\.\)]*\s*(.{1,60}?)\s*[\"']?\s*[:=,\|]\s*[\"']?$")
 MAX_IMPORT_BYTES = 8 * 1024 * 1024
@@ -297,8 +306,7 @@ def import_keys(text, source_name=""):
     for label, key in pairs:
         if key in have:
             dupes.append({"label": next((l for l, k in existing if k == key), ""),
-                          "masked": mask(key),
-                          "legacy": bool(LEGACY_RE.match(key))})
+                          "masked": mask(key)})
             continue
         n += 1
         lab = unique_label(label, taken, n)
@@ -325,7 +333,7 @@ def import_keys(text, source_name=""):
     return {"ok": True,
             "found": len(pairs),
             "added": [{"label": l, "masked": mask(k),
-                       "legacy": bool(LEGACY_RE.match(k))} for l, k in added],
+                       } for l, k in added],
             "duplicates": dupes,
             "maybes": [m[:6] + "\u2026" for m in maybes],
             "ring": len(load_ring()),
@@ -663,6 +671,113 @@ def listen(path, language="", verbatim=True):
 
 # -------------------------------------------------------------------- KEYS
 
+# A key is one of five things and they are not interchangeable. Calling "no
+# credit" working sends the ring at a wall; calling it refused has somebody
+# delete a live account they only needed to top up. Ported from
+# modules/keyring.md 2d and 2e, including the order the tests run in.
+#
+#   working   it did the work                       use it
+#   busy      throttled this minute                 wait, NEVER delete
+#   no credit real key, live account, no money      top up, or delete on purpose
+#   refused   wrong, revoked, wrong provider        delete
+#   unknown   the answer says nothing about the key  try again, never delete
+RETRY_HINT = re.compile(r"retrydelay|retry-after|retryinfo|quotafailure|"
+                        r"per minute|try again in", re.I)
+MONEY_STRONG = re.compile(r"credit|balance|depleted|insufficient|billing|"
+                          r"payment|prepayment|e0300|zero_credits", re.I)
+
+
+def verdict_for(code, body):
+    """The provider's answer, in one word. A pure function, so it can be tested
+    without a key and without a network."""
+    b = body if isinstance(body, str) else ""
+    if code == 200:
+        return "working"
+    if code in (401, 403):
+        return "refused"
+    if code == 429:
+        # THE RETRY HINT IS CHECKED FIRST AND WINS. Google answers a spent
+        # account and an impatient one with the same status and the same word,
+        # so matching on "quota" alone tells somebody to delete a live key
+        # because they pressed Test twice in one second.
+        if RETRY_HINT.search(b):
+            return "busy"
+        if MONEY_STRONG.search(b):
+            return "no credit"
+        return "busy"
+    if code == 404:
+        return "unknown"          # the model is gone, which says nothing about the key
+    if code in (500, 502, 503, 504) or code < 0:
+        return "unknown"
+    return "unknown"
+
+
+DELETABLE = ("refused",)          # and "no credit", but only when asked by name
+
+
+def remove_keys(labels, reason="removed"):
+    """Take keys out of the ring and put them where they can be fetched back.
+
+    A permanent condemnation that cannot be undone is a bug wearing a rule's
+    clothing, so nothing is destroyed: the entries move to a graveyard file,
+    also chmod 600, and Put back returns them. The ring is rewritten whole here
+    rather than appended to, which is the one operation that has to be, and it
+    goes through a .new file and a rename like everything else."""
+    ring = load_ring()
+    keep = [(l, k) for l, k in ring if l not in labels]
+    gone = [(l, k) for l, k in ring if l in labels]
+    if not gone:
+        return {"ok": True, "removed": [], "ring": len(ring)}
+    head = ""
+    if os.path.exists(KEYFILE):
+        for line in open(KEYFILE).read().splitlines():
+            if line.strip().startswith("#"):
+                head += line + "\n"
+            elif line.strip():
+                break
+    body = "".join("%s\n%s\n\n" % (l, k) for l, k in keep)
+    tmp = KEYFILE + ".new"
+    with open(tmp, "w") as f:
+        f.write((head + "\n" if head else "") + body)
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, KEYFILE)
+    os.chmod(KEYFILE, 0o600)
+
+    os.makedirs(HOME, exist_ok=True)
+    with open(GRAVEYARD, "a") as f:
+        for l, k in gone:
+            f.write("# %s, %s\n%s\n%s\n\n" % (reason, time.strftime("%d.%m.%Y %H:%M"), l, k))
+    os.chmod(GRAVEYARD, 0o600)
+    return {"ok": True, "removed": [{"label": l, "masked": mask(k)} for l, k in gone],
+            "ring": len(load_ring())}
+
+
+def removed_keys():
+    if not os.path.exists(GRAVEYARD):
+        return []
+    lines = [l.rstrip() for l in open(GRAVEYARD).read().splitlines()]
+    out, i = [], 0
+    while i < len(lines) - 1:
+        if lines[i] and not lines[i].startswith("#") and KEY_RE.fullmatch(lines[i + 1].strip()):
+            out.append((lines[i], lines[i + 1].strip()))
+            i += 2
+        else:
+            i += 1
+    return out
+
+
+def restore_keys():
+    """Put everything back and empty the graveyard. import_keys does the
+    merging, so a key that is somehow already in the ring is not doubled."""
+    gone = removed_keys()
+    if not gone:
+        return {"ok": True, "restored": [], "ring": len(load_ring())}
+    text = "".join("%s\n%s\n\n" % (l, k) for l, k in gone)
+    r = import_keys(text, "put back")
+    open(GRAVEYARD, "w").close()
+    return {"ok": True, "restored": r["added"], "ring": r["ring"]}
+
+
 def health():
     """What is installed and what is not. The Keys tab shows this so a missing
     ffmpeg is discovered here rather than by a transcription that fails."""
@@ -684,51 +799,51 @@ def health():
 
 
 def test_all_keys():
-    """One cheap call per key. Costs one flash-lite request each, which is the
-    model with the most daily room, so this is the cheapest honest test there is."""
+    """One real call per key, the cheapest model with the most daily room.
+
+    modules/gemini.md: a GET on /models returns 200 for an account with zero
+    credit, so it tests validity only. The only way to learn whether an account
+    can do work is to ask it to do some."""
     ring = load_ring()
     rows, lock = [], threading.Lock()
 
     def check(pair):
         label, key = pair
-        t = time.time()
+        t0 = time.time()
         code, body = post("gemini-3.1-flash-lite", "generateContent",
                           {"contents": [{"parts": [{"text": "hi"}]}]}, key, timeout=60)
-        if code == 503:                       # busy model, not a bad key
-            time.sleep(2)
+        if code in (503, 500, 502, 504):
+            time.sleep(2)                     # busy model, not a bad key
             code, body = post("gemini-3.1-flash-lite", "generateContent",
                               {"contents": [{"parts": [{"text": "hi"}]}]}, key, timeout=60)
-        ms = int((time.time() - t) * 1000)
-        if code == 200:
-            state, why = "live", ""
+        ms = int((time.time() - t0) * 1000)
+        v = verdict_for(code, body if isinstance(body, str) else "")
+        why = {"working": "",
+               "busy": "throttled right now, this says nothing about the key",
+               "no credit": "the account is alive and has no money in it",
+               "refused": "revoked, mistyped, or not a Gemini key",
+               "unknown": "no answer about the key, try again"}[v]
+        if v == "working":
             spend(label, "gemini-3.1-flash-lite")
-        elif code == 429 and "prepayment" in str(body):
-            state, why = "no credit", "prepaid balance empty"
+        elif v == "no credit":
             mark_dead(label, "no credit")
-        elif code == 429:
-            q = read_quota(str(body))
+        elif v == "refused":
+            mark_dead(label, "refused")
+        elif v == "busy":
+            q = read_quota(body if isinstance(body, str) else "")
             if q.get("rpd"):
-                state, why = "live", "at daily wall on this model (%d)" % q["rpd"]
-            else:
-                state, why = "live", "minute limit, still healthy"
-        elif code == 401:
-            state, why = "dead", "401, key revoked or project gone"
-            mark_dead(label, "401")
-        else:
-            state, why = "?", "HTTP %s" % code
-        if LEGACY_RE.match(key) and state == "live" and not why:
-            why = "old AIza format, still works, Google no longer issues these"
+                why = "at its daily wall on this model (%d a day)" % q["rpd"]
         with lock:
-            rows.append({"label": label, "masked": mask(key), "state": state,
-                         "why": why, "ms": ms,
-                         "legacy": bool(LEGACY_RE.match(key))})
+            rows.append({"label": label, "masked": mask(key), "verdict": v,
+                         "why": why, "ms": ms, "code": code})
 
     ts = [threading.Thread(target=check, args=(p,)) for p in ring]
-    for t in ts:
-        t.start()
-    for t in ts:
-        t.join()
-    rows.sort(key=lambda r: (r["state"] != "live", r["label"]))
+    for th in ts:
+        th.start()
+    for th in ts:
+        th.join()
+    order = {"working": 0, "busy": 1, "no credit": 2, "unknown": 3, "refused": 4}
+    rows.sort(key=lambda r: (order.get(r["verdict"], 9), r["label"]))
     return rows
 
 
@@ -779,9 +894,9 @@ def run_tests():
     ok = 0
     print("1. key ring parses and at least one key is live")
     rows = test_all_keys()
-    live = [r for r in rows if r["state"] == "live"]
+    live = [r for r in rows if r["verdict"] in ("working", "busy")]
     for r in rows:
-        print("   %-14s %-9s %s" % (r["label"], r["state"], r["why"]))
+        print("   %-14s %-9s %s" % (r["label"], r["verdict"], r["why"]))
     print("   %d live of %d" % (len(live), len(rows)))
     ok += 1 if live else 0
 
@@ -846,7 +961,15 @@ audio{width:100%;margin-top:12px}
 table{width:100%;border-collapse:collapse;font-size:14px}
 td,th{text-align:left;padding:8px 6px;border-bottom:1px solid var(--line)}
 th{color:var(--mute);font-weight:500}
-.live{color:var(--ok)}.dead{color:var(--bad)}
+.working{color:var(--ok)}
+.busy{color:var(--key)}
+.nocredit{color:var(--key)}
+.unknown{color:var(--mute)}
+.refused{color:var(--bad)}
+button.go.dim{background:var(--panel);color:var(--mute);border:1px solid var(--line)}
+button.go.dim:disabled{opacity:.45}
+button.go.arm{background:var(--bad);color:#fff;border:0}
+.row button.go{margin-top:10px}
 .big{font-size:30px;font-weight:300;margin:2px 0}
 .note{color:var(--mute);font-size:13px;margin:4px 0 18px}
 .bar{height:5px;background:var(--line);border-radius:3px;overflow:hidden;margin-top:5px}
@@ -896,8 +1019,16 @@ markdown table. It finds the keys, takes the account names where they are
 there, and adds only the ones the ring does not already have.</div>
 <div class="out idle" id="kimp">nothing imported this session</div>
 
-<button class="go" onclick="testKeys()">Test every key</button>
-<div id="keys" class="out idle">no key tested this session</div>
+<button class="go" onclick="testKeys()">Test every account</button>
+<div id="keys" class="out idle">no account tested this session</div>
+<div class="row">
+<button class="go dim" id="del" onclick="deleteRefused()" disabled>Delete the refused ones</button>
+<button class="go dim" id="undel" onclick="putBack()" disabled>Put back</button>
+</div>
+<div class="note">Refused means revoked, mistyped, or not a Gemini key. A busy
+account is never deleted: throttled says nothing about the key. Nothing is
+destroyed either way — deleted accounts move to a file and Put back returns
+them.</div>
 <div id="dep" class="note idle">checking what is installed…</div>
 </section>
 </div>
@@ -907,7 +1038,7 @@ V.forEach(v=>{v1.add(new Option(v,v));v2.add(new Option(v,v))});
 v1.value="Charon";
 window.addEventListener('load',loadBudget);
 function tab(i){document.querySelectorAll('nav button').forEach((b,j)=>b.classList.toggle('on',i==j));
- document.querySelectorAll('section').forEach((s,j)=>s.classList.toggle('on',i==j));if(i==2){loadBudget();loadHealth();}}
+ document.querySelectorAll('section').forEach((s,j)=>s.classList.toggle('on',i==j));if(i==2){loadBudget();loadHealth();checkGrave();}}
 async function doSpeak(){
  sgo.disabled=true;sout.textContent='generating, about half the length of the audio…';
  const r=await(await fetch('/api/speak',{method:'POST',headers:{'Content-Type':'application/json'},
@@ -945,7 +1076,7 @@ async function doImport(){
  if(!r.ok){kimp.textContent='no: '+r.error;return;}
  let s=r.found+' key'+(r.found==1?'':'s')+' found in '+r.source+'\\n';
  s+=r.added.length+' added, '+r.duplicates.length+' already in the ring\\n';
- r.added.forEach(a=>{s+='\\n  + '+a.label+'   '+a.masked+(a.legacy?'   old AIza format':'')});
+ r.added.forEach(a=>{s+='\\n  + '+a.label+'   '+a.masked});
  r.duplicates.forEach(a=>{s+='\\n  = '+(a.label||'already here')+'   '+a.masked});
  if(r.maybes.length)s+='\\n\\nnot a format I know, left alone: '+r.maybes.join(', ');
  s+='\\n\\nthe ring now holds '+r.ring;
@@ -956,14 +1087,74 @@ async function loadHealth(){
  dep.textContent='python '+h.python+' · flask '+y(h.flask)+' · waitress '+y(h.waitress)
   +' · ffmpeg '+y(h.ffmpeg)+' · ring '+h.keys+' accounts at '+h.keyfile;
  dep.classList.remove('idle');}
+let REFUSED=[];
 async function testKeys(){
- keys.innerHTML='<div class="note">testing, one request per key…</div>';
+ keys.classList.remove('idle');keys.textContent='asking every account to do one small piece of work…';
  const rows=await(await fetch('/api/keys')).json();
- let s='<table><tr><th>account</th><th>key</th><th>state</th><th>ms</th></tr>';
- rows.forEach(r=>{s+='<tr><td>'+r.label+'</td><td>'+r.masked+'</td><td class="'+(r.state=='live'?'live':'dead')+'">'
-  +r.state+(r.why?'<div class="note" style="margin:0">'+r.why+'</div>':'')+'</td><td>'+r.ms+'</td></tr>';});
- keys.innerHTML=s+'</table>';keys.classList.remove('idle');loadBudget();}
+ let s='<table><tr><th>account</th><th>key</th><th>answer</th><th>ms</th></tr>';
+ REFUSED=[];
+ rows.forEach(r=>{
+  if(r.verdict=='refused')REFUSED.push(r.label);
+  s+='<tr><td>'+r.label+'</td><td>'+r.masked+'</td><td class="'+r.verdict.replace(' ','')+'">'
+   +r.verdict+(r.why?'<div class="note" style="margin:0">'+r.why+'</div>':'')+'</td><td>'+r.ms+'</td></tr>';});
+ keys.innerHTML=s+'</table>';
+ del.disabled=REFUSED.length==0;
+ del.textContent=REFUSED.length?('Delete '+REFUSED.length+' refused account'+(REFUSED.length==1?'':'s')):'Delete the refused ones';
+ del.className='go '+(REFUSED.length?'arm':'dim');
+ loadBudget();checkGrave();}
+async function checkGrave(){
+ const g=await(await fetch('/api/removed')).json();
+ undel.disabled=g.count==0;
+ undel.textContent=g.count?('Put back '+g.count):'Put back';}
+async function deleteRefused(){
+ if(!REFUSED.length)return;
+ const r=await(await fetch('/api/delete',{method:'POST',headers:{'Content-Type':'application/json'},
+  body:JSON.stringify({labels:REFUSED})})).json();
+ let s='removed '+r.removed.length+', the ring now holds '+r.ring;
+ r.removed.forEach(a=>{s+='\\n  - '+a.label+'   '+a.masked});
+ s+='\\n\\nnothing was destroyed. Put back returns them.';
+ keys.textContent=s;REFUSED=[];del.disabled=true;del.className='go dim';
+ del.textContent='Delete the refused ones';loadBudget();checkGrave();}
+async function putBack(){
+ const r=await(await fetch('/api/restore',{method:'POST'})).json();
+ keys.textContent='put back '+r.restored.length+', the ring now holds '+r.ring;
+ loadBudget();checkGrave();}
 </script></body></html>"""
+
+
+def open_page(url):
+    """Open the phone's own browser. webbrowser.open DOES NOT WORK on Termux:
+    it looks for desktop browsers and desktop environment variables, finds
+    none, returns False and says nothing. So the chain below, in this order.
+
+    `am start` prints its failure and STILL EXITS ZERO — asking for a package
+    that is not installed writes "Activity not started, unable to resolve
+    Intent" and returns success — so its OUTPUT is read, not its exit code."""
+    import subprocess
+    def run(cmd):
+        try:
+            p = subprocess.run(cmd, capture_output=True, timeout=15)
+            out = (p.stdout + p.stderr).decode("utf-8", "replace").lower()
+            if p.returncode != 0 or "unable to resolve" in out or "error" in out:
+                return False
+            return True
+        except Exception:
+            return False
+
+    if run(["am", "start", "-a", "android.intent.action.VIEW", "-d", url]):
+        return "am start"
+    if run(["termux-open-url", url]):
+        return "termux-open-url"
+    for c in ("xdg-open", "open"):
+        if run([c, url]):
+            return c
+    try:
+        import webbrowser
+        if webbrowser.open(url):
+            return "webbrowser"
+    except Exception:
+        pass
+    return ""
 
 
 def serve():
@@ -1025,14 +1216,74 @@ def serve():
     def api_keys():
         return jsonify(test_all_keys())
 
+    @app.post("/api/delete")
+    def api_delete():
+        j = request.get_json(force=True) or {}
+        labels = [str(x) for x in (j.get("labels") or [])]
+        if not labels:
+            return jsonify({"ok": False, "error": "nothing named"})
+        return jsonify(remove_keys(labels, "refused"))
+
+    @app.get("/api/removed")
+    def api_removed():
+        g = removed_keys()
+        return jsonify({"count": len(g),
+                        "keys": [{"label": l, "masked": mask(k)} for l, k in g]})
+
+    @app.post("/api/restore")
+    def api_restore():
+        return jsonify(restore_keys())
+
     @app.get("/api/budget")
     def api_budget():
         return jsonify(budget())
 
     os.makedirs(OUTDIR, exist_ok=True)
-    print("Google TTS and STT v%d on http://127.0.0.1:%d" % (VERSION, PORT))
-    print("key ring: %s" % KEYFILE)
-    app.run(host="127.0.0.1", port=PORT, threaded=True)
+    url = "http://127.0.0.1:%d" % PORT
+    ring = load_ring()
+
+    print("")
+    print("  GOOGLE TTS AND STT v%d" % VERSION)
+    print("  %s" % url)
+    print("  %d account%s in %s" % (len(ring), "" if len(ring) == 1 else "s", KEYFILE))
+    if not ring:
+        # An empty ring is not a reason to refuse to start. The picker that
+        # fixes it is ON THE PAGE, so refusing to open the page is refusing to
+        # let anybody fix it. v5 exited here and left the browser unreachable.
+        print("  no keys yet — the Keys tab has a file picker, that is where they go")
+    print("  ctrl-c to stop")
+    print("")
+
+    # 127.0.0.1, not 0.0.0.0. This process holds credentials, and the rule is
+    # content binds wide, credentials bind to loopback.
+    def kick():
+        time.sleep(1.2)
+        how = open_page(url)
+        print("  browser: %s" % (how or "could not open one, go to %s yourself" % url))
+    threading.Thread(target=kick, daemon=True).start()
+
+    try:
+        subprocess.Popen(["termux-wake-lock"], stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL)
+    except Exception:
+        pass
+
+    try:
+        from waitress import serve as waitress_serve
+        # Waitress, not the Flask development server: single threaded, no
+        # request limits, no backpressure, and it says so itself. Waitress is
+        # pure python and thread pooled with no compiled extensions, which is
+        # why it works in Termux where gunicorn does not.
+        waitress_serve(app, host="127.0.0.1", port=PORT, threads=8)
+    except ImportError:
+        print("  waitress is missing, using the development server")
+        app.run(host="127.0.0.1", port=PORT, threaded=True)
+    finally:
+        try:
+            subprocess.Popen(["termux-wake-unlock"], stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
 
 
 def cli_import(path):
@@ -1043,8 +1294,7 @@ def cli_import(path):
     r = import_keys(open(path, "rb").read().decode("utf-8", "replace"), os.path.basename(path))
     print("  %d key(s) found in %s" % (r["found"], r["source"]))
     for a in r["added"]:
-        print("  + %-24s %s%s" % (a["label"], a["masked"],
-                                  "   old AIza format, still works" if a.get("legacy") else ""))
+        print("  + %-24s %s" % (a["label"], a["masked"]))
     for a in r["duplicates"]:
         print("  = %-24s %s   already in the ring" % (a["label"] or "", a["masked"]))
     for m in r["maybes"]:
@@ -1058,6 +1308,4 @@ if __name__ == "__main__":
         sys.exit(run_tests())
     if len(sys.argv) > 2 and sys.argv[1] == "import":
         sys.exit(cli_import(sys.argv[2]))
-    if not load_ring():
-        sys.exit("no keys found in %s" % KEYFILE)
     serve()

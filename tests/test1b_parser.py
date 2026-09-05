@@ -85,21 +85,19 @@ shapes = {
 for name, text in shapes.items():
     check("finds both keys: %s" % name, keys_in(text), [A, B])
 
-check("finds an AIza key next to an AQ. key", keys_in("a\n%s\nb\n%s\n" % (A, C)), [A, C])
-# AQ. is what Google issues now. AIza is legacy and is still READ, because a
-# ring built over two years holds AIza keys that still authenticate, and a
-# filter that drops them loses working accounts without saying so.
+# modules/keyring.md: nothing in this project looks for the retired AIza
+# prefix. It is not imported — and it is not silently dropped either: it comes
+# back as an unknown shape, reported, so a real key is never lost in silence.
+check("an old AIza token is not taken as a key", keys_in("a\n%s\nb\n%s\n" % (A, C)), [A])
+check("but it is reported as an unknown shape", C in app.parse_keys("a\n%s\n" % C)[1], True)
 reset()
-check("an AIza key is marked legacy on import",
-      app.import_keys("old one\n%s\n" % C, "legacy.txt")["added"][0]["legacy"], True)
-reset()
-check("an AQ. key is not marked legacy",
-      app.import_keys("new one\n%s\n" % A, "current.txt")["added"][0]["legacy"], False)
-check("a legacy key is still read back out of the ring",
-      [k for _, k in app.load_ring()], [A])
+check("importing a file of only AIza tokens adds nothing",
+      app.import_keys("old one\n%s\n" % C, "legacy.txt")["added"], [])
+check("and says what it left alone",
+      len(app.import_keys("old one\n%s\n" % C, "legacy.txt")["maybes"]), 1)
 reset()
 check("a key repeated in one file is one key", keys_in("%s\n%s\n%s\n" % (A, A, A)), [A])
-check("order of appearance is kept", keys_in("%s\n%s\n%s\n" % (B, A, C)), [B, A, C])
+check("order of appearance is kept", keys_in("%s\n%s\n%s\n" % (B, A, D)), [B, A, D])
 
 # ---------------------------------------------------- NOT finding non-keys
 junk = {

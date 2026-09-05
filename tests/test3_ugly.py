@@ -287,6 +287,38 @@ check("a second key wanting the same name is numbered", r["added"][0]["label"], 
 check("the ring parses cleanly after all of that", len(app.load_ring()) >= 2)
 check("the ring file is still 600", oct(os.stat(KEYS).st_mode)[-3:], "600")
 
+# --------------------------------------------------- DELETING, AND UNDOING IT
+# The rule that costs the most if it is wrong: a busy key is not a bad key.
+reset()
+app.GRAVEYARD = os.path.join(app.HOME, "removed_keys")
+if os.path.exists(app.GRAVEYARD):
+    os.remove(app.GRAVEYARD)
+open(KEYS, "w").write("# a comment of mine\n\ngood\n%s\n\nbad\n%s\n" % (K1, "AQ.Ab8RN6" + "9" * 24))
+check("two in the ring to start", len(app.load_ring()), 2)
+r = app.remove_keys(["bad"], "refused")
+check("the named one is removed", [x["label"] for x in r["removed"]], ["bad"])
+check("the other one stays", [l for l, _ in app.load_ring()], ["good"])
+check("a comment in the ring survives a deletion", "# a comment of mine" in open(KEYS).read())
+check("the ring file is still 600 after a rewrite", oct(os.stat(KEYS).st_mode)[-3:], "600")
+check("nothing was destroyed", [l for l, _ in app.removed_keys()], ["bad"])
+check("and the removed file is 600", oct(os.stat(app.GRAVEYARD).st_mode)[-3:], "600")
+r = app.restore_keys()
+check("put back returns it", [x["label"] for x in r["restored"]], ["bad"])
+check("the ring holds two again", len(app.load_ring()), 2)
+check("and the graveyard is empty", app.removed_keys(), [])
+r = app.remove_keys(["not in the ring at all"])
+check("removing a name that is not there changes nothing", r["removed"], [])
+check("the ring is untouched", len(app.load_ring()), 2)
+r = app.restore_keys()
+check("put back with nothing to put back is not an error", r["restored"], [])
+# put back must not duplicate: the same key removed and restored twice
+app.remove_keys(["bad"])
+app.restore_keys()
+app.remove_keys(["bad"])
+app.restore_keys()
+check("removing and restoring twice does not duplicate", len(app.load_ring()), 2)
+check("nor in the file", open(KEYS).read().count("AQ.Ab8RN6999999999999999999999999"), 1)
+
 # --------------------------------------------------------- LEDGER SABOTAGE
 open(app.LEDGER, "w").write("{ this is not json")
 check("a corrupted ledger is rebuilt, not fatal", isinstance(app.read_ledger(), dict))
