@@ -229,6 +229,55 @@ check("24 kHz", w.getframerate(), 24000)
 check("mono", w.getnchannels(), 1)
 check("16 bit", w.getsampwidth(), 2)
 
+# ---------------------------------------------- the tag, which is invented
+# Gemini has nothing like Hume's per-utterance description field, so the tags
+# are COMPILED rather than passed through. The compiler is a pure function and
+# this is where it is proved, with no key and no network.
+SP = [{"name": "VIVEKA", "voice": "Charon"}, {"name": "MANAN", "voice": "Puck"}]
+p_, used_, probs_ = app.compile_script("<VIVEKA: Amused> Ah. There you are.\n"
+                                       "<MANAN: Anxious: slow> I am trying.", SP)
+check("both speakers are recognised", used_, ["VIVEKA", "MANAN"])
+check("nothing to complain about", probs_, [])
+check("the direction is the words, not the label",
+      "amused, on the edge of laughing" in p_, True)
+check("the pace is folded into the same direction", "slowly" in p_, True)
+check("each line carries its speaker", "MANAN: (anxious" in p_, True)
+check("the tag itself is never spoken", "<VIVEKA" in p_, False)
+check("the timbre of the chosen voice is told to the model",
+      "VIVEKA is a informative voice." in p_, True)
+
+p1, u1, _ = app.compile_script("just read this", [{"name": "SOLO", "voice": "Kore"}])
+check("one speaker gets no name prefix", "SOLO:" in p1, False)
+check("and is asked to read rather than to converse", "Read the following aloud." in p1, True)
+
+_, _, p2 = app.compile_script("<NOBODY> hello", SP)
+check("a tag naming somebody with no voice is reported, not ignored",
+      p2, ["no voice is set for <NOBODY>"])
+_, _, p3 = app.compile_script("<VIVEKA: Sausage> hello", SP)
+check("a direction that does not exist is reported", p3, ["no direction called Sausage"])
+check("but the word is still passed through rather than dropped",
+      "Sausage" in app.compile_script("<VIVEKA: Sausage> hello", SP)[0], True)
+
+_, u3, p4 = app.compile_script("<A> one <B> two <C> three",
+                               [{"name": "A", "voice": "Kore"}, {"name": "B", "voice": "Puck"},
+                                {"name": "C", "voice": "Orus"}])
+check("three speakers is refused loudly, because Gemini takes two",
+      any("takes two speakers" in x for x in p4), True)
+check("and it does not silently send three", len(u3), 2)
+
+check("text before any tag still belongs to somebody",
+      "one" in app.compile_script("one <MANAN> two", SP)[0], True)
+check("an empty script does not raise", isinstance(app.compile_script("", SP)[0], str), True)
+check("thirty eight directions came across from Sample Player", len(app.EMOTIONS), 38)
+check("every one has a group, a label, a glyph, a direction and a preview",
+      all(len(e) == 5 for e in app.EMOTIONS), True)
+check("every glyph is one character, because a grid of emoji is a mess",
+      all(len(e[2]) == 1 for e in app.EMOTIONS), True)
+check("thirty voices, each with the one word Google publishes",
+      len(app.VOICE_TIMBRE), 30)
+check("and no invented facets: no gender, no age, no accent",
+      all(isinstance(v, str) for v in app.VOICE_TIMBRE.values()), True)
+
 # -------------------------------------------------- the engine anchors
 # The vendored page is only usable if the swap actually applies. A missing
 # anchor at build time is fatal; this catches it a step earlier, in the test

@@ -20,6 +20,47 @@ own word:
 
 The v6 numbers still work and are no longer drawn.
 
+## SPEAK, which is Sample Player with Hume swapped for Gemini
+
+Ported from `SAMPLE_PLAYER`: two slots, a browser with a search box and facet
+chips, and a bank of directions you insert rather than type. *A free text box is
+a blank page, and a blank page in the middle of choosing a voice is the moment
+somebody gives up and takes the default.*
+
+**The thirty-eight directions are `Emotions.kt`, unchanged** — eight groups,
+each with a one-character glyph so a direction can be found by shape before it
+is read, and nothing is an emoji because a monospace grid of them is a mess of
+different widths. Search across label, group and the direction itself.
+
+**The voice facets are only what Google publishes.** `Roles.kt`'s lesson kept: a
+blank is a fact, a guess is not. Hume gives four tags and Sample Player still
+had to read the *names* to find the role. Google gives one adjective and nothing
+else, so there is no gender facet, no age, no accent — a search box, the timbre,
+and what you have starred.
+
+### The tag
+
+Invented, because Gemini has nothing like Hume's per-utterance `description`.
+Hume takes an acting direction beside every line; Gemini takes **one** prose
+direction for the whole call and a speaker name in front of each line. So the
+tags are compiled, not passed through.
+
+    <Viveka>                  this line is Viveka's
+    <Viveka: Weary>           and he is weary
+    <Viveka: Weary: slow>     and slow with it
+    <Manan>                   now Manan
+
+Angle brackets because they cannot be typed by accident in dialogue the way a
+bracket or a slash can. Put the cursor where you want one and pick a direction;
+the pace dropdown folds into the same tag.
+
+`compile_script` turns that into a preamble naming both speakers and their
+timbres, then one line each with its direction in parentheses. **Problems are
+never silent**: a tag naming somebody with no voice, a direction that does not
+exist, or a third speaker when Gemini takes two, all come back with the audio
+and are shown. A line read in the wrong voice sounds like a bad model rather
+than a typo.
+
 ## Maha Transcribe, inside the LISTEN tab
 
 The LISTEN tab **is** the app. Not a link to it: a link is a second step and a

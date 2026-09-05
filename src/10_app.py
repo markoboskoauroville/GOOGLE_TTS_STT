@@ -41,7 +41,7 @@ try:
 except Exception:
     PACIFIC = timezone(timedelta(hours=-8))
 
-VERSION = 11
+VERSION = 12
 PORT = int(os.environ.get("GTTS_PORT", "7311"))
 KEYFILE = os.environ.get("GEMINI_KEYS", os.path.expanduser("~/.gemini_keys"))
 HOME = os.path.expanduser("~/.google_tts_stt")
@@ -565,6 +565,175 @@ def pcm_to_wav(path, pcm):
         w.setframerate(24000)
         w.writeframes(pcm)
     return len(pcm) / 2 / 24000
+
+
+# The thirty prebuilt Gemini voices and the one word Google publishes for each.
+#
+# Roles.kt's lesson, kept: A BLANK IS A FACT, A GUESS IS NOT. Hume publishes four
+# tags per voice and Sample Player still had to read the NAMES to find the role,
+# because the tags did not carry it. Google publishes one adjective and nothing
+# else - no gender, no age, no accent - so those facets do not exist here rather
+# than being invented from the sound of a name. The filter is the search box,
+# the timbre, and what you have starred.
+VOICE_TIMBRE = {
+    "Zephyr": "bright", "Puck": "upbeat", "Charon": "informative", "Kore": "firm",
+    "Fenrir": "excitable", "Leda": "youthful", "Orus": "firm", "Aoede": "breezy",
+    "Callirrhoe": "easy going", "Autonoe": "bright", "Enceladus": "breathy",
+    "Iapetus": "clear", "Umbriel": "easy going", "Algieba": "smooth",
+    "Despina": "smooth", "Erinome": "clear", "Algenib": "gravelly",
+    "Rasalgethi": "informative", "Laomedeia": "upbeat", "Achernar": "soft",
+    "Alnilam": "firm", "Schedar": "even", "Gacrux": "mature",
+    "Pulcherrima": "forward", "Achird": "friendly", "Zubenelgenubi": "casual",
+    "Vindemiatrix": "gentle", "Sadachbia": "lively", "Sadaltager": "knowledgeable",
+    "Sulafat": "warm",
+}
+
+# Ported from SAMPLE_PLAYER/Emotions.kt, thirty eight of them, unchanged.
+#
+# Why a list at all, when the direction is read as prose and anything would
+# work: A FREE TEXT BOX IS A BLANK PAGE, and a blank page in the middle of
+# choosing a voice is the moment somebody gives up and takes the default.
+#
+# The glyph is one character so a direction can be found by shape before it is
+# read, and nothing here is an emoji: a monospace grid of them is a mess of
+# different widths and half of them are the same yellow circle at this size.
+#
+# group, label, glyph, the direction itself, what a preview says
+EMOTIONS = [
+    ["Plain", "Neutral", "—", "even and unhurried, no particular emotion", "is speaking plainly"],
+    ["Plain", "Clear", "▭", "clear and articulate, like reading a notice aloud", "is reading this clearly"],
+    ["Plain", "Conversational", "◇", "relaxed and conversational, as if talking to a friend", "is just talking"],
+    ["Plain", "Narration", "▤", "steady narration, warm but not performed", "is narrating"],
+    ["Warm", "Kind", "♡", "gentle and kind, unhurried", "is being kind"],
+    ["Warm", "Affectionate", "❥", "affectionate, a smile in the voice", "is feeling affectionate"],
+    ["Warm", "Reassuring", "◠", "calm and reassuring, steadying someone", "is reassuring you"],
+    ["Warm", "Grateful", "✿", "quietly grateful, sincere", "is grateful"],
+    ["Warm", "Tender", "◡", "tender and low, almost private", "is being tender"],
+    ["Bright", "Happy", "☀", "genuinely happy, light and quick", "is happy"],
+    ["Bright", "Excited", "⚡", "excited, can hardly get the words out fast enough", "is excited"],
+    ["Bright", "Playful", "◔", "playful and teasing", "is being playful"],
+    ["Bright", "Amused", "≈", "amused, on the edge of laughing", "is amused"],
+    ["Bright", "Triumphant", "▲", "triumphant, delighted with itself", "is triumphant"],
+    ["Low", "Sad", "▽", "sad and quiet, slowing at the ends of phrases", "is sad"],
+    ["Low", "Grieving", "☂", "grieving, barely holding the voice together", "is grieving"],
+    ["Low", "Weary", "…", "weary, worn out, no energy left for emphasis", "is exhausted"],
+    ["Low", "Disappointed", "↓", "disappointed, flat where it should have lifted", "is disappointed"],
+    ["Low", "Regretful", "◟", "regretful, admitting something", "is full of regret"],
+    ["Sharp", "Angry", "✖", "angry, clipped and hard on the consonants", "is angry"],
+    ["Sharp", "Furious", "‼", "furious, barely holding it together", "is furious"],
+    ["Sharp", "Firm", "▮", "firm and final, leaving no room to argue", "is being firm"],
+    ["Sharp", "Impatient", "»", "impatient, pushing to get to the end", "is impatient"],
+    ["Sharp", "Sarcastic", "¬", "dry and sarcastic, meaning the opposite", "is being sarcastic"],
+    ["Tense", "Anxious", "◌", "anxious, breath high and shallow", "is anxious"],
+    ["Tense", "Afraid", "△", "afraid, voice unsteady", "is afraid"],
+    ["Tense", "Urgent", "!", "urgent, needs to be understood immediately", "is in a hurry"],
+    ["Tense", "Suspicious", "◐", "suspicious, weighing every word", "is suspicious"],
+    ["Tense", "Whispered", "◦", "whispered, as if someone might hear", "is whispering"],
+    ["Still", "Calm", "○", "calm and slow, plenty of space between phrases", "is calm"],
+    ["Still", "Meditative", "◎", "meditative, soft, guiding a breath", "is meditating"],
+    ["Still", "Reverent", "†", "reverent, careful with the words", "is being reverent"],
+    ["Still", "Sleepy", "☾", "quiet and drowsy, winding down", "is falling asleep"],
+    ["Work", "Announcer", "◉", "confident announcer, projecting to a room", "is announcing"],
+    ["Work", "Documentary", "▦", "measured documentary narration, authoritative", "is narrating a documentary"],
+    ["Work", "Teaching", "✎", "explaining patiently to someone learning", "is teaching"],
+    ["Work", "Advertising", "★", "upbeat and persuasive, selling something", "is selling something"],
+    ["Work", "Storytelling", "❦", "telling a story to a child, colours in the voice", "is telling a story"],
+]
+
+PACES = [("normal", ""), ("slow", "slowly"), ("fast", "quickly"),
+         ("very slow", "very slowly, with space between the phrases")]
+
+
+def emotion_by_label(label):
+    want = (label or "").strip().lower()
+    for group, lab, glyph, text, spoken in EMOTIONS:
+        if lab.lower() == want:
+            return text
+    return ""
+
+
+TAG_RE = re.compile(r"<\s*([^<>:|]{1,30}?)\s*(?::\s*([^<>:|]{0,40}?))?\s*(?::\s*([^<>|]{0,30}?))?\s*>")
+
+
+def compile_script(text, speakers):
+    """Turn a tagged script into what Gemini is actually sent.
+
+    THE TAG, invented here because Gemini has nothing like Hume's per-utterance
+    `description` field. Hume takes an acting direction beside every line. Gemini
+    takes ONE prose direction for the whole call, and a speaker name in front of
+    each line. So the tags are compiled rather than passed through.
+
+        <Viveka>                  this line is Viveka's
+        <Viveka: Weary>           and he is weary
+        <Viveka: Weary: slow>     and slow with it
+        <Manan>                   now Manan
+
+    Angle brackets because they cannot be typed by accident in dialogue the way a
+    bracket or a slash can, and because the person is already reading a script
+    where a name means a speaker.
+
+    Returns (prompt, speakers_used, problems). PROBLEMS ARE NEVER SILENT: a tag
+    naming somebody with no voice would otherwise come back as a line read in the
+    wrong voice, which sounds like a bad model rather than a typo.
+    """
+    names = [s.get("name", "").strip() for s in speakers if s.get("name", "").strip()]
+    known = {n.lower(): n for n in names}
+    problems = []
+    lines = []
+    cur = names[0] if names else ""
+    pending = ""
+    pos = 0
+    for m in TAG_RE.finditer(text or ""):
+        chunk = (text[pos:m.start()] or "").strip()
+        if chunk:
+            lines.append((cur, pending, chunk))
+            pending = ""
+        who = (m.group(1) or "").strip()
+        if who.lower() in known:
+            cur = known[who.lower()]
+        else:
+            problems.append("no voice is set for <%s>" % who)
+        emo = (m.group(2) or "").strip()
+        pace = (m.group(3) or "").strip()
+        bits = []
+        if emo:
+            d = emotion_by_label(emo)
+            if not d:
+                problems.append("no direction called %s" % emo)
+            bits.append(d or emo)
+        if pace:
+            p = dict(PACES).get(pace.lower(), pace)
+            if p:
+                bits.append(p)
+        pending = ", ".join(bits)
+        pos = m.end()
+    tail = (text[pos:] or "").strip()
+    if tail:
+        lines.append((cur, pending, tail))
+
+    used = [n for n in names if any(l[0] == n for l in lines)] or names[:1]
+    if len(used) > 2:
+        problems.append("Gemini takes two speakers in one call and this has %d" % len(used))
+        used = used[:2]
+
+    head = []
+    if len(used) > 1:
+        head.append("TTS the following conversation between %s." % " and ".join(used))
+    else:
+        head.append("Read the following aloud.")
+    for s in speakers:
+        n = s.get("name", "").strip()
+        if n in used:
+            head.append("%s is a %s voice."
+                        % (n, VOICE_TIMBRE.get(s.get("voice", ""), "clear")))
+    head.append("Follow the direction in brackets before each line "
+                "and do not read the brackets aloud.")
+
+    body = []
+    for who, direction, said in lines:
+        prefix = ("%s: " % who) if len(used) > 1 else ""
+        body.append(prefix + (("(%s) " % direction) if direction else "") + said)
+    return "\n".join(head) + "\n\n" + "\n".join(body), used, problems
 
 
 def speak(text, voice, voice2=None, name_a="A", name_b="B"):
@@ -1112,17 +1281,41 @@ th{color:var(--dim);font-weight:400;letter-spacing:.06em}
 </div>
 
 <section class="tab active">
-<textarea id="text" placeholder="Say warmly and slowly: the arm is always yours. The permission is mine.
+<!-- SAMPLE_PLAYER's shape: two slots, a browser with a search box and facet
+     chips, and a bank of directions you insert rather than type. A free text
+     box is a blank page, and a blank page while choosing a voice is where
+     somebody takes the default. -->
+<div class="row">
+<div><label>VOICE 1 NAME</label><input id="n1" value="VIVEKA"></div>
+<div><label>VOICE 2 NAME</label><input id="n2" value="MANAN"></div>
+</div>
+<div class="row">
+<div><label>VOICE 1</label><button class="go ghost" id="pick1" onclick="openBrowser(1)">Charon &middot; informative</button></div>
+<div><label>VOICE 2</label><button class="go ghost" id="pick2" onclick="openBrowser(2)">Puck &middot; upbeat</button></div>
+</div>
 
-The direction goes in the text itself, in plain English. For two speakers, pick a second voice and write NAME: line."></textarea>
-<div class="row">
-<div><label>VOICE</label><select id="v1"></select></div>
-<div><label>SECOND VOICE</label><select id="v2"><option value="">none, one speaker</option></select></div>
+<div id="browser" class="kcard" style="display:none">
+<input id="vq" placeholder="search a voice by name or timbre" oninput="drawVoices()">
+<div id="vfacets" class="kacts" style="flex-wrap:wrap"></div>
+<div id="vlist" style="max-height:38vh;overflow:auto;margin-top:8px"></div>
 </div>
+
+<label>SCRIPT</label>
+<textarea id="text" placeholder="&lt;VIVEKA: Amused&gt; Ah. There you are. I was expecting you.
+&lt;MANAN: Anxious: slow&gt; I am trying.
+&lt;VIVEKA: Firm&gt; I know."></textarea>
+<div class="note">A tag sets who is speaking, how, and how fast:
+<b>&lt;NAME&gt;</b>, <b>&lt;NAME: Weary&gt;</b>, <b>&lt;NAME: Weary: slow&gt;</b>.
+Put the cursor where you want one and pick below.</div>
+
 <div class="row">
-<div><label>FIRST SPEAKER</label><input id="na" value="VIVEKA"></div>
-<div><label>SECOND SPEAKER</label><input id="nb" value="MANAN"></div>
+<div><label>INSERT FOR</label><select id="who"></select></div>
+<div><label>PACE</label><select id="pace"></select></div>
 </div>
+<input id="eq" placeholder="search a direction: angry, whisper, teaching…" oninput="drawEmotions()">
+<div id="egroups" class="kacts" style="flex-wrap:wrap"></div>
+<div id="elist" style="max-height:30vh;overflow:auto;margin-top:8px"></div>
+
 <button class="go" id="sgo" onclick="doSpeak()">SPEAK</button>
 <div class="out idle" id="sout">nothing spoken yet</div>
 <audio id="player" class="idle" controls></audio>
@@ -1154,9 +1347,11 @@ twenty.</div>
 </section>
 </div>
 <script>
-const V=%%VOICES%%;
-V.forEach(v=>{v1.add(new Option(v,v));v2.add(new Option(v,v))});
-v1.value="Charon";
+let VOICES=[], EMO=[], PACES=[], STAR=[];
+let SLOT={1:{voice:'Charon'},2:{voice:'Puck'}}, browsing=0, efacet='', vfacet='';
+try{STAR=JSON.parse(localStorage.getItem('gtt_star')||'[]')}catch(e){STAR=[]}
+function star(n){STAR=STAR.includes(n)?STAR.filter(x=>x!=n):STAR.concat([n]);
+ localStorage.setItem('gtt_star',JSON.stringify(STAR));drawVoices();}
 // The header a cross-site request cannot set. Its value does not matter, its
 // presence does.
 const H={'X-Gtt-Local':'1'};
@@ -1171,15 +1366,71 @@ function tab(i){
  document.querySelectorAll('.tab-btn').forEach((b,j)=>b.classList.toggle('active',i==j));
  document.querySelectorAll('.tab').forEach((s,j)=>s.classList.toggle('active',i==j));
  if(i==2){loadBudget();loadHealth();checkGrave();}}
-window.addEventListener('load',loadBudget);
+window.addEventListener('load',()=>{loadBudget();loadCatalogues();});
+async function loadCatalogues(){
+ VOICES=await(await api('/api/voices')).json();
+ EMO=await(await api('/api/emotions')).json();
+ const timbres=[...new Set(VOICES.map(v=>v.timbre))].sort();
+ vfacets.innerHTML='<button onclick="setVFacet(\'\')">all</button>'
+  +'<button onclick="setVFacet(\'*\')">starred</button>'
+  +timbres.map(t=>'<button onclick="setVFacet(\''+t+'\')">'+t+'</button>').join('');
+ const groups=[...new Set(EMO.map(e=>e.group))];
+ egroups.innerHTML='<button onclick="setEFacet(\'\')">all</button>'
+  +groups.map(g=>'<button onclick="setEFacet(\''+g+'\')">'+g.toLowerCase()+'</button>').join('');
+ ['normal','slow','fast','very slow'].forEach(p=>pace.add(new Option(p,p)));
+ drawVoices();drawEmotions();refreshWho();}
+function refreshWho(){
+ const cur=who.value;
+ who.innerHTML='';
+ [n1.value.trim()||'VOICE 1', n2.value.trim()||'VOICE 2'].forEach(n=>who.add(new Option(n,n)));
+ if(cur)who.value=cur;}
+n1.addEventListener('input',refreshWho);n2.addEventListener('input',refreshWho);
+function setVFacet(f){vfacet=f;drawVoices();}
+function setEFacet(f){efacet=f;drawEmotions();}
+function openBrowser(slot){browsing=slot;browser.style.display='block';drawVoices();}
+function drawVoices(){
+ const q=(vq.value||'').toLowerCase();
+ const rows=VOICES.filter(v=>
+   (vfacet==''||(vfacet=='*'?STAR.includes(v.name):v.timbre==vfacet))
+   &&(v.name.toLowerCase().includes(q)||v.timbre.includes(q)));
+ vlist.innerHTML=rows.length?rows.map(v=>
+  '<div class="kcard" style="margin-bottom:6px"><div class="khead">'
+  +'<div class="klabel">'+v.name+'</div><div class="kwhy">'+v.timbre+'</div></div>'
+  +'<div class="kacts">'
+  +'<button class="gold" onclick="chooseVoice(\''+v.name+'\')">use for '+(browsing||1)+'</button>'
+  +'<button onclick="star(\''+v.name+'\')">'+(STAR.includes(v.name)?'\u2605 starred':'\u2606 star')+'</button>'
+  +'</div></div>').join(''):'<div class="note">nothing matches</div>';}
+function chooseVoice(name){
+ const s=browsing||1;SLOT[s].voice=name;
+ const v=VOICES.find(x=>x.name==name)||{timbre:''};
+ (s==1?pick1:pick2).innerHTML=name+' &middot; '+v.timbre;
+ browser.style.display='none';}
+function drawEmotions(){
+ const q=(eq.value||'').toLowerCase();
+ const rows=EMO.filter(e=>(efacet==''||e.group==efacet)
+   &&(e.label.toLowerCase().includes(q)||e.text.includes(q)||e.group.toLowerCase().includes(q)));
+ elist.innerHTML=rows.length?rows.map(e=>
+  '<button class="go ghost" style="text-align:left;margin-top:4px;border-radius:8px"'
+  +' onclick="insertTag(\''+e.label+'\')">'+e.glyph+'  '+e.label
+  +'<span class="kwhy">  '+e.text+'</span></button>').join(''):'<div class="note">nothing matches</div>';}
+function insertTag(label){
+ const p=pace.value&&pace.value!='normal'?(': '+pace.value):'';
+ const tag='<'+who.value+': '+label+p+'> ';
+ const s=text.selectionStart||0,e=text.selectionEnd||0;
+ text.value=text.value.slice(0,s)+tag+text.value.slice(e);
+ text.focus();text.selectionStart=text.selectionEnd=s+tag.length;}
 
 async function doSpeak(){
  sgo.disabled=true;sout.classList.remove('idle');
  sout.textContent='generating, about half the length of the audio…';
  const r=await(await api('/api/speak',{method:'POST',headers:{'Content-Type':'application/json'},
-  body:JSON.stringify({text:text.value,voice:v1.value,voice2:v2.value,na:na.value,nb:nb.value})})).json();
+  body:JSON.stringify({text:text.value,speakers:[
+   {name:n1.value.trim(),voice:SLOT[1].voice},
+   {name:n2.value.trim(),voice:SLOT[2].voice}]})})).json();
  sgo.disabled=false;
- if(r.ok){sout.textContent=r.seconds+'s of audio, '+r.model+' on ['+r.key+']'+(r.log&&r.log.length?'\\n'+r.log.join('\\n'):'');
+ if(r.ok){sout.textContent=r.seconds+'s of audio, '+r.model+' on ['+r.key+']'
+   +((r.problems&&r.problems.length)?'\\n\\n'+r.problems.join('\\n'):'')
+   +(r.log&&r.log.length?'\\n'+r.log.join('\\n'):'');
   player.src='/out/'+r.file;player.classList.remove('idle');}
  else sout.textContent='no: '+r.error+'\\n'+((r.log||[]).join('\\n'));}
 
@@ -1503,7 +1754,7 @@ def serve():
 
     @app.get("/")
     def index():
-        return (PAGE.replace("%%VOICES%%", json.dumps(VOICES))
+        return (PAGE.replace("%%VOICES%%", "[]")
                 .replace("%%ASSUMED%%", str(RPD_UNKNOWN_ASSUMED))
                 .replace("%%VERSION%%", str(VERSION)))
 
@@ -1531,12 +1782,28 @@ def serve():
         txt = (j.get("text") or "").strip()
         if not txt:
             return jsonify({"ok": False, "error": "nothing to say"})
-        v2 = j.get("voice2") or None
-        if v2:
-            txt = ("TTS the following conversation between %s and %s.\n%s"
-                   % (j.get("na", "A"), j.get("nb", "B"), txt))
-        return jsonify(speak(txt, j.get("voice") or "Charon", v2,
-                             j.get("na", "A"), j.get("nb", "B")))
+        speakers = j.get("speakers") or []
+        speakers = [s for s in speakers if (s.get("name") or "").strip()]
+        if not speakers:
+            speakers = [{"name": "SPEAKER", "voice": j.get("voice") or "Charon"}]
+        prompt, used, problems = compile_script(txt, speakers)
+        by = {s["name"]: s.get("voice") or "Charon" for s in speakers}
+        r = speak(prompt,
+                  by.get(used[0], "Charon"),
+                  by.get(used[1]) if len(used) > 1 else None,
+                  used[0], used[1] if len(used) > 1 else "")
+        r["problems"] = problems
+        r["prompt"] = prompt
+        return jsonify(r)
+
+    @app.get("/api/voices")
+    def api_voices():
+        return jsonify([{"name": n, "timbre": VOICE_TIMBRE[n]} for n in sorted(VOICE_TIMBRE)])
+
+    @app.get("/api/emotions")
+    def api_emotions():
+        return jsonify([{"group": g, "label": l, "glyph": gl, "text": tx, "spoken": sp}
+                        for g, l, gl, tx, sp in EMOTIONS])
 
     @app.post("/api/listen")
     def api_listen():

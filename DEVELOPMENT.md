@@ -552,3 +552,58 @@ its settings panel says where the keys live and the KEYS tab is the only place
 they are imported, tested or deleted. Both halves spend from the same ledger and
 the same daily budget, which was the whole reason for putting the two apps under
 one roof in the first place.
+
+---
+
+## 5.9.2026 — v12, SPEAK is Sample Player with Gemini behind it
+
+Baba: *for the first tab we are actually replacing Hume with Google. Look at my
+sample player apps. Emotions are inline tags. There must be a database of
+emotions the user can search and pick. And two voices, with names, so we know
+who is speaking, in which emotion, at which speed.*
+
+### What came across unchanged
+
+`Emotions.kt`, all thirty-eight, eight groups, glyphs included. Its own comment
+is the reason the list exists at all: Hume reads the direction as prose so any
+words work, *which is exactly why there is a list here — a free text box is a
+blank page, and a blank page in the middle of choosing a voice is the moment
+somebody gives up and takes the default.* One-character glyphs, no emoji,
+because a monospace grid of emoji is a mess of different widths and half of them
+are the same yellow circle.
+
+`Roles.kt`'s rule came across too, as a decision not to do something. Hume
+publishes four tags and Sample Player still had to read the voice NAMES to find
+a role, and it gave no role to the 83 voices that are only names, because a
+blank is a fact and a guess is not. Google publishes one adjective per voice, so
+this browser has a search box, a timbre chip and a star, and no gender, age or
+accent facet invented from how a name sounds.
+
+### What had to be invented, and why
+
+Hume takes a `description` beside **every utterance**. Gemini takes **one** prose
+direction for the whole call, plus a speaker name in front of each line. So the
+inline tags cannot be passed through — they are compiled:
+
+    <Viveka: Weary: slow>  →  a preamble naming both speakers and their timbres
+                              VIVEKA: (weary, worn out, slowly) the line
+
+Angle brackets because they cannot be typed by accident in dialogue the way a
+bracket or a slash can, and because a name meaning a speaker is already how a
+script reads.
+
+`compile_script` is a pure function with twenty-one checks in test 1, including
+the three failures that matter: a tag naming somebody with no voice, a direction
+that does not exist, and a third speaker when Gemini takes two. **None of them
+is silent.** A line read in the wrong voice sounds like a bad model rather than
+a typo, and that is the kind of fault somebody re-records around instead of
+fixing.
+
+### What is not proved
+
+Whether Gemini follows a *different* direction on each line. Earlier in this
+session a direction in the preamble measurably changed the read — the whisper
+take came back at a quarter the amplitude of the others — but that was one
+direction for one call. Per-line parentheticals are the standard screenplay
+shape and models have seen a great deal of it, which is the reason for the
+choice, not evidence for it. First thing to listen for once there are keys.
