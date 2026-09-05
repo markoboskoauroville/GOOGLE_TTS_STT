@@ -340,7 +340,14 @@ function loadCatalogues() {
     var timbres = [];
     VOICES.forEach(function (v) { if (timbres.indexOf(v.timbre) < 0) timbres.push(v.timbre); });
     timbres.sort();
-    var f = '<span class="chip on" data-vf="">all</span><span class="chip" data-vf="*">starred</span>';
+    // roles first, because they are the question actually being asked, then
+    // the two that are about this person's own use, then the timbres Google
+    // publishes. Order is the argument: what you look for first is first.
+    var f = '<span class="chip" data-vf="@actors">actors</span>' +
+            '<span class="chip" data-vf="@narrators">narrators</span>' +
+            '<span class="chip" data-vf="@anchors">anchors</span>' +
+            '<span class="chip on" data-vf="">all</span>' +
+            '<span class="chip" data-vf="*">starred</span>';
     timbres.forEach(function (t) { f += '<span class="chip" data-vf="' + esc(t) + '">' + esc(t) + "</span>"; });
     el("vfacets").innerHTML = f;
     var groups = [];
@@ -364,6 +371,22 @@ function loadCatalogues() {
     loadBudget();
   });
 }
+// The role is his, and only falls back to the suggestion. Kept on the device,
+// like the stars: it is a judgement about his own work, not a fact about the
+// voice, so it does not belong on a server.
+var ROLE = {};
+try { ROLE = JSON.parse(localStorage.getItem("gtt_roles") || "{}"); } catch (e) { ROLE = {}; }
+function roleOf(name) {
+  if (ROLE[name]) return ROLE[name];
+  for (var i = 0; i < VOICES.length; i++) if (VOICES[i].name === name) return VOICES[i].role_hint || "";
+  return "";
+}
+function setRole(name, role) {
+  if (role) ROLE[name] = role; else delete ROLE[name];
+  localStorage.setItem("gtt_roles", JSON.stringify(ROLE));
+  drawVoices();
+}
+
 function timbreOf(name) {
   for (var i = 0; i < VOICES.length; i++) if (VOICES[i].name === name) return VOICES[i].timbre;
   return "";
@@ -395,6 +418,13 @@ el("eq").addEventListener("input", drawEmotions);
 document.addEventListener("click", function (ev) {
   var c = ev.target.closest ? ev.target.closest(".chip") : null;
   if (!c) return;
+  if (c.dataset.role) {
+    setRole(c.dataset.rv, roleOf(c.dataset.rv) === c.dataset.role ? "" : c.dataset.role);
+    c.parentElement.querySelectorAll(".rolechip").forEach(function (x) {
+      x.classList.toggle("on", roleOf(c.dataset.rv) === x.dataset.role);
+    });
+    return;
+  }
   if (c.dataset.vf !== undefined) {
     vfacet = c.dataset.vf;
     el("vfacets").querySelectorAll(".chip").forEach(function (x) { x.classList.toggle("on", x === c); });
@@ -409,8 +439,18 @@ document.addEventListener("click", function (ev) {
 function drawVoices() {
   var q = (el("vq").value || "").toLowerCase();
   var rows = VOICES.filter(function (v) {
-    var okf = vfacet === "" || (vfacet === "*" ? STAR.indexOf(v.name) >= 0 : v.timbre === vfacet);
+    var okf;
+    if (vfacet === "") okf = true;
+    else if (vfacet === "*") okf = STAR.indexOf(v.name) >= 0;
+    else if (vfacet.charAt(0) === "@") okf = roleOf(v.name) === vfacet.slice(1);
+    else okf = v.timbre === vfacet;
     return okf && (v.name.toLowerCase().indexOf(q) >= 0 || v.timbre.indexOf(q) >= 0);
+  });
+  // MOST USED FIRST, in every filter. Popularity here is counted, not ranked
+  // by anybody: it is how often this person has actually played the voice.
+  // Ties fall back to the name, so the order is stable rather than arbitrary.
+  rows.sort(function (a, b) {
+    return (b.used || 0) - (a.used || 0) || a.name.localeCompare(b.name);
   });
   el("vlist").innerHTML = rows.length ? rows.map(function (v) {
     // the chosen voices carry a border, so the answer to "which one did I
@@ -505,6 +545,13 @@ function showVoice(name, btn) {
         s += "<b>where the name comes from: not established</b><br>" +
              "Left blank rather than guessed.<br><br>";
       }
+      s += '<div style="margin-top:8px"><b>role</b> ' +
+           ["actors", "narrators", "anchors"].map(function (r) {
+             return '<span class="chip rolechip' + (roleOf(v.name) === r ? " on" : "") +
+                    '" data-role="' + r + '" data-rv="' + esc(v.name) + '">' + r + "</span>";
+           }).join("") +
+           '<div class="kwhy">' + esc(v.role_source) + "</div></div>";
+      s += "played " + (v.used || 0) + " time" + (v.used === 1 ? "" : "s") + "<br>";
       s += "preview line: " + esc(v.preview_line) + "<br>";
       if (v.cached) {
         s += "measured from the cached preview: " + (v.seconds || 0).toFixed(1) + "s";
@@ -519,6 +566,15 @@ function showVoice(name, btn) {
       // between two plays is the thing being compared. Cached like every other
       // preview: a direction already heard on this voice costs nothing to hear
       // again, and the ones that are already paid for are marked.
+      // the languages, with their own search. THEY BELONG TO THE MODEL: all
+      // thirty voices take all of them, and the card says so rather than
+      // implying a difference that is not there.
+      var LOC = (v.locales || []).concat(v.locales_extra || []);
+      s += '<div style="margin-top:10px"><b>languages and accents</b>' +
+           '<div class="kwhy">' + esc(v.locales_note) + "</div>" +
+           '<input class="locq" placeholder="search a language or a code" style="margin-top:6px">' +
+           '<div class="locs" style="max-height:22vh;overflow:auto;margin-top:6px"></div></div>';
+
       var have = v.cached_emotions || [];
       s += '<div style="margin-top:10px">' +
            '<input class="emoq" placeholder="search a direction">' +
@@ -530,6 +586,25 @@ function showVoice(name, btn) {
            " already cached on this voice, marked \u25cf</div></div>";
       card.innerHTML = s;
       card.style.display = "block";
+      var locq = card.querySelector(".locq");
+      var locs = card.querySelector(".locs");
+      function fillLoc() {
+        var want = (locq.value || "").toLowerCase();
+        var rows = LOC.filter(function (l) {
+          return l.language.toLowerCase().indexOf(want) >= 0 ||
+                 l.code.toLowerCase().indexOf(want) >= 0 ||
+                 (l.region || "").toLowerCase().indexOf(want) >= 0;
+        });
+        locs.innerHTML = rows.length ? rows.map(function (l) {
+          return '<div style="display:flex;gap:8px;padding:3px 0">' +
+                 '<span style="flex:0 0 5.5em;color:var(--amber)">' + esc(l.code) + "</span>" +
+                 "<span>" + esc(l.language) + '</span><span class="kwhy" style="margin:0">' +
+                 esc(l.region || "") + "</span></div>";
+        }).join("") : '<div class="kwhy">nothing matches</div>';
+      }
+      fillLoc();
+      locq.addEventListener("input", fillLoc);
+
       var sel = card.querySelector(".emosel");
       var q = card.querySelector(".emoq");
       function fill() {

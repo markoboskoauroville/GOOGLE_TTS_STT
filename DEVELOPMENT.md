@@ -997,3 +997,43 @@ Nothing new on the server except the list of which directions this voice already
 has cached. The play goes through the same `/api/preview` as every other one, so
 there is one cache, one key derivation and one place a duplicate could be paid
 for twice.
+
+---
+
+## 5.9.2026 — v22, three roles, counted popularity, and the languages
+
+Baba asked for three categories at the front — actors, narrators, anchors —
+voices sorted by popularity, and a searchable list of the languages each voice
+can do.
+
+**None of those three things exists in what Google publishes.** One adjective
+per voice. No role, no ranking, no per-voice language. So each was answered with
+the nearest honest thing rather than with something invented:
+
+**Roles are suggested, then owned.** The suggestion comes from the adjective —
+something to push against is an actor, something you can listen to for an hour is
+a narrator, nothing in the way of the words is an anchor — so the three
+categories are not empty on the first day. Three chips in the card change it and
+the choice lives on the device. It is a judgement about his work, not a fact
+about the voice, and it does not belong on a server.
+
+**Popularity is counted.** A number in the ledger that goes up whenever a voice
+actually speaks, cached previews included, because a cached play is still a play.
+It survives the daily reset for the same reason the learned limits do: it is
+knowledge, not spend. Ties break on the name so the order does not shuffle.
+
+That is the difference worth keeping: nobody ranked these voices. The list is
+sorted by what he has actually reached for.
+
+**Languages belong to the MODEL, not the voice**, and the card says so in those
+words. All thirty voices take all twenty-six locales; there is no voice that
+speaks Polish and another that does not, and a per-voice list would have implied
+a difference that is not there. What changes with the locale is the accent,
+because the voice is re-rendered in it.
+
+**Croatian is listed apart, on measurement.** It is not on Google's
+generally-available list, and a Croatian TTS call came back as Croatian speech
+earlier today. So the list is what is promised, and the line under it is what was
+observed, and they are not run together. The seventy-plus preview languages the
+newer model claims are left out entirely: a preview list is not stable, and a
+language that stops working is worse than one never offered.

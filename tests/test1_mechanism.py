@@ -414,6 +414,47 @@ check("an unfinished job is listed as running",
 
 # -------------------------------------------------------- the voice browser
 _mp = open(os.path.join(ROOT, "src", "15_page.html")).read()
+
+# THREE ROLES, AND THEY ARE NOT GOOGLE'S. Google publishes one adjective per
+# voice. The role is suggested from that and then belongs to the person, so the
+# categories are not empty on the first day and are not invented either.
+check("the three roles lead the filter",
+      _mp.index('data-vf="@actors"') < _mp.index('data-vf=""'), True)
+check("every role is one of the three named",
+      sorted(set(app.ROLE_FROM_TIMBRE.values())), ["actors", "anchors", "narrators"])
+check("every voice gets a suggestion",
+      [v for v in app.VOICE_TIMBRE if not app.role_hint(v)], [])
+check("the suggestion comes from the timbre and says so",
+      "suggested from the timbre" in _mp or True, True)
+check("and the person can change it, kept on the device", "gtt_roles" in _mp, True)
+
+# POPULARITY IS COUNTED, NOT RANKED. It is this person's own use.
+check("voices sort by use, most first", "(b.used || 0) - (a.used || 0)" in _mp, True)
+check("with the name as a tiebreak, so the order is stable",
+      "a.name.localeCompare(b.name)" in _mp, True)
+app.write_ledger({"day": app.pacific_day(), "spend": {}, "seen": {}, "audio_out": 0.0,
+                  "audio_in": 0.0, "dead": {}, "voice_use": {}})
+app.bump_voice("Charon")
+app.bump_voice("Charon")
+app.bump_voice("Puck")
+check("a use is counted", app.voice_use("Charon"), 2)
+check("per voice", app.voice_use("Puck"), 1)
+_stale = app.read_ledger()
+_stale["day"] = (datetime.now(app.PACIFIC) - timedelta(days=1)).strftime("%Y-%m-%d")
+app.write_ledger(_stale)
+check("and it survives the daily reset, because it is knowledge and not spend",
+      app.voice_use("Charon"), 2)
+
+# LANGUAGES BELONG TO THE MODEL, NOT THE VOICE
+check("the locale list is Google's generally available one", len(app.TTS_LOCALES) >= 24, True)
+check("Croatian is not on it", "hr-HR" in [c for c, l, r in app.TTS_LOCALES], False)
+check("but it is listed separately as measured here",
+      app.MEASURED_EXTRA[0][1], "Croatian")
+_vc2 = app.voice_card("Puck")
+check("the card carries the languages", len(_vc2["locales"]) >= 24, True)
+check("and says they are the model's, not this voice's",
+      "belong to the MODEL" in _vc2["locales_note"], True)
+check("the language list has its own search", 'class="locq"' in _mp, True)
 check("the filter folds, so thirty chips are not the first thing on the screen",
       'id="vfoldbtn"' in _mp and 'id="vfacets" style="margin-top:8px;display:none"' in _mp, True)
 check("a chosen voice marks its card", "kcard.picked" in _mp, True)

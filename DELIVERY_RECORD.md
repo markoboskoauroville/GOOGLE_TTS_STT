@@ -1,16 +1,16 @@
 # DELIVERY RECORD
 
-**v21, 5.9.2026.** What was measured, and what was not tested.
+**v22, 5.9.2026.** What was measured, and what was not tested.
 
 ## The gate
 
-    build is fresh          21-google-tts-stt-v21.sh matches src/
+    build is fresh          22-google-tts-stt-v22.sh matches src/
     installer is whole      --verify passes
-    TEST 1   mechanism      183 checks   0 failed
+    TEST 1   mechanism      199 checks   0 failed
     TEST 1b  the parser      73 checks   0 failed
     TEST 3   ugly cases      59 checks   0 failed
     TEST 4   upgrade         58 checks   0 failed
-                            373 checks   0 failed
+                            389 checks   0 failed
 
 TEST 2 was run against a fabricated ring at v8: everything structural passed —
 the guard refuses an api call with no header, refuses another page's Origin,
@@ -161,6 +161,22 @@ wrong it is wrong in the card and nowhere else: nothing depends on it.
 
 Kore is blank. I could not establish what it refers to and did not want to fill
 the field with something plausible.
+
+## What v22 claims, and on whose authority
+
+**The roles are not Google's and the app says so on every card.** They are
+derived from the one adjective Google publishes, which makes them a reading of a
+published fact rather than an invention — and they are overridable, because the
+person who knows whether a voice can carry his film is not me.
+
+**Croatian is claimed on measurement, not on documentation.** It is absent from
+Google's generally-available TTS locale list and a Croatian TTS call came back as
+Croatian speech on 5.9.2026. The card lists it apart from the twenty-six for
+exactly that reason.
+
+The newer TTS model claims seventy-plus languages in preview. Those are not
+listed: a preview list is not stable, and a language that stops working is worse
+than one that was never offered.
 
 ## NOT TESTED
 

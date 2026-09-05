@@ -92,6 +92,20 @@ each with a one-character glyph so a direction can be found by shape before it
 is read, and nothing is an emoji because a monospace grid of them is a mess of
 different widths. Search across label, group and the direction itself.
 
+**Three roles lead the filter: actors, narrators, anchors.** Google publishes no
+such thing — one adjective per voice and nothing else — so the role is
+**suggested from that adjective and then belongs to you**. Something to push
+against goes to actors, something you can listen to for an hour to narrators,
+nothing in the way of the words to anchors. Three chips in the ID card change
+it, and your choice is kept on the device: it is a judgement about your work,
+not a fact about the voice.
+
+**Popularity is counted, not ranked by anybody.** Every filter sorts most-played
+first, from a count in the ledger that goes up whenever a voice actually speaks —
+including a cached preview, which is still a play. It survives midnight, because
+it is knowledge rather than spend. Ties fall back to the name so the order is
+stable.
+
 **The filter folds.** Thirty timbre chips are five rows before anything else,
 so they are behind FILTER and open when asked. The search box stays out, because
 typing a name is faster than finding a chip.
@@ -108,6 +122,13 @@ apart, because they are not equally trustworthy:
 | **published** | the one adjective, and a note that Google publishes nothing else |
 | **measured** | length, words a minute, mean and peak dB — read off the cached preview with ffmpeg, and absent until there is one |
 | **identified** | what the name refers to, labelled *identified here, not by Google* |
+
+**Languages are in the card, with their own search.** Twenty-six locales, and
+the card says plainly that **they belong to the model, not to the voice**: all
+thirty voices take all of them, and the voice is re-rendered in the accent of
+whichever is chosen. There is no voice that speaks Polish and another that does
+not. Croatian is listed separately, because it is **not** on Google's list and it
+works — measured here.
 
 **And the card is where you audition.** A search box, a dropdown of all
 thirty-eight directions, and a play button: the same fixed sentence, this voice,

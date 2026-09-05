@@ -41,7 +41,7 @@ try:
 except Exception:
     PACIFIC = timezone(timedelta(hours=-8))
 
-VERSION = 21
+VERSION = 22
 PORT = int(os.environ.get("GTTS_PORT", "7311"))
 KEYFILE = os.environ.get("GEMINI_KEYS", os.path.expanduser("~/.gemini_keys"))
 HOME = os.path.expanduser("~/.google_tts_stt")
@@ -381,13 +381,16 @@ def read_ledger():
     if d.get("day") != pacific_day():
         # midnight Pacific happened. Everything Google counts is back to zero.
         d = {"day": pacific_day(), "spend": {}, "seen": d.get("seen", {}),
-             "audio_out": 0.0, "audio_in": 0.0, "dead": d.get("dead", {})}
+             "audio_out": 0.0, "audio_in": 0.0, "dead": d.get("dead", {}),
+             # counted use survives midnight: it is knowledge, not spend
+             "voice_use": d.get("voice_use", {})}
         write_ledger(d)
     d.setdefault("spend", {})
     d.setdefault("seen", {})
     d.setdefault("dead", {})
     d.setdefault("audio_out", 0.0)
     d.setdefault("audio_in", 0.0)
+    d.setdefault("voice_use", {})
     return d
 
 
@@ -645,6 +648,93 @@ PACES = [("normal", ""), ("slow", "slowly"), ("fast", "quickly"),
          ("very slow", "very slowly, with space between the phrases")]
 
 
+# ---------------------------------------------------------------- ROLES
+#
+# Baba asked for three categories at the front of the filter: actors,
+# narrators, anchors.
+#
+# GOOGLE PUBLISHES NO SUCH THING. One adjective per voice and nothing else. So
+# the role is not invented from the sound of a name — it is SUGGESTED from the
+# one published fact, and then it is his to change. The suggestion is a starting
+# point so the three categories are not empty on the first day; the assignment
+# that sticks is the one he makes, kept on his device.
+#
+# Which is the same rule as everywhere else in this app: a blank is a fact and a
+# guess is not, and where a guess is useful it says out loud that it is one.
+ROLE_FROM_TIMBRE = {
+    # carrying a character: something to push against
+    "upbeat": "actors", "excitable": "actors", "bright": "actors",
+    "youthful": "actors", "lively": "actors", "forward": "actors",
+    "gravelly": "actors", "firm": "actors",
+    # carrying a long text: something you can listen to for an hour
+    "mature": "narrators", "smooth": "narrators", "warm": "narrators",
+    "gentle": "narrators", "soft": "narrators", "breathy": "narrators",
+    "easy going": "narrators", "casual": "narrators", "breezy": "narrators",
+    # carrying facts: nothing in the way of the words
+    "informative": "anchors", "knowledgeable": "anchors", "even": "anchors",
+    "clear": "anchors", "friendly": "anchors",
+}
+ROLES = ["actors", "narrators", "anchors"]
+
+
+def role_hint(voice):
+    return ROLE_FROM_TIMBRE.get(VOICE_TIMBRE.get(voice, ""), "")
+
+
+# --------------------------------------------------------------- LANGUAGES
+#
+# THE LANGUAGES BELONG TO THE MODEL, NOT TO THE VOICE. All thirty voices take
+# all of them; there is no voice that speaks Polish and another that does not.
+# So this list is the same on every card, and the card says so rather than
+# implying a difference that is not there.
+#
+# What DOES change with the language is the accent, because the voice is
+# re-rendered in it. Setting the code explicitly is better than letting it be
+# detected — the model guesses from the text and short text guesses badly.
+#
+# The twenty-four are Google's generally-available list for Gemini TTS. The
+# newer TTS model claims seventy-plus in preview; those are not listed here
+# because the preview list is not stable and a language that stops working is
+# worse than one that was never offered.
+TTS_LOCALES = [
+    ("ar-EG", "Arabic", "Egypt"), ("bn-BD", "Bengali", "Bangladesh"),
+    ("nl-NL", "Dutch", "Netherlands"), ("en-IN", "English", "India"),
+    ("en-US", "English", "United States"), ("en-GB", "English", "United Kingdom"),
+    ("fr-FR", "French", "France"), ("de-DE", "German", "Germany"),
+    ("hi-IN", "Hindi", "India"), ("id-ID", "Indonesian", "Indonesia"),
+    ("it-IT", "Italian", "Italy"), ("ja-JP", "Japanese", "Japan"),
+    ("ko-KR", "Korean", "South Korea"), ("mr-IN", "Marathi", "India"),
+    ("pl-PL", "Polish", "Poland"), ("pt-BR", "Portuguese", "Brazil"),
+    ("ro-RO", "Romanian", "Romania"), ("ru-RU", "Russian", "Russia"),
+    ("es-ES", "Spanish", "Spain"), ("es-US", "Spanish", "United States"),
+    ("ta-IN", "Tamil", "India"), ("te-IN", "Telugu", "India"),
+    ("th-TH", "Thai", "Thailand"), ("tr-TR", "Turkish", "Turkey"),
+    ("uk-UA", "Ukrainian", "Ukraine"), ("vi-VN", "Vietnamese", "Vietnam"),
+]
+
+# Not on Google's list, and it works. MEASURED 5.9.2026: a TTS call with
+# Croatian text came back as Croatian speech. So the list is what is promised,
+# not the boundary of what is possible, and the card says that too.
+MEASURED_EXTRA = [("hr", "Croatian", "measured here, not on Google's list")]
+
+
+def voice_use(voice=None):
+    """How often each voice has actually been used. POPULARITY IS COUNTED, NOT
+    RANKED BY ME: it is this person's own use, and it survives the daily reset
+    because it is knowledge rather than spend."""
+    d = read_ledger()
+    u = d.get("voice_use", {})
+    return u.get(voice, 0) if voice else u
+
+
+def bump_voice(voice, n=1):
+    with _lock:
+        d = read_ledger()
+        u = d.setdefault("voice_use", {})
+        u[voice] = u.get(voice, 0) + n
+        write_ledger(d)
+
+
 # ------------------------------------------------------------ THE CACHE
 #
 # A preview is the same request every time: the same voice, the same direction,
@@ -695,6 +785,7 @@ def preview(voice, label):
     h, prompt = preview_key(voice, label)
     hit = preview_path(h)
     if hit:
+        bump_voice(voice)      # a cached play is still a use
         return {"ok": True, "file": os.path.basename(hit), "cached": True,
                 "line": preview_line(voice, label)}
 
@@ -713,6 +804,7 @@ def preview(voice, label):
                 pcm = base64.b64decode(p["inlineData"]["data"])
     if not pcm:
         return {"ok": False, "error": "no audio in the reply"}
+    bump_voice(voice)
     os.makedirs(PREVIEWS, exist_ok=True)
     tmp = os.path.join(PREVIEWS, h + ".wav.new")
     secs = pcm_to_wav(tmp, pcm)
@@ -783,6 +875,15 @@ def voice_card(name):
                          "else: no gender, no age, no accent.",
             "origin_kind": kind, "origin_note": note,
             "origin_source": "identified here, not by Google" if kind else "",
+            "role_hint": role_hint(name),
+            "role_source": "suggested from the timbre Google publishes, and yours to change",
+            "used": voice_use(name),
+            "locales": [{"code": c, "language": l, "region": r} for c, l, r in TTS_LOCALES],
+            "locales_extra": [{"code": c, "language": l, "region": r}
+                              for c, l, r in MEASURED_EXTRA],
+            "locales_note": "These belong to the MODEL, not to this voice. All thirty "
+                            "voices take all of them, and the voice is re-rendered in the "
+                            "accent of whichever is chosen.",
             "preview_line": preview_line(name, "Neutral"),
             "cached": False, "seconds": None, "mean_db": None, "peak_db": None}
     # which directions are already paid for on THIS voice. Shown in the
@@ -937,6 +1038,9 @@ def speak(text, voice, voice2=None, name_a="A", name_b="B"):
                 pcm = base64.b64decode(p["inlineData"]["data"])
     if not pcm:
         return {"ok": False, "error": "no audio in the reply", "log": r["log"]}
+    bump_voice(voice)
+    if voice2:
+        bump_voice(voice2)
     os.makedirs(OUTDIR, exist_ok=True)
     fname = "speak_%s.wav" % time.strftime("%Y%m%d_%H%M%S")
     secs = pcm_to_wav(os.path.join(OUTDIR, fname), pcm)
@@ -2017,7 +2121,10 @@ def serve():
 
     @app.get("/api/voices")
     def api_voices():
-        return jsonify([{"name": n, "timbre": VOICE_TIMBRE[n]} for n in sorted(VOICE_TIMBRE)])
+        use = voice_use()
+        return jsonify([{"name": n, "timbre": VOICE_TIMBRE[n],
+                         "role_hint": role_hint(n), "used": use.get(n, 0)}
+                        for n in sorted(VOICE_TIMBRE)])
 
     @app.get("/api/emotions")
     def api_emotions():
