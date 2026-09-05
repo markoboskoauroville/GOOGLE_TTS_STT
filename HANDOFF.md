@@ -109,6 +109,13 @@ apart, because they are not equally trustworthy:
 | **measured** | length, words a minute, mean and peak dB — read off the cached preview with ffmpeg, and absent until there is one |
 | **identified** | what the name refers to, labelled *identified here, not by Google* |
 
+**And the card is where you audition.** A search box, a dropdown of all
+thirty-eight directions, and a play button: the same fixed sentence, this voice,
+whichever direction is chosen, so the only thing that changes between two plays
+is the thing being compared. Directions already cached **on this voice** are
+marked ● and cost nothing; ○ costs one of that account's ten. The count under
+the picker says how many of the thirty-eight are already paid for.
+
 The names are astronomical: moons of the outer planets and named stars.
 `Zubenelgenubi` is hard to hold in the head; *alpha Librae, the southern claw,
 from when Libra was part of Scorpio* is not. **Kore is left blank**, because I

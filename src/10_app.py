@@ -41,7 +41,7 @@ try:
 except Exception:
     PACIFIC = timezone(timedelta(hours=-8))
 
-VERSION = 20
+VERSION = 21
 PORT = int(os.environ.get("GTTS_PORT", "7311"))
 KEYFILE = os.environ.get("GEMINI_KEYS", os.path.expanduser("~/.gemini_keys"))
 HOME = os.path.expanduser("~/.google_tts_stt")
@@ -785,6 +785,10 @@ def voice_card(name):
             "origin_source": "identified here, not by Google" if kind else "",
             "preview_line": preview_line(name, "Neutral"),
             "cached": False, "seconds": None, "mean_db": None, "peak_db": None}
+    # which directions are already paid for on THIS voice. Shown in the
+    # picker, so a free one can be chosen over one that costs a request.
+    card["cached_emotions"] = [lab for g, lab, gl, tx, sp in EMOTIONS
+                               if preview_path(preview_key(name, lab)[0])]
     h, _ = preview_key(name, "Neutral")
     p = preview_path(h)
     if p:

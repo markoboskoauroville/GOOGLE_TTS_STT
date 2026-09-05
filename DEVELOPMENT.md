@@ -967,3 +967,33 @@ when Libra was part of Scorpio* is a thing you can keep.
 applies here for the same reason it applied to gender: a blank is a fact and a
 guess is not. It would have been easy to write something plausible about
 Persephone. The field says the name is not established instead.
+
+---
+
+## 5.9.2026 — v21, auditioning inside the card
+
+Baba: *under the info button of every voice, add the ability that the voice
+speaks one simple sentence. In every info there will be a dropdown with a search
+box, and I switch the emotion and press play and listen how this voice
+interprets the emotion.*
+
+The card had a fixed Neutral preview and the emotion bank was somewhere else, so
+comparing two voices on the same direction meant leaving the card, changing the
+slot, coming back. Now the picker is in the card: search, dropdown, play.
+
+**The sentence stays fixed.** `SAMPLE_PLAYER/Emotions.kt` already made it short
+on purpose — the voice's own name and what it is doing, "Orus is angry." So
+between any two plays the only thing that varies is the one thing being
+compared. A longer sentence would be a better sample of the voice and a worse
+instrument for the comparison, which is the question actually being asked here.
+
+**Marked ● or ○.** The cache is keyed on voice AND direction, so a direction
+already heard on this voice is free and one not heard costs one of ten for that
+day. The picker says which before it is pressed, and the count under it says how
+many of the thirty-eight are already paid for. A preview that looks free is one
+nobody counts until the wall.
+
+Nothing new on the server except the list of which directions this voice already
+has cached. The play goes through the same `/api/preview` as every other one, so
+there is one cache, one key derivation and one place a duplicate could be paid
+for twice.

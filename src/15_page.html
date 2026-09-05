@@ -514,8 +514,52 @@ function showVoice(name, btn) {
       } else {
         s += "not previewed yet, so there is nothing measured to show";
       }
+      // HEAR THIS VOICE DO ANY DIRECTION. The same fixed sentence, this voice,
+      // whichever of the thirty-eight is chosen, so the only thing that varies
+      // between two plays is the thing being compared. Cached like every other
+      // preview: a direction already heard on this voice costs nothing to hear
+      // again, and the ones that are already paid for are marked.
+      var have = v.cached_emotions || [];
+      s += '<div style="margin-top:10px">' +
+           '<input class="emoq" placeholder="search a direction">' +
+           '<div class="row" style="margin-top:6px">' +
+           '<select class="emosel"></select>' +
+           '<button class="hearemo" style="flex:0 0 auto;padding:11px 16px">&#9654;</button>' +
+           "</div>" +
+           '<div class="kwhy emonote">' + have.length + " of " + EMO.length +
+           " already cached on this voice, marked \u25cf</div></div>";
       card.innerHTML = s;
       card.style.display = "block";
+      var sel = card.querySelector(".emosel");
+      var q = card.querySelector(".emoq");
+      function fill() {
+        var want = (q.value || "").toLowerCase();
+        var keep = sel.value;
+        sel.innerHTML = "";
+        EMO.filter(function (e) {
+          return e.label.toLowerCase().indexOf(want) >= 0 ||
+                 e.text.indexOf(want) >= 0 ||
+                 e.group.toLowerCase().indexOf(want) >= 0;
+        }).forEach(function (e) {
+          var mark = have.indexOf(e.label) >= 0 ? "\u25cf " : "\u25cb ";
+          sel.add(new Option(mark + e.glyph + "  " + e.label + " \u2014 " + e.text, e.label));
+        });
+        if (keep) sel.value = keep;
+        if (!sel.value && sel.options.length) sel.selectedIndex = 0;
+      }
+      fill();
+      q.addEventListener("input", fill);
+      card.querySelector(".hearemo").addEventListener("click", function () {
+        var btn = this;
+        hear(v.name, sel.value, btn);
+        var note = card.querySelector(".emonote");
+        if (note && have.indexOf(sel.value) < 0) {
+          have.push(sel.value);
+          note.textContent = have.length + " of " + EMO.length +
+            " already cached on this voice, marked \u25cf";
+          fill();
+        }
+      });
     }).catch(function () { done(); });
 }
 

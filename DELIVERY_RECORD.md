@@ -1,16 +1,16 @@
 # DELIVERY RECORD
 
-**v20, 5.9.2026.** What was measured, and what was not tested.
+**v21, 5.9.2026.** What was measured, and what was not tested.
 
 ## The gate
 
-    build is fresh          20-google-tts-stt-v20.sh matches src/
+    build is fresh          21-google-tts-stt-v21.sh matches src/
     installer is whole      --verify passes
-    TEST 1   mechanism      176 checks   0 failed
+    TEST 1   mechanism      183 checks   0 failed
     TEST 1b  the parser      73 checks   0 failed
     TEST 3   ugly cases      59 checks   0 failed
     TEST 4   upgrade         58 checks   0 failed
-                            366 checks   0 failed
+                            373 checks   0 failed
 
 TEST 2 was run against a fabricated ring at v8: everything structural passed —
 the guard refuses an api call with no header, refuses another page's Origin,

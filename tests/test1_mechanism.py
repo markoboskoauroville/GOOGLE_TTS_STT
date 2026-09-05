@@ -421,6 +421,18 @@ check("and its button", "button.chosen" in _mp, True)
 check("choosing redraws the list, or the mark never appears",
       _mp.count("drawVoices();          // so the card shows which one was chosen"), 1)
 check("there is an info button on every voice", 'data-info=' in _mp, True)
+# and inside it, this voice doing any of the thirty-eight directions
+check("the card carries a direction picker", 'class="emosel"' in _mp, True)
+check("with a search box, because thirty-eight in a dropdown is a scroll",
+      'class="emoq"' in _mp, True)
+check("and a play button", 'class="hearemo"' in _mp, True)
+check("it plays through the same cache as every other preview",
+      _mp.count("hear(v.name, sel.value, btn)"), 1)
+check("the directions already paid for on this voice are marked",
+      "cached_emotions" in _mp, True)
+_vc = app.voice_card("Charon")
+check("and the server says which those are", isinstance(_vc["cached_emotions"], list), True)
+check("a voice never previewed has none", app.voice_card("Sulafat")["cached_emotions"], [])
 
 # the id card keeps three kinds of fact apart: published, measured, identified
 _card = app.voice_card("Zubenelgenubi")
