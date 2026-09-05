@@ -136,3 +136,107 @@ PREPALL_OLD = "  async function transcribeSegmentsSeq(segments, statusFn) {\n   
 PREPALL_NEW = "  // EVERY transcription passes through ffmpeg, recordings included. The file\n  // picker already did; a recording used to go straight up as whatever the\n  // browser happened to produce, which is a different pipeline for the same\n  // job and the one nobody was testing.\n  async function prepForUpload(blob, statusFn) {\n    try {\n      const fd = new FormData();\n      fd.append('file', blob, 'take.webm');\n      const r = await fetch('/api/optimize-audio', {\n        method: 'POST', headers: { 'X-Gtt-Local': '1' }, body: fd\n      });\n      if (!r.ok) return blob;                       // reduce if we can, send if we cannot\n      const out = await r.blob();\n      if (!out || !out.size) return blob;\n      if (statusFn) statusFn('optimized  \\u00B7  ' + Math.round(blob.size / 1024) +\n                             ' KB \\u2192 ' + Math.round(out.size / 1024) + ' KB');\n      return out;\n    } catch (e) {\n      return blob;\n    }\n  }\n\n  async function transcribeSegmentsSeq(segments, statusFn) {\n    const parts = [];\n    for (let i = 0; i < segments.length; i++) {\n      const label = segments.length > 1 ? ('segment ' + (i + 1) + '/' + segments.length + '  \\u00B7  ') : '';\n      const ready = await prepForUpload(segments[i], (m) => statusFn(label + m));\n      const t = await transcribeDispatch(ready, 'segment_' + (i + 1) + '.ogg', (m) => statusFn(label + m));"
 
 PATCHES += [(RINGHAS_OLD, RINGHAS_NEW), (MICBEST_OLD, MICBEST_NEW), (RECBITS_OLD, RECBITS_NEW), (PREPALL_OLD, PREPALL_NEW)]
+
+
+# ------------------------------------------------------------ STAGED STATUS
+#
+# Baba: "I want to see this app being alive nonstop and informing me what it
+# does in every of its windows."
+#
+# The three stages that take real time are transcoding, sending and waiting,
+# and silence during any of them is indistinguishable from a stall. Each one
+# now says its own name, in this page's status line AND to the page around it:
+# this page runs in an iframe, and the activity line in the parent should say
+# what the app is doing whichever tab is being looked at.
+#
+# Applied to the replacements above BY VALUE rather than written into them by
+# hand. Those literals already carry escaped JavaScript, and editing escaped
+# text inside an escaped literal is exactly what shipped a dead page at v13.
+
+_ACT_HELPER = """  function gttAct(msg, done) {
+    try {
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({ gtt: 'act', msg: msg, done: !!done }, '*');
+      }
+    } catch (ignored) {}
+  }
+
+"""
+
+
+def _stage(new):
+    """Return the replacement with its stages announced."""
+    out = _ACT_HELPER + new
+
+    # sending
+    out = out.replace(
+        "statusFn('gemini  \\u00b7  sending ' + Math.round(blob.size / 1024) + ' KB');",
+        "const kb = Math.round(blob.size / 1024);\n"
+        "    statusFn('sending ' + kb + ' KB to Google\\u2026');\n"
+        "    gttAct('sending ' + kb + ' KB to Google');")
+
+    # waiting, with a second counter, because a silent minute reads as a hang
+    out = out.replace(
+        "      const r = await fetch('/api/listen', { method: 'POST',\n"
+        "        headers: { 'X-Gtt-Local': '1' }, body: fd });",
+        "      const t0 = Date.now();\n"
+        "      const tick = setInterval(function () {\n"
+        "        const s = Math.round((Date.now() - t0) / 1000);\n"
+        "        statusFn('waiting for Google\\u2026  ' + s + 's');\n"
+        "        gttAct('waiting for Google, ' + s + 's');\n"
+        "      }, 1000);\n"
+        "      let r;\n"
+        "      try {\n"
+        "        r = await fetch('/api/listen', { method: 'POST',\n"
+        "          headers: { 'X-Gtt-Local': '1' }, body: fd });\n"
+        "      } finally { clearInterval(tick); }")
+
+    # receiving, and an empty transcript that used to read as success
+    out = out.replace(
+        "      const j = await r.json();\n"
+        "      if (!j.ok) { statusFn('gemini: ' + (j.error || 'failed'), 'err'); return null; }\n"
+        "      statusFn('gemini  \\u00b7  ' + j.seconds + 's heard on [' + j.key + ']');\n"
+        "      return (j.text || '').trim();",
+        "      statusFn('receiving\\u2026');\n"
+        "      gttAct('receiving the transcript');\n"
+        "      const j = await r.json();\n"
+        "      if (!j.ok) {\n"
+        "        statusFn('Google: ' + (j.error || 'failed'), 'err');\n"
+        "        gttAct('Google refused: ' + (j.error || 'failed'), true);\n"
+        "        return null;\n"
+        "      }\n"
+        "      const text = (j.text || '').trim();\n"
+        "      if (!text) {\n"
+        "        statusFn('Google heard ' + j.seconds + 's and returned no words', 'err');\n"
+        "        gttAct('no words came back', true);\n"
+        "        return null;\n"
+        "      }\n"
+        "      statusFn('done  \\u00b7  ' + j.seconds + 's heard, ' + j.model +\n"
+        "               ' on [' + j.key + ']', 'ok');\n"
+        "      gttAct('done, ' + j.seconds + 's transcribed', true);\n"
+        "      return text;")
+
+    out = out.replace(
+        "      statusFn('gemini: ' + e.message, 'err');\n      return null;",
+        "      statusFn('Google: ' + e.message, 'err');\n"
+        "      gttAct('that did not go through: ' + e.message, true);\n"
+        "      return null;")
+
+    # transcoding
+    out = out.replace(
+        "      fd.append('file', blob, 'take.webm');",
+        "      fd.append('file', blob, 'take.webm');\n"
+        "      const before = Math.round(blob.size / 1024);\n"
+        "      if (statusFn) statusFn('transcoding ' + before + ' KB with ffmpeg\\u2026');\n"
+        "      gttAct('transcoding ' + before + ' KB with ffmpeg');")
+    out = out.replace("statusFn('optimized  \\u00b7  '", "statusFn('transcoded  \\u00b7  '")
+    return out
+
+
+_staged = []
+for _old, _new in PATCHES:
+    if "transcribeDispatch(blob, filename, statusFn)" in _new or "prepForUpload" in _new:
+        _staged.append((_old, _stage(_new)))
+    else:
+        _staged.append((_old, _new))
+PATCHES = _staged

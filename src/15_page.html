@@ -77,6 +77,11 @@ th{color:var(--dim);font-weight:400;letter-spacing:.06em}
 /* the spinner. One braille cell, cycled. It is the only thing on the screen
    that moves, so movement always means the same thing: something is running. */
 .spin{display:inline-block;width:1ch;color:var(--amber)}
+#act{display:flex;gap:9px;align-items:baseline;background:var(--surface-2);
+ border:1px solid var(--line);border-radius:999px;padding:9px 14px;margin-bottom:10px;
+ font-size:11px;color:var(--dim);letter-spacing:.04em;min-height:36px}
+#act.on{color:var(--prose);border-color:var(--amber)}
+#actmsg{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 </style></head><body><div class="unit">
 
 <div class="top">
@@ -87,6 +92,12 @@ th{color:var(--dim);font-weight:400;letter-spacing:.06em}
   </div>
   <button class="cog" id="cog" title="settings">&#9881;</button>
 </div>
+
+<!-- THE ACTIVITY LINE. Always present, in every tab. It is the one place that
+     says what the app is doing, and it says it even when the answer is
+     "nothing", because a line that only appears when something is happening
+     is a line you have to notice appearing. -->
+<div id="act"><span class="spin" id="actspin">●</span><span id="actmsg">ready</span></div>
 
 <!-- SETTINGS. One panel, and what is in it depends on the tab underneath, so
      the cog always means "the settings for what I am looking at". -->
@@ -173,13 +184,63 @@ th{color:var(--dim);font-weight:400;letter-spacing:.06em}
 var VERSION = "@@VERSION@@";
 var ASSUMED = "@@ASSUMED@@";
 
+// ------------------------------------------------------------- activity
+// One line, always on screen, in every tab. Every call goes through here, so
+// there is no path that does work silently: an app that reports the slow
+// things and says nothing about the quick ones teaches you that silence means
+// broken, and then a fast answer looks like a fault.
+var actTimer = null, actDepth = 0;
+function actStart(msg) {
+  actDepth++;
+  var m = document.getElementById("actmsg");
+  var s = document.getElementById("actspin");
+  document.getElementById("act").classList.add("on");
+  m.textContent = msg;
+  if (actTimer) return;
+  var i = 0;
+  actTimer = setInterval(function () {
+    s.textContent = FRAMES[i++ % FRAMES.length];
+  }, 80);
+}
+function actStep(msg) {
+  var m = document.getElementById("actmsg");
+  if (m) m.textContent = msg;
+}
+function actEnd(msg) {
+  actDepth = Math.max(0, actDepth - 1);
+  if (actDepth > 0) return;
+  if (actTimer) { clearInterval(actTimer); actTimer = null; }
+  document.getElementById("actspin").textContent = "\u25cf";
+  document.getElementById("act").classList.remove("on");
+  document.getElementById("actmsg").textContent = msg || "ready";
+}
+
 // The header a cross-site request cannot set. Its value does not matter.
 var H = {"X-Gtt-Local": "1"};
-function api(u, o) {
+function api(u, o, label) {
   o = o || {};
   o.headers = Object.assign({}, H, o.headers || {});
-  return fetch(u, o).then(function (r) { return r.json(); });
+  if (label) actStart(label);
+  return fetch(u, o).then(function (r) {
+    if (label) actStep("receiving");
+    return r.json();
+  }).then(function (j) {
+    if (label) actEnd();
+    return j;
+  }).catch(function (e) {
+    if (label) actEnd("that did not go through: " + e.message);
+    throw e;
+  });
 }
+
+// Maha Transcribe runs in an iframe and reports its own stages up here, so the
+// line says what the app is doing whichever tab you are looking at.
+window.addEventListener("message", function (ev) {
+  if (!ev.data || ev.data.gtt !== "act") return;
+  if (ev.data.done) actEnd(ev.data.msg);
+  else if (actDepth > 0) actStep(ev.data.msg);
+  else actStart(ev.data.msg);
+});
 function el(id) { return document.getElementById(id); }
 function esc(s) {
   return String(s).replace(/[&<>"']/g, function (c) {
@@ -265,7 +326,8 @@ el("cog").addEventListener("click", function () {
 // ------------------------------------------------------------- catalogues
 function loadCatalogues() {
   var stopB = working(el("bud"), "reading the ledger");
-  Promise.all([api("/api/voices"), api("/api/emotions")]).then(function (r) {
+  Promise.all([api("/api/voices", null, "loading voices"),
+               api("/api/emotions", null, "loading directions")]).then(function (r) {
     VOICES = r[0];
     EMO = r[1];
     var timbres = [];
@@ -410,7 +472,8 @@ function insertTag(label) {
 var PLAYER = null;
 function hear(voice, label, btn) {
   var done = busy(btn, "");
-  api("/api/preview?voice=" + encodeURIComponent(voice) + "&emotion=" + encodeURIComponent(label))
+  api("/api/preview?voice=" + encodeURIComponent(voice) + "&emotion=" + encodeURIComponent(label),
+      null, "previewing " + voice + ", " + label)
     .then(function (r) {
       if (!r.ok) { done("no"); return; }
       done(r.cached ? "cached" : "new");
@@ -433,7 +496,7 @@ el("sgo").addEventListener("click", function () {
       speakers: [{name: el("n1").value.trim(), voice: SLOT[1].voice},
                  {name: el("n2").value.trim(), voice: SLOT[2].voice}]
     })
-  }).then(function (r) {
+  }, "sending the script to Google").then(function (r) {
     stop();
     el("sgo").disabled = false;
     if (r.ok) {
@@ -461,7 +524,7 @@ el("kf").addEventListener("change", function () {
   var stop = working(el("kimp"), "reading " + el("kf").files[0].name);
   var fd = new FormData();
   fd.append("keyfile", el("kf").files[0]);
-  api("/api/import", {method: "POST", body: fd}).then(function (r) {
+  api("/api/import", {method: "POST", body: fd}, "reading the key file").then(function (r) {
     stop();
     if (!r.ok) { el("kimp").textContent = "no: " + r.error; return; }
     var s = r.found + " key" + (r.found === 1 ? "" : "s") + " found in " + r.source + "\n";
@@ -498,12 +561,12 @@ function draw() {
 }
 function testAll() {
   var done = busy(el("testall"), "TESTING");
-  api("/api/ring").then(function (r0) {
+  api("/api/ring", null, "listing the ring").then(function (r0) {
     ROWS = r0.keys.map(function (k) {
       return {label: k.label, masked: k.masked, verdict: "testing", why: ""};
     });
     draw();
-    return api("/api/keys");
+    return api("/api/keys", null, "asking every account to do a piece of work");
   }).then(function (rows) {
     ROWS = rows;
     draw();
@@ -515,7 +578,8 @@ function testAll() {
 el("testall").addEventListener("click", testAll);
 function testOne(label, btn) {
   var done = busy(btn, "");
-  api("/api/key/" + encodeURIComponent(label) + "/test", {method: "POST"}).then(function (r) {
+  api("/api/key/" + encodeURIComponent(label) + "/test", {method: "POST"},
+      "testing " + label).then(function (r) {
     done();
     if (!r.ok) return;
     for (var i = 0; i < ROWS.length; i++) if (ROWS[i].label === label) ROWS[i] = r;
@@ -525,7 +589,8 @@ function testOne(label, btn) {
 }
 function showModels(label, btn) {
   var done = busy(btn, "");
-  api("/api/key/" + encodeURIComponent(label) + "/models").then(function (r) {
+  api("/api/key/" + encodeURIComponent(label) + "/models",
+      null, "asking " + label + " what it can reach").then(function (r) {
     done();
     var cards = el("keys").querySelectorAll(".kcard");
     for (var i = 0; i < cards.length; i++) {
@@ -542,7 +607,7 @@ function showModels(label, btn) {
 }
 function dropKey(label) {
   api("/api/delete", {method: "POST", headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({labels: [label]})}).then(function () {
+    body: JSON.stringify({labels: [label]})}, "removing " + label).then(function () {
     ROWS = ROWS.filter(function (x) { return x.label !== label; });
     draw();
     loadBudget();
@@ -555,7 +620,7 @@ el("del").addEventListener("click", function () {
   if (!labels.length) return;
   var done = busy(el("del"), "DELETING");
   api("/api/delete", {method: "POST", headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({labels: labels})}).then(function () {
+    body: JSON.stringify({labels: labels})}, "removing the refused accounts").then(function () {
     ROWS = ROWS.filter(function (r) { return r.verdict !== "refused"; });
     draw();
     done();
@@ -565,7 +630,7 @@ el("del").addEventListener("click", function () {
 });
 el("undel").addEventListener("click", function () {
   var done = busy(el("undel"), "PUTTING BACK");
-  api("/api/restore", {method: "POST"}).then(function () { done(); testAll(); });
+  api("/api/restore", {method: "POST"}, "putting them back").then(function () { done(); testAll(); });
 });
 function checkGrave() {
   api("/api/removed").then(function (g) {
@@ -575,7 +640,7 @@ function checkGrave() {
 }
 function loadHealth() {
   var stop = working(el("dep"), "checking what is installed");
-  api("/api/health").then(function (h) {
+  api("/api/health", null, "checking what is installed").then(function (h) {
     stop();
     var y = function (b) { return b ? "yes" : "no"; };
     el("dep").textContent = "python " + h.python + " \u00b7 flask " + y(h.flask) +
@@ -585,7 +650,7 @@ function loadHealth() {
 }
 function loadCache() {
   var stop = working(el("cachenote"), "counting the cache");
-  api("/api/cache").then(function (c) {
+  api("/api/cache", null, "counting the cache").then(function (c) {
     stop();
     el("cachenote").textContent = c.count + " preview" + (c.count === 1 ? "" : "s") +
       " cached, " + Math.round(c.bytes / 1024) + " KB. A preview is the same request " +

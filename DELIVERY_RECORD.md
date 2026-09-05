@@ -1,16 +1,16 @@
 # DELIVERY RECORD
 
-**v17, 5.9.2026.** What was measured, and what was not tested.
+**v18, 5.9.2026.** What was measured, and what was not tested.
 
 ## The gate
 
-    build is fresh          17-google-tts-stt-v17.sh matches src/
+    build is fresh          18-google-tts-stt-v18.sh matches src/
     installer is whole      --verify passes
-    TEST 1   mechanism      136 checks   0 failed
+    TEST 1   mechanism      146 checks   0 failed
     TEST 1b  the parser      73 checks   0 failed
     TEST 3   ugly cases      59 checks   0 failed
     TEST 4   upgrade         58 checks   0 failed
-                            326 checks   0 failed
+                            336 checks   0 failed
 
 TEST 2 was run against a fabricated ring at v8: everything structural passed —
 the guard refuses an api call with no header, refuses another page's Origin,
@@ -120,6 +120,19 @@ their own accuracy and their own failure modes.
 That is a decision, not an implementation detail, and it is Baba's to make. The
 page is not vendored yet because vendoring it without an engine would put a
 reader in the repository that cannot read.
+
+## The page is driven now, not just parsed
+
+jsdom is in the loop. The page is loaded, a file is picked, the button is
+clicked, and the status line is read back in order. That is how the recording
+gate was found at v17 and how the stage messages were verified here: with a
+stubbed fetch that takes 2.4 seconds, the line reads transcoding, sending,
+waiting 1s, waiting 2s, receiving, done — and the parent tab is told each one.
+
+Twice now a rewrite has silently matched nothing because the JavaScript escape
+`\u00b7` is six characters in the python literal and one character in a python
+string. Both times the driven page showed it immediately and reading the code
+did not.
 
 ## NOT TESTED
 

@@ -845,3 +845,44 @@ high-frequency detail that tells an s from an f. Measured after the change: a
 
 It got bigger. That is the right direction when the only thing bytes buy is
 accuracy and the only thing they cost is a second on localhost.
+
+---
+
+## 5.9.2026 — v18, the app says what it is doing
+
+Baba: *now it works. I need a braille spinner and next to it a status line.
+What's going on? Transcoding, sending to Google, receiving. I want to see this
+app being alive nonstop and informing me what it does in every of its windows.*
+
+One line under the tabs, in all three, always there — including when the answer
+is "ready". A line that only appears when something is happening is a line you
+have to notice appearing.
+
+Every call goes through one `api()` that takes a label, so there is no path left
+that does work silently. That is the same argument as the spinner running on the
+eight-millisecond cache hit: report the slow things only, and the hand learns
+that a still screen means broken.
+
+The transcribe page runs in an iframe and now posts its stages to the page
+around it, so the line is right whichever tab is on screen. The stages are the
+ones that cost real time: transcoding, sending, waiting — with a second counter,
+because a silent minute reads as a hang — and receiving.
+
+**An empty transcript is now a failure.** It used to return `''` as success, so
+the box stayed blank and the status said done. On screen that is the same thing
+as nothing having happened, and it is exactly what "transcription not happening"
+would look like if Google ever returned nothing.
+
+### The same escaping trap, twice, caught by driving the page
+
+The stage rewrites are applied to the patch replacements by value at import
+time, because hand-editing escaped JavaScript inside an escaped python literal
+is what killed v13. The first attempt still matched nothing: `\\u00b7` is SIX
+characters in those literals and one character in an ordinary python string, so
+every replace was a silent no-op.
+
+Reading the code did not show it. Loading the page and reading the status line
+in order showed it in one run: the line still said "gemini · sending" where it
+should have said "sending 0 KB to Google". That harness is now the thing that
+verifies this kind of change, and it is why this version was correct on the
+second attempt rather than the fifth.

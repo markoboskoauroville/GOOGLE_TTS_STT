@@ -364,6 +364,24 @@ check("audio is prepared at 24 kHz for Gemini, not 16 kHz for AssemblyAI",
 check("and at 48 kbps, because Gemini is billed by the second and not the byte",
       app.PREP_BITRATE, "48k")
 
+# ---------------------------------------------------------- the stages
+# "I want to see this app being alive nonstop and informing me what it does."
+# The three that take real time each say their own name, in this page and in
+# the one around it.
+for _stage in ("transcoding", "sending", "waiting for Google", "receiving"):
+    check("the transcribe page announces: %s" % _stage, _stage in _tp, True)
+check("it counts the seconds while it waits, because a silent minute reads as a hang",
+      "s + 's'" in _tp, True)
+check("and it reports up to the tab around it", "postMessage({ gtt: 'act'" in _tp, True)
+check("an empty transcript is a failure, not a silent success",
+      "returned no words" in _tp, True)
+_mp = open(os.path.join(ROOT, "src", "15_page.html")).read()
+check("the main page has an activity line that is always there",
+      'id="act"' in _mp and "ready" in _mp, True)
+check("and it listens for what the iframe reports", 'ev.data.gtt !== "act"' in _mp, True)
+check("every call carries a label, so nothing works silently",
+      _mp.count('", "') > 0 and "actStart" in _mp, True)
+
 # ------------------------------------------------------------- THE PAGE
 # v13 shipped a page whose script died at parse. On the phone that looked like
 # "counting the cache" forever and a SPEAK button that did nothing, because

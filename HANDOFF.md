@@ -20,6 +20,31 @@ own word:
 
 The v6 numbers still work and are no longer drawn.
 
+## The activity line
+
+One line, under the tabs, **in every tab, always**. It says what the app is
+doing and it says it even when the answer is nothing, because a line that only
+appears when something is happening is a line you have to notice appearing.
+
+Every call goes through one `api()` that carries a label, so there is no path
+that does work silently. An app that reports the slow things and says nothing
+about the quick ones teaches the hand that a still screen means broken, and then
+a fast answer looks like a fault.
+
+**Maha Transcribe reports up.** It runs in an iframe, and it posts its stages to
+the page around it, so the line says what the app is doing whichever tab is on
+screen. The stages are the ones that take real time:
+
+    transcoding 412 KB with ffmpeg
+    sending 143 KB to Google
+    waiting for Google, 7s          <- counts up, because a silent minute reads as a hang
+    receiving the transcript
+    done, 24s transcribed
+
+**An empty transcript is now a failure.** It used to read as success: a blank box
+and a status saying done, which on screen is the same thing as nothing having
+happened at all.
+
 ## The screen
 
 Three pills and a cogwheel, and nothing else above the work. No title bar, no
