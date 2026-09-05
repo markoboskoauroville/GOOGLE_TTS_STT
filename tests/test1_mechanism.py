@@ -322,8 +322,15 @@ _bspec.loader.exec_module(_bi)
 _tp = _bi.engine_swapped()
 _app_src = open(os.path.join(ROOT, "src", "10_app.py")).read()
 _wants = sorted(set(re.findall(r"fetch\('(/api/[a-z0-9\-/]+)'", _tp)))
-_missing = [u for u in _wants
-            if ('"%s"' % u) not in _app_src and ("'%s'" % u) not in _app_src]
+def _served(u):
+    # a route with a path parameter is written "/api/chunk/<jid>", so a call to
+    # "/api/chunk/" + id is matched by its prefix rather than by the whole string
+    if ('"%s"' % u) in _app_src or ("'%s'" % u) in _app_src:
+        return True
+    return ('"%s<' % u) in _app_src or ('"%s"' % u.rstrip("/")) in _app_src
+
+
+_missing = [u for u in _wants if not _served(u)]
 check("every endpoint the vendored page calls exists here: %s" % ", ".join(_wants),
       _missing, [])
 check("and its own guard header is accepted",
@@ -363,6 +370,47 @@ check("audio is prepared at 24 kHz for Gemini, not 16 kHz for AssemblyAI",
       app.PREP_RATE, 24000)
 check("and at 48 kbps, because Gemini is billed by the second and not the byte",
       app.PREP_BITRATE, "48k")
+
+# ------------------------------------------------- the chunking algorithm
+# Five hours is not one request. A pure function decides where to cut, so it
+# is tested here without ffmpeg and without a key.
+_pts = [float(x) for x in range(30, 18000, 30)]      # a pause every 30 seconds
+_cuts = app.plan_cuts(18000.0, _pts)
+check("five hours becomes thirty parts", len(_cuts) + 1, 30)
+check("EVERY cut lands in a real pause, never in the middle of a word",
+      all(c in _pts for c in _cuts), True)
+_spans = app.cut_points_to_parts(18000.0, _cuts)
+check("the parts cover the whole thing, start to end",
+      (_spans[0][0], _spans[-1][1]), (0.0, 18000.0))
+check("and they join with no gap",
+      all(_spans[i][1] == _spans[i + 1][0] for i in range(len(_spans) - 1)), True)
+check("each part is about ten minutes",
+      all(500 < (b - a) < 780 for a, b in _spans), True)
+
+check("a file shorter than one part is not cut at all", app.plan_cuts(400.0, [100.0]), [])
+check("a pause near the ten minute mark is taken", app.plan_cuts(1500.0, [720.0])[0], 720.0)
+check("a pause far from it is not", app.plan_cuts(1500.0, [300.0])[0], 600.0)
+check("with no pauses anywhere it still cuts, at the clock",
+      app.plan_cuts(18000.0, [])[:2], [600.0, 1200.0])
+check("a zero length file plans nothing", app.plan_cuts(0.0, []), [])
+check("no part is ever shorter than the minimum",
+      all((b - a) >= app.CHUNK_MIN for a, b in app.cut_points_to_parts(
+          1300.0, app.plan_cuts(1300.0, [1190.0]))), True)
+
+# the job survives the process: that is the whole point
+app.JOBS = os.path.join(HOME, "jobs")
+_j = {"id": "testjob", "name": "x", "state": "running", "total": 3, "done": 1,
+      "texts": ["first part"], "parts": [], "started": 0, "duration": 60}
+app.job_write(_j)
+check("a job is written to disk", app.job_read("testjob")["done"], 1)
+_j["done"] = 2
+_j["texts"].append("second part")
+app.job_write(_j)
+check("and updated after every part", app.job_read("testjob")["done"], 2)
+check("the text so far is what has landed", app.job_text(app.job_read("testjob")),
+      "first part\n\nsecond part")
+check("an unfinished job is listed as running",
+      [x["state"] for x in app.job_list()], ["running"])
 
 # ---------------------------------------------------------- the stages
 # "I want to see this app being alive nonstop and informing me what it does."
@@ -427,8 +475,8 @@ _ep = _iu.module_from_spec(_spec)
 _spec.loader.exec_module(_ep)
 _html = open(os.path.join(ROOT, "src", "30_transcribe.html")).read()
 check("the vendored page is the whole app", len(_html) > 100000, True)
-check("thirteen patches, each one either swapping the engine or taking a "
-      "second engine out", len(_ep.PATCHES), 13)
+check("fourteen patches, each one swapping an engine, taking a second engine "
+      "out, or sending a long file the long way", len(_ep.PATCHES), 14)
 for _old, _ in _ep.PATCHES:
     check("the engine anchor is still there: %s" % _old.strip().splitlines()[0][:44],
           _old in _html, True)

@@ -1,16 +1,16 @@
 # DELIVERY RECORD
 
-**v18, 5.9.2026.** What was measured, and what was not tested.
+**v19, 5.9.2026.** What was measured, and what was not tested.
 
 ## The gate
 
-    build is fresh          18-google-tts-stt-v18.sh matches src/
+    build is fresh          19-google-tts-stt-v19.sh matches src/
     installer is whole      --verify passes
-    TEST 1   mechanism      146 checks   0 failed
+    TEST 1   mechanism      163 checks   0 failed
     TEST 1b  the parser      73 checks   0 failed
     TEST 3   ugly cases      59 checks   0 failed
     TEST 4   upgrade         58 checks   0 failed
-                            336 checks   0 failed
+                            353 checks   0 failed
 
 TEST 2 was run against a fabricated ring at v8: everything structural passed —
 the guard refuses an api call with no header, refuses another page's Origin,
@@ -133,6 +133,23 @@ Twice now a rewrite has silently matched nothing because the JavaScript escape
 `\u00b7` is six characters in the python literal and one character in a python
 string. Both times the driven page showed it immediately and reading the code
 did not.
+
+## The chunker, measured
+
+`plan_cuts` on five hours with a pause every thirty seconds: thirty parts, every
+cut landing in a real pause, the parts joining with no gap and covering 0 to
+18000 seconds, each between eight and thirteen minutes. With no pauses at all it
+still cuts, at the clock. A pause two minutes from the mark is taken; one five
+minutes away is not.
+
+`silence_points` on a real 79 second file built from speech with three second
+silences spliced in: twenty six pauses found, and the planner's cuts all landed
+in them.
+
+**NOT tested: a real five hour file, end to end.** The parts are cut by the same
+ffmpeg call the optimizer uses and the job store is exercised directly, but no
+recording longer than 79 seconds has been through the whole path, and no job has
+survived an actual process death.
 
 ## NOT TESTED
 

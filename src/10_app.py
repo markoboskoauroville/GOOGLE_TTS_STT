@@ -41,7 +41,7 @@ try:
 except Exception:
     PACIFIC = timezone(timedelta(hours=-8))
 
-VERSION = 18
+VERSION = 19
 PORT = int(os.environ.get("GTTS_PORT", "7311"))
 KEYFILE = os.environ.get("GEMINI_KEYS", os.path.expanduser("~/.gemini_keys"))
 HOME = os.path.expanduser("~/.google_tts_stt")
@@ -1152,6 +1152,241 @@ def restore_keys():
     return {"ok": True, "restored": r["added"], "ring": r["ring"]}
 
 
+# =========================================================================
+# THE CHUNKING SENDING ALGORITHM
+#
+# Baba, 5.9.2026: "if I'm uploading you 5 hours of audio, you will not send
+# 5 hours at once. Break it in chunks of 10 minutes, but break it at a point
+# where the silence is, not in the middle of the waveform. Then send, transcribe,
+# put it in the box, save it in archive so it's not lost even if my battery runs
+# out. Between the sessions keep the same state."
+#
+# Four rules, and each one is there for a reason that has already cost
+# somebody something:
+#
+#   1  CUT AT SILENCE, NOT AT THE CLOCK. A cut through a word gives two
+#      halves that are each unintelligible, and the model does not tell you
+#      that: it invents a plausible word at both edges. Ten minutes is where
+#      to LOOK for a cut, not where to make one.
+#
+#   2  THE FILE GOES TO DISK FIRST. You cannot find silence in something you
+#      are streaming past. This is exactly why it cannot be done for live
+#      recording, and why live recording keeps its own segmenting.
+#
+#   3  SAVE AFTER EVERY PART. A five-hour file is an hour of transcribing on
+#      a phone. Batteries die. Anything held only in a browser tab is gone,
+#      so each part's text is written to disk the moment it comes back.
+#
+#   4  RESUME IS THE DEFAULT, NOT A FEATURE. On start the server looks for
+#      unfinished jobs and picks them up. A job that needs a person to
+#      remember to resume it is a job that gets abandoned.
+CHUNK_TARGET = 600.0        # ten minutes, the place to start looking
+CHUNK_SEARCH = 150.0        # how far either side a silence may be, two and a half minutes
+CHUNK_MIN = 120.0           # never make a part shorter than this
+SILENCE_DB = "-32dB"        # quieter than this counts as silence
+SILENCE_MIN = 0.55          # and it has to last this long to be a pause
+
+
+def silence_points(path):
+    """Where the pauses are, in seconds. ffmpeg's silencedetect writes them to
+    stderr as a side effect of decoding, so this reads the log rather than the
+    output. Returns the MIDDLE of each pause, which is the safest place to cut:
+    the edges still carry the tail of a word and the breath before the next."""
+    ff = ffmpeg_bin()
+    if not ff:
+        return []
+    try:
+        p = subprocess.run(
+            [ff, "-hide_banner", "-nostats", "-i", path,
+             "-af", "silencedetect=noise=%s:d=%s" % (SILENCE_DB, SILENCE_MIN),
+             "-f", "null", "-"],
+            capture_output=True, text=True, timeout=PREP_TIMEOUT)
+    except Exception:
+        return []
+    starts, mids = [], []
+    for line in (p.stderr or "").splitlines():
+        if "silence_start:" in line:
+            try:
+                starts.append(float(line.split("silence_start:")[1].strip().split()[0]))
+            except Exception:
+                pass
+        elif "silence_end:" in line:
+            try:
+                end = float(line.split("silence_end:")[1].strip().split()[0])
+            except Exception:
+                continue
+            if starts:
+                mids.append(round((starts.pop() + end) / 2.0, 2))
+    return sorted(mids)
+
+
+def plan_cuts(duration, points, target=CHUNK_TARGET, search=CHUNK_SEARCH, minimum=CHUNK_MIN):
+    """Where to cut. A pure function, so it can be tested without ffmpeg.
+
+    Walks forward from the last cut: the next one wants to land `target`
+    seconds along, and takes the pause nearest to that within `search`. If
+    there is no pause in that window — a lecture with no breath in it, music
+    under speech — it cuts at the clock and says so by simply doing it, because
+    a part that is fifteen minutes long is worse than one clean cut in a
+    sentence."""
+    if duration <= 0:
+        return []
+    if duration <= target + search:
+        return []                       # one part, no cuts at all
+    cuts, at = [], 0.0
+    while duration - at > target + search:
+        want = at + target
+        window = [p for p in points
+                  if abs(p - want) <= search and p - at >= minimum and duration - p >= minimum]
+        cut = min(window, key=lambda p: abs(p - want)) if window else want
+        if cut <= at + minimum:
+            cut = at + target
+        cuts.append(round(cut, 2))
+        at = cut
+    return cuts
+
+
+def cut_points_to_parts(duration, cuts):
+    """[(start, end)] covering the whole thing, in order, nothing dropped."""
+    edges = [0.0] + list(cuts) + [duration]
+    return [(edges[i], edges[i + 1]) for i in range(len(edges) - 1)]
+
+
+# ------------------------------------------------------------------- jobs
+JOBS = os.path.join(HOME, "jobs")
+_job_lock = threading.Lock()
+
+
+def job_dir(jid):
+    return os.path.join(JOBS, jid)
+
+
+def job_read(jid):
+    p = os.path.join(job_dir(jid), "job.json")
+    if not os.path.exists(p):
+        return None
+    try:
+        return json.load(open(p))
+    except Exception:
+        return None
+
+
+def job_write(job):
+    """Written after every single part. This is rule 3, and it is the whole
+    reason a five hour file survives a flat battery."""
+    d = job_dir(job["id"])
+    os.makedirs(d, exist_ok=True)
+    tmp = os.path.join(d, "job.json.new")
+    with open(tmp, "w") as f:
+        json.dump(job, f, indent=1)
+    os.replace(tmp, os.path.join(d, "job.json"))
+
+
+def job_list():
+    out = []
+    if not os.path.isdir(JOBS):
+        return out
+    for jid in sorted(os.listdir(JOBS)):
+        j = job_read(jid)
+        if j:
+            out.append({k: j[k] for k in ("id", "name", "state", "done", "total",
+                                          "started", "duration") if k in j})
+    return out
+
+
+def job_text(job):
+    return "\n\n".join(t for t in job.get("texts", []) if t)
+
+
+def start_chunk_job(raw, name):
+    """Take a file, put it on disk, find the pauses, cut it, and start."""
+    jid = time.strftime("%Y%m%d_%H%M%S")
+    d = job_dir(jid)
+    os.makedirs(d, exist_ok=True)
+    src = os.path.join(d, "source" + (os.path.splitext(name)[1][:8] or ".input"))
+    with open(src, "wb") as f:
+        f.write(raw)
+
+    duration = probe_duration(src) or 0.0
+    points = silence_points(src)
+    cuts = plan_cuts(duration, points)
+    spans = cut_points_to_parts(duration, cuts)
+
+    job = {"id": jid, "name": name or "audio", "state": "cutting",
+           "duration": round(duration, 1), "silences": len(points),
+           "total": len(spans), "done": 0, "texts": [], "parts": [],
+           "started": time.time(), "note": ""}
+    job_write(job)
+
+    ff = ffmpeg_bin()
+    parts = []
+    for i, (a, b) in enumerate(spans):
+        out = os.path.join(d, "part_%03d.ogg" % (i + 1))
+        subprocess.run([ff, "-y", "-i", src, "-ss", "%.2f" % a, "-to", "%.2f" % b,
+                        "-vn", "-ac", "1", "-ar", str(PREP_RATE), "-c:a", "libopus",
+                        "-b:a", PREP_BITRATE, "-application", "audio", "-f", "ogg", out],
+                       capture_output=True, timeout=PREP_TIMEOUT)
+        parts.append({"file": os.path.basename(out), "start": round(a, 2),
+                      "end": round(b, 2), "seconds": round(b - a, 1),
+                      "at_silence": bool(i < len(cuts) and cuts[i] in points)})
+    job["parts"] = parts
+    job["state"] = "running"
+    job_write(job)
+    try:
+        os.remove(src)          # the parts are the work now; the original is bytes
+    except Exception:
+        pass
+    run_chunk_job(jid)
+    return job
+
+
+def run_chunk_job(jid):
+    """One part at a time, in order, saving after each. Never two at once: the
+    parts belong to one recording and the daily budget is small enough that
+    racing them only means racing to the wall."""
+    def worker():
+        while True:
+            with _job_lock:
+                job = job_read(jid)
+                if not job or job["state"] not in ("running",):
+                    return
+                i = job["done"]
+                if i >= job["total"]:
+                    job["state"] = "finished"
+                    job_write(job)
+                    return
+            part = job["parts"][i]
+            path = os.path.join(job_dir(jid), part["file"])
+            r = listen(path, job.get("lang", "")) if os.path.exists(path) else \
+                {"ok": False, "error": "part %d is missing" % (i + 1)}
+            with _job_lock:
+                job = job_read(jid) or job
+                if r.get("ok"):
+                    job["texts"] = job.get("texts", []) + [r.get("text", "")]
+                    job["done"] = i + 1
+                    job["note"] = "part %d of %d, %s on [%s]" % (
+                        i + 1, job["total"], r.get("model", ""), r.get("key", ""))
+                else:
+                    job["state"] = "stalled"
+                    job["note"] = r.get("error", "that part did not go through")
+                job_write(job)
+            if job["state"] != "running":
+                return
+    threading.Thread(target=worker, daemon=True).start()
+
+
+def resume_jobs():
+    """Rule 4. On start, anything left running is picked up where it stopped.
+    A job that needs somebody to remember to resume it is a job that gets
+    abandoned, and this one is five hours long."""
+    n = 0
+    for j in job_list():
+        if j.get("state") == "running":
+            run_chunk_job(j["id"])
+            n += 1
+    return n
+
+
 def health():
     """What is installed and what is not. The Keys tab shows this so a missing
     ffmpeg is discovered here rather than by a transcription that fails."""
@@ -1751,6 +1986,43 @@ def serve():
             "X-Original-Bytes": str(meta["original_bytes"]),
             "X-Optimized-Bytes": str(meta["optimized_bytes"])})
 
+    @app.post("/api/chunk/start")
+    def api_chunk_start():
+        f = request.files.get("file")
+        if f is None:
+            return jsonify({"ok": False, "error": "no file arrived"})
+        raw = f.read()
+        if not raw:
+            return jsonify({"ok": False, "error": "that file is empty"})
+        job = start_chunk_job(raw, f.filename or "audio")
+        job["ok"] = True
+        return jsonify(job)
+
+    @app.get("/api/chunk/<jid>")
+    def api_chunk_state(jid):
+        job = job_read(jid)
+        if not job:
+            return jsonify({"ok": False, "error": "no job called %r" % jid})
+        out = dict(job)
+        out["ok"] = True
+        out["text"] = job_text(job)
+        return jsonify(out)
+
+    @app.get("/api/chunk")
+    def api_chunk_list():
+        return jsonify({"ok": True, "jobs": job_list()})
+
+    @app.post("/api/chunk/<jid>/resume")
+    def api_chunk_resume(jid):
+        job = job_read(jid)
+        if not job:
+            return jsonify({"ok": False, "error": "no job called %r" % jid})
+        if job["state"] in ("stalled", "running"):
+            job["state"] = "running"
+            job_write(job)
+            run_chunk_job(jid)
+        return jsonify({"ok": True, "state": job["state"]})
+
     @app.get("/api/health")
     def api_health():
         return jsonify(health())
@@ -1798,6 +2070,7 @@ def serve():
 
     os.makedirs(OUTDIR, exist_ok=True)
     quiet_flask()
+    resumed = resume_jobs()
 
     # The port ACTUALLY bound, which is not always the one asked for. Set once
     # and read from here everywhere downstream, so no part of the app can be
@@ -1820,6 +2093,9 @@ def serve():
           w("%d account%s" % (len(ring), "" if len(ring) == 1 else "s"), SLATE))
     if note:
         print("  " + w(note, SAND))
+    if resumed:
+        print("  " + w("picking up %d unfinished transcription%s"
+                       % (resumed, "" if resumed == 1 else "s"), SAND))
     if not ring:
         # An empty ring is not a reason to refuse to start. The picker that
         # fixes it is ON THE PAGE, so refusing to open the page is refusing to

@@ -199,6 +199,37 @@ Nothing here was written fresh where a file already solved it.
 | `Key_Tester` HANDOFF | the status glyphs and the five words |
 | `MAHA_TRANSCRIBE_STREAMLIT/ttt/keyring.py` | the ring rules: never drop a key for its shape, a key file is a working note |
 
+## Long recordings: the chunking sending algorithm
+
+Full rules in the manifest, `modules/chunking-and-sending.md`. Anything over
+about twelve minutes goes this way.
+
+1. **The file goes to disk first.** You cannot find silence in something you are
+   streaming past — which is exactly why this cannot be done for live recording,
+   and why the recorder keeps its own segmenting.
+2. **The pauses are found**, with `silencedetect` at −32 dB for 0.55 s.
+3. **Cut at the middle of a pause near the ten minute mark**, within two and a
+   half minutes either side. Ten minutes is where to LOOK, not where to cut: a
+   cut through a word gives two halves the model completes with plausible
+   inventions rather than reporting.
+4. **One part at a time**, in order, and **the text is written to disk the
+   moment it lands**. A five hour file is an hour of work on a phone and
+   batteries die.
+5. **Resume happens on start**, without being asked.
+
+The person sees `part 3 of 12 · gemini-3.1-flash-lite on [kukljica]`, and the
+box fills a paragraph at a time.
+
+    ~/.google_tts_stt/jobs/<id>/job.json     state, total, done, texts
+    ~/.google_tts_stt/jobs/<id>/part_001.ogg
+
+`state` is `cutting`, `running`, `finished` or `stalled`. Stalled keeps
+everything and resuming continues from `done`, never from the beginning.
+
+`plan_cuts` is a pure function — duration and pause times in, cut times out — so
+the decision that matters is tested without ffmpeg, without a key and without a
+five hour file.
+
 ## Audio, end to end
 
 **Record at the best the phone will give.** The microphone is asked for mono

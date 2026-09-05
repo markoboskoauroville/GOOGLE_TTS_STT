@@ -240,3 +240,80 @@ for _old, _new in PATCHES:
     else:
         _staged.append((_old, _new))
 PATCHES = _staged
+
+
+# --------------------------------------------- long files go through the chunker
+# A five hour recording is not one request. The page hands it to the server,
+# which puts it on disk, finds the pauses, cuts at them, and transcribes part by
+# part — saving each one as it lands, so a flat battery costs the current part
+# and nothing else.
+#
+# Live recording does NOT go this way and cannot: you cannot find silence in
+# something you are still streaming past. The recorder keeps its own segmenting.
+CHUNK_OLD = """  transcribeBtn.addEventListener('click', () => {
+    const file = optimizedBlob || pickedFile;
+    if (!file) return;
+    transcribeBtn.disabled = true;"""
+
+CHUNK_NEW = """  // roughly twelve minutes of 24 kHz mono Opus. Past this the file is cut at
+  // its own pauses and sent a part at a time.
+  const CHUNK_BYTES = 12 * 60 * 6000;
+
+  async function runChunked(file) {
+    setStatus('putting the file on disk and looking for the pauses\\u2026');
+    gttAct('finding the pauses in ' + Math.round(file.size / 1048576) + ' MB');
+    const fd = new FormData();
+    fd.append('file', file, file.name || 'audio');
+    let job;
+    try {
+      const r = await fetch('/api/chunk/start', { method: 'POST',
+        headers: { 'X-Gtt-Local': '1' }, body: fd });
+      job = await r.json();
+    } catch (e) {
+      setStatus('could not start: ' + e.message, 'err');
+      gttAct('could not start', true);
+      return;
+    }
+    if (!job.ok) { setStatus(job.error || 'could not start', 'err'); return; }
+    setStatus('cut into ' + job.total + ' parts at ' + job.silences + ' pauses');
+    let last = -1;
+    const poll = setInterval(async () => {
+      let s;
+      try {
+        s = await (await fetch('/api/chunk/' + job.id,
+          { headers: { 'X-Gtt-Local': '1' } })).json();
+      } catch (e) { return; }
+      if (s.done !== last) {
+        last = s.done;
+        transcriptEl.value = s.text || '';
+        const msg = 'part ' + Math.min(s.done + 1, s.total) + ' of ' + s.total +
+                    (s.note ? '  \\u00b7  ' + s.note : '');
+        setStatus(msg);
+        gttAct(msg);
+      }
+      if (s.state === 'finished') {
+        clearInterval(poll);
+        transcriptEl.value = s.text || '';
+        setStatus('done  \\u00b7  ' + s.total + ' parts, ' +
+                  Math.round((s.duration || 0) / 60) + ' minutes', 'ok');
+        gttAct('done, ' + s.total + ' parts', true);
+        bumpUsage('tx');
+        transcribeBtn.disabled = false;
+        updateTranscribeState();
+      } else if (s.state === 'stalled') {
+        clearInterval(poll);
+        setStatus('stopped at part ' + (s.done + 1) + ': ' + (s.note || ''), 'err');
+        gttAct('stopped at part ' + (s.done + 1), true);
+        transcribeBtn.disabled = false;
+        updateTranscribeState();
+      }
+    }, 1500);
+  }
+
+  transcribeBtn.addEventListener('click', () => {
+    const file = optimizedBlob || pickedFile;
+    if (!file) return;
+    transcribeBtn.disabled = true;
+    if (file.size > CHUNK_BYTES) { runChunked(file); return; }"""
+
+PATCHES += [(CHUNK_OLD, CHUNK_NEW)]

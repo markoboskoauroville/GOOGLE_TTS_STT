@@ -886,3 +886,43 @@ in order showed it in one run: the line still said "gemini · sending" where it
 should have said "sending 0 KB to Google". That harness is now the thing that
 verifies this kind of change, and it is why this version was correct on the
 second attempt rather than the fifth.
+
+---
+
+## 5.9.2026 — v19, the chunking sending algorithm
+
+Baba, and it is now `modules/chunking-and-sending.md` in the manifest so it does
+not have to be said a third time.
+
+The rule that carries the weight is **cut at silence, not at the clock**. A cut
+through a word gives two halves that are each unintelligible, and the model does
+not report that — it invents a plausible word at both edges. The damage arrives
+as a confident wrong sentence, which is worse than an error, because nothing
+about it looks wrong. Ten minutes is where to LOOK for a cut. `silencedetect`
+says where the pauses are; the cut goes in the MIDDLE of one, because the edges
+still carry the tail of a word and the breath before the next.
+
+**The file goes to disk first**, and that is the reason this cannot be done for
+live recording: live audio has no end yet, so it has no duration to divide and
+no way to know whether the pause you are in is the one you wanted. Live keeps
+its own segmenting and the two must not be merged. He said this himself and it
+is in the module.
+
+**Save after every part.** A five hour file is an hour of transcribing on a
+phone. Batteries die, and anything held only in a browser tab dies with them, so
+the job lives on disk and the browser is a viewer that polls it. Closing the tab
+costs nothing.
+
+**Resume on start, without being asked.** A job that needs somebody to remember
+to resume it is a job that gets abandoned, and this one is five hours long.
+
+`plan_cuts` is a pure function on purpose: duration and a list of pause times in,
+cut times out. That is the decision worth testing and it is now tested seventeen
+ways without ffmpeg, without a key and without a five hour file — including no
+pauses at all, a file shorter than one part, and a pause too far from the mark
+to use.
+
+What is not tested is a real five hour recording. The pieces are: the cut
+planner on synthetic pauses, `silence_points` on a 79 second file with real
+silences spliced into it, and the job store written and read directly. Nothing
+has run for an hour, and no job has yet survived an actual process death.
