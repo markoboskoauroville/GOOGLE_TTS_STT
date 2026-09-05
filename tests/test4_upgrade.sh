@@ -284,6 +284,20 @@ bash "$INSTALLER" --quiet >/dev/null 2>&1
   && ok "and a file already in it is never overwritten" \
   || bad "and a file already in it is never overwritten"
 
+# THE UPDATE PATH. Pressing u inside the running app used to start the updater
+# as a CHILD: it finished, printed "installed", and handed the terminal back to
+# a loop still in cbreak, still serving the old code, showing no prompt. It
+# looked exactly like the installer hanging. It must replace the process.
+grep -q 'os.execvp("gtt-update"' "$APPHOME/app.py" \
+  && ok "the updater replaces this copy rather than nesting under it" \
+  || bad "the updater replaces this copy rather than nesting under it"
+grep -q "termios.tcsetattr(fd, termios.TCSADRAIN, old)" "$APPHOME/app.py" \
+  && ok "and the terminal is handed back before it goes" \
+  || bad "and the terminal is handed back before it goes"
+grep -q "still running on 7311" "$INSTALLER" \
+  && ok "and an install over a running copy says so" \
+  || bad "and an install over a running copy says so"
+
 # the generated installer must match its sources
 if $PY "$ROOT/tools/build_installer.py" --check >/dev/null 2>&1; then
   ok "the shipped installer matches src/"

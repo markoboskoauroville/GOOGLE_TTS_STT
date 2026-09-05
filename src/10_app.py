@@ -41,7 +41,7 @@ try:
 except Exception:
     PACIFIC = timezone(timedelta(hours=-8))
 
-VERSION = 14
+VERSION = 15
 PORT = int(os.environ.get("GTTS_PORT", "7311"))
 KEYFILE = os.environ.get("GEMINI_KEYS", os.path.expanduser("~/.gemini_keys"))
 HOME = os.path.expanduser("~/.google_tts_stt")
@@ -1738,8 +1738,30 @@ def serve():
                 print("  " + ("opening the browser" if open_page(url)
                               else w("no way to open a browser from here", RED)))
             if ch == "u":
-                print("  running gtt-update")
-                subprocess.call(["gtt-update"])
+                # REPLACE THIS PROCESS. Running the updater as a child looked
+                # like the installer hanging: it finished, printed "installed",
+                # and handed the terminal back to a loop that was still in
+                # cbreak, still serving the OLD code on the port, and showing
+                # no prompt. Nothing was wrong except that nothing said so.
+                #
+                # exec ends this copy first. The port is freed, the terminal
+                # goes back to the shell when the installer is done, and there
+                # is no old version left running to be confused by.
+                print("")
+                print("  " + w("stopping this copy, then updating.", SAND))
+                print("  " + w("run  gtt  again when it finishes.", SAND))
+                print("")
+                termios.tcsetattr(fd, termios.TCSADRAIN, old)
+                try:
+                    subprocess.Popen(["termux-wake-unlock"], stdout=subprocess.DEVNULL,
+                                     stderr=subprocess.DEVNULL)
+                except Exception:
+                    pass
+                try:
+                    os.execvp("gtt-update", ["gtt-update"])
+                except Exception as ex:
+                    print("  could not run gtt-update: %s" % ex)
+                    tty.setcbreak(fd)
             if ch == "k":
                 for l, k in load_ring():
                     print("  %-24s %s" % (l, mask(k)))

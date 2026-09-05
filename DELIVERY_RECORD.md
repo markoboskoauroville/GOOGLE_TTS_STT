@@ -1,16 +1,16 @@
 # DELIVERY RECORD
 
-**v14, 5.9.2026.** What was measured, and what was not tested.
+**v15, 5.9.2026.** What was measured, and what was not tested.
 
 ## The gate
 
-    build is fresh          14-google-tts-stt-v14.sh matches src/
+    build is fresh          15-google-tts-stt-v15.sh matches src/
     installer is whole      --verify passes
     TEST 1   mechanism      114 checks   0 failed
     TEST 1b  the parser      73 checks   0 failed
     TEST 3   ugly cases      59 checks   0 failed
-    TEST 4   upgrade         55 checks   0 failed
-                            301 checks   0 failed
+    TEST 4   upgrade         58 checks   0 failed
+                            304 checks   0 failed
 
 TEST 2 was run against a fabricated ring at v8: everything structural passed —
 the guard refuses an api call with no header, refuses another page's Origin,
@@ -134,6 +134,8 @@ Named rather than left to silence.
   v1. Test 4 installs v1 over itself and hand-writes a ledger in an older shape
   so there is genuinely something from before to misread. From v2 the test uses
   the actual previous release and the stand-in comes out.
+- **`u` in the console, end to end.** The exec path is checked by reading the
+  installed app; it has not been pressed on a phone.
 - **`gtt-update` end to end.** It needs a version newer than the installed one
   to actually replace anything. `get.sh` HAS now been run end to end against
   the live repository, which is how the API rate limit was found. Their parts were checked: the listing call, the version compare, and

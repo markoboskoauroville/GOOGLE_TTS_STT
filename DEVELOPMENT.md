@@ -702,3 +702,37 @@ Braille, one cell, 80 ms. On every call, including the ones that return in eight
 milliseconds. An app that spins for the slow things and freezes for the quick
 ones teaches the hand that a still screen means broken — and then the fast path,
 which is the cache doing its job, looks like the fault.
+
+---
+
+## 5.9.2026 — v15, the installer was finished and looked stuck
+
+Baba: *I don't understand what's going on with this installer. It doesn't finish
+installing, it just stuck here.*
+
+It had finished. The screenshot shows `installed v14` and the whole command list
+printed underneath it. Nothing was hanging. What was missing was any sign that
+it was over.
+
+He pressed `u` inside the running v13 console, which ran `gtt-update` as a
+**child process**. So when the installer finished, control came back to a loop
+that was:
+
+- still in cbreak, so there is no prompt and nothing echoes when you type
+- still serving the OLD code on 7311, because the process never ended
+- still holding the port the new version would want
+
+A finished installer, a dead-looking terminal, and the old app still on screen.
+Everything about it says stuck.
+
+`u` now hands the terminal back, releases the wake lock, and **execs** the
+updater. Exec replaces this process: the server dies first, the port is free,
+the installer owns the terminal, and when it is done you are at a shell prompt
+with nothing stale behind you. It says so in two lines before it goes, and it
+does not restart the app afterwards, because starting a server is not an
+installer's decision to make.
+
+The installer also checks the port on its way out. If something is still serving
+on 7311 it says that the copy on screen is still the old one and how to stop it.
+A silent finish underneath a running old version is indistinguishable from a
+hang, and that is the whole of what happened here.

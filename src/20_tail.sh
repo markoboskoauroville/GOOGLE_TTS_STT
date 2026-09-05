@@ -225,6 +225,14 @@ if [ "$RUNTESTS" = "1" ]; then
   fi
 fi
 
+# If a copy is still serving, the person is looking at the OLD version and the
+# port is still held. Say it plainly: an installer that finishes silently while
+# the old app is still on screen is an installer that looks like it failed.
+if command -v curl >/dev/null 2>&1 && curl -fsS --max-time 2 "http://127.0.0.1:7311/" >/dev/null 2>&1; then
+  say "${WARN}A copy is still running on 7311.${OFF} It is still the old version"
+  say "until you stop it. Press ${SAND}q${OFF} in it, then run ${SAND}gtt${OFF}."
+  blank
+fi
 say "${OK}installed${OFF} $GTT_VERSION"
 if [ "$KEYCOUNT" -lt 1 ]; then
   blank

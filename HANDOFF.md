@@ -189,6 +189,21 @@ correctly 127.0.0.1 even for a cross-site fetch.
 The page itself loads on 1 and 2 alone, because typing the address in yourself
 sends no Origin and no custom header. Everything under `/api/` needs all three.
 
+## Updating
+
+`u` in the console, or `gtt-update` from the shell. Either way the running copy
+**ends first**: `u` hands the terminal back and `exec`s the updater, so this
+process is replaced rather than becoming its parent. The port is freed, the
+installer has the terminal to itself, and when it finishes you are at a shell
+prompt with nothing old left running.
+
+Run `gtt` again afterwards. The update does not restart it for you, because
+starting a server is not something an installer should decide.
+
+If an install runs while a copy is still serving on 7311 it says so, because a
+finished installer sitting underneath a still-running old version looks exactly
+like an installer that hung.
+
 ## The port
 
 Preferred, then the next fifteen, then whatever the system hands out. There is

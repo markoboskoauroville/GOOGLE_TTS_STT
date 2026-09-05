@@ -5,9 +5,9 @@
 #   src/00_head.sh   9b27f46ee8bc
 #   src/30_transcribe.html   67e73826805d   vendored, engine swapped at build
 #   src/seed/                 47 cached previews
-#   src/10_app.py    05d6feef4f77
+#   src/10_app.py    c4b9d3ef5b21
 #   src/15_page.html 50980abed4e6
-#   src/20_tail.sh   d0718c3a7841
+#   src/20_tail.sh   36640551ba37
 #
 # GOOGLE TTS AND STT, one roof over the two halves of the same job.
 #
@@ -21,10 +21,10 @@
 # ledgers, and two ledgers that each think they own the daily budget are both
 # wrong by dinner time.
 #
-#   bash 14-google-tts-stt-v14.sh                 install
-#   bash 14-google-tts-stt-v14.sh --keys FILE     install, and take the keys out of FILE
-#   bash 14-google-tts-stt-v14.sh --test          install, then run the four tests
-#   bash 14-google-tts-stt-v14.sh --verify        check this file is whole, change nothing
+#   bash 15-google-tts-stt-v15.sh                 install
+#   bash 15-google-tts-stt-v15.sh --keys FILE     install, and take the keys out of FILE
+#   bash 15-google-tts-stt-v15.sh --test          install, then run the four tests
+#   bash 15-google-tts-stt-v15.sh --verify        check this file is whole, change nothing
 #
 # INSTALLING SPENDS NOTHING. The four tests make real calls against a real
 # ring, and a TTS account has ten requests a day, so they run when you ask for
@@ -47,8 +47,8 @@
 
 set -u
 
-GTT_VERSION="v14"
-GTT_FILE="14-google-tts-stt-v14.sh"
+GTT_VERSION="v15"
+GTT_FILE="15-google-tts-stt-v15.sh"
 GTT_REPO="markoboskoauroville/GOOGLE_TTS_STT"
 
 # --- the platform layer, and nothing below this block knows the platform ---
@@ -248,7 +248,7 @@ try:
 except Exception:
     PACIFIC = timezone(timedelta(hours=-8))
 
-VERSION = 14
+VERSION = 15
 PORT = int(os.environ.get("GTTS_PORT", "7311"))
 KEYFILE = os.environ.get("GEMINI_KEYS", os.path.expanduser("~/.gemini_keys"))
 HOME = os.path.expanduser("~/.google_tts_stt")
@@ -1945,8 +1945,30 @@ def serve():
                 print("  " + ("opening the browser" if open_page(url)
                               else w("no way to open a browser from here", RED)))
             if ch == "u":
-                print("  running gtt-update")
-                subprocess.call(["gtt-update"])
+                # REPLACE THIS PROCESS. Running the updater as a child looked
+                # like the installer hanging: it finished, printed "installed",
+                # and handed the terminal back to a loop that was still in
+                # cbreak, still serving the OLD code on the port, and showing
+                # no prompt. Nothing was wrong except that nothing said so.
+                #
+                # exec ends this copy first. The port is freed, the terminal
+                # goes back to the shell when the installer is done, and there
+                # is no old version left running to be confused by.
+                print("")
+                print("  " + w("stopping this copy, then updating.", SAND))
+                print("  " + w("run  gtt  again when it finishes.", SAND))
+                print("")
+                termios.tcsetattr(fd, termios.TCSADRAIN, old)
+                try:
+                    subprocess.Popen(["termux-wake-unlock"], stdout=subprocess.DEVNULL,
+                                     stderr=subprocess.DEVNULL)
+                except Exception:
+                    pass
+                try:
+                    os.execvp("gtt-update", ["gtt-update"])
+                except Exception as ex:
+                    print("  could not run gtt-update: %s" % ex)
+                    tty.setcbreak(fd)
             if ch == "k":
                 for l, k in load_ring():
                     print("  %-24s %s" % (l, mask(k)))
@@ -4501,6 +4523,14 @@ if [ "$RUNTESTS" = "1" ]; then
   fi
 fi
 
+# If a copy is still serving, the person is looking at the OLD version and the
+# port is still held. Say it plainly: an installer that finishes silently while
+# the old app is still on screen is an installer that looks like it failed.
+if command -v curl >/dev/null 2>&1 && curl -fsS --max-time 2 "http://127.0.0.1:7311/" >/dev/null 2>&1; then
+  say "${WARN}A copy is still running on 7311.${OFF} It is still the old version"
+  say "until you stop it. Press ${SAND}q${OFF} in it, then run ${SAND}gtt${OFF}."
+  blank
+fi
 say "${OK}installed${OFF} $GTT_VERSION"
 if [ "$KEYCOUNT" -lt 1 ]; then
   blank
