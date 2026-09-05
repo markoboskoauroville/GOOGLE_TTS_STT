@@ -496,3 +496,59 @@ Test 4 now installs into a home with a key in the ring and asserts three things:
 no test run, no announcement of one, and **no ledger file**, which is the
 evidence that nothing was spent. Then it runs `--test` and asserts that one does
 still work.
+
+---
+
+## 5.9.2026 — v11, one engine and nothing to choose
+
+Baba, off the settings screen: *we said change the engine, but there are so many
+other engines. We need from this app only recording and transcribe. Translate
+goes out. Gemini models, you need to choose them automatically. We don't choose.*
+
+v9 vendored the page and changed one function, and that was the wrong reading of
+"change the engine". A settings screen still offering Claude, a Claude model, a
+Claude budget, a Gemini correction model and an AssemblyAI transcription model
+is five engines with one of them swapped.
+
+Nine patches now, and every one takes something out:
+
+    the translate pill
+    the Claude / Gemini switch
+    the Claude model list
+    the Claude session budget
+    the Gemini correction model list
+    the AssemblyAI transcription model list
+    every per-provider key panel
+    plus the two dispatch swaps from v9
+
+**The model is chosen, not offered.** Correction and reshape now POST to
+`/api/rewrite` and the server walks the same chain Speak and Listen already
+walk. `modules/model-names.md` is the reason: a dated model name fails with
+not_found before the request runs, so it never appears in usage and looks
+exactly like a dead key. A picker makes that worse, because the stale name then
+lives in somebody's localStorage where nobody can see it.
+
+### Two functions would have taken the page down
+
+`renderAaiModels` and `renderCorrModels` wrote straight into the elements the
+strip removed, and a `null.innerHTML` throws during setup — not in a corner of
+the settings panel, but before anything else runs. They are guarded rather than
+deleted, because each is called from several places. Test 4 checks that no
+removed element id has an unguarded use left.
+
+### The tab IS the app
+
+Baba: *what you did, that I need to go on the second tab and open new complete
+app, doesn't make sense because I have also open file in this app.* Correct. A
+link is a second step and a second page, and a file opened in one page is not
+there when you leave it. The LISTEN tab loads the app the first time it is
+opened and then leaves it alone, because reloading would throw away a recording
+in progress.
+
+### One settings, one ring
+
+The transcribe page had a ring per provider in localStorage. It has none now:
+its settings panel says where the keys live and the KEYS tab is the only place
+they are imported, tested or deleted. Both halves spend from the same ledger and
+the same daily budget, which was the whole reason for putting the two apps under
+one roof in the first place.

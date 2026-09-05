@@ -245,8 +245,26 @@ if [ -f "$T" ]; then
   grep -q "return aaiTranscribe(blob, filename, statusFn);" "$T" \
     && bad "the upstream dispatch must be gone" || ok "the upstream dispatch is gone"
   grep -q "aaiAttemptJob" "$T" \
-    && ok "but the rest of the app is untouched, not rewritten" \
-    || bad "but the rest of the app is untouched, not rewritten"
+    && ok "but the recording and the queue are untouched" \
+    || bad "but the recording and the queue are untouched"
+  # ONE ENGINE. Every other engine and every model picker comes out.
+  grep -q 'data-tab="translate"' "$T" && bad "translate is gone" || ok "translate is gone"
+  grep -q "claude api model" "$T" && bad "the Claude model picker is gone" \
+    || ok "the Claude model picker is gone"
+  grep -q "claude session budget" "$T" && bad "the Claude budget is gone" \
+    || ok "the Claude budget is gone"
+  grep -q "gemini correction model" "$T" && bad "the Gemini model picker is gone" \
+    || ok "the Gemini model picker is gone"
+  grep -q "assemblyai transcription model" "$T" && bad "the AssemblyAI picker is gone" \
+    || ok "the AssemblyAI picker is gone"
+  grep -q "keys live only in this browser" "$T" && bad "the per-provider key panels are gone" \
+    || ok "the per-provider key panels are gone"
+  grep -q "api/rewrite" "$T" \
+    && ok "correction goes to the server, which picks the model" \
+    || bad "correction goes to the server, which picks the model"
+  grep -q "if (!aaiModelList) return;" "$T" \
+    && ok "the renderers guard against the elements that were removed" \
+    || bad "the renderers guard against the elements that were removed"
 fi
 
 # the generated installer must match its sources

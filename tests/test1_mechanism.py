@@ -239,6 +239,8 @@ _ep = _iu.module_from_spec(_spec)
 _spec.loader.exec_module(_ep)
 _html = open(os.path.join(ROOT, "src", "30_transcribe.html")).read()
 check("the vendored page is the whole app", len(_html) > 100000, True)
+check("nine patches, and every one of them takes something out or swaps an engine",
+      len(_ep.PATCHES), 9)
 for _old, _ in _ep.PATCHES:
     check("the engine anchor is still there: %s" % _old.strip().splitlines()[0][:44],
           _old in _html, True)

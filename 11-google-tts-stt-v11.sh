@@ -4,7 +4,7 @@
 #
 #   src/00_head.sh   9b27f46ee8bc
 #   src/30_transcribe.html   67e73826805d   vendored, engine swapped at build
-#   src/10_app.py    dbf29e62818f
+#   src/10_app.py    673f6cb1b9b5
 #   src/20_tail.sh   e4e2f2848cc8
 #
 # GOOGLE TTS AND STT, one roof over the two halves of the same job.
@@ -19,10 +19,10 @@
 # ledgers, and two ledgers that each think they own the daily budget are both
 # wrong by dinner time.
 #
-#   bash 10-google-tts-stt-v10.sh                 install
-#   bash 10-google-tts-stt-v10.sh --keys FILE     install, and take the keys out of FILE
-#   bash 10-google-tts-stt-v10.sh --test          install, then run the four tests
-#   bash 10-google-tts-stt-v10.sh --verify        check this file is whole, change nothing
+#   bash 11-google-tts-stt-v11.sh                 install
+#   bash 11-google-tts-stt-v11.sh --keys FILE     install, and take the keys out of FILE
+#   bash 11-google-tts-stt-v11.sh --test          install, then run the four tests
+#   bash 11-google-tts-stt-v11.sh --verify        check this file is whole, change nothing
 #
 # INSTALLING SPENDS NOTHING. The four tests make real calls against a real
 # ring, and a TTS account has ten requests a day, so they run when you ask for
@@ -45,8 +45,8 @@
 
 set -u
 
-GTT_VERSION="v10"
-GTT_FILE="10-google-tts-stt-v10.sh"
+GTT_VERSION="v11"
+GTT_FILE="11-google-tts-stt-v11.sh"
 GTT_REPO="markoboskoauroville/GOOGLE_TTS_STT"
 
 # --- the platform layer, and nothing below this block knows the platform ---
@@ -246,7 +246,7 @@ try:
 except Exception:
     PACIFIC = timezone(timedelta(hours=-8))
 
-VERSION = 10
+VERSION = 11
 PORT = int(os.environ.get("GTTS_PORT", "7311"))
 KEYFILE = os.environ.get("GEMINI_KEYS", os.path.expanduser("~/.gemini_keys"))
 HOME = os.path.expanduser("~/.google_tts_stt")
@@ -1099,6 +1099,43 @@ def models_for(label):
     return {"ok": False, "error": "no account called %r" % label}
 
 
+REWRITE_PROMPTS = {
+    "grammar": ("Correct only the grammar, spelling and punctuation of the text below. "
+                "Do not rephrase, do not rearrange or merge sentences, do not change the "
+                "wording, structure or shape of the text in any way. Make only the smallest "
+                "necessary fixes. Keep the original language. Reply with the corrected text "
+                "only, nothing else.\n\nText:\n"),
+    "reshape": ("Rewrite the text below so it flows well. Remove every repetition and merge "
+                "everything into one clear text that explains the whole message. You may "
+                "rearrange sentences freely. Write exactly as a human would. Do not use "
+                "dashes, bullet points, headings or any special formatting, only plain "
+                "sentences with normal punctuation. Keep the length balanced and the tone "
+                "friendly but clear. Keep the original language. Reply with the rewritten "
+                "text only, nothing else.\n\nText:\n"),
+}
+
+
+def rewrite(kind, text):
+    """Correct or reshape a transcript. THE MODEL IS NOT A SETTING.
+
+    modules/model-names.md: a dated model string is a time bomb — it fails with
+    not_found before the request runs, so it never appears in usage and looks
+    exactly like a dead key. So there is no model picker and no dated name in
+    the page: the chain here is tried in order and the first one that answers
+    wins, exactly as Speak and Listen already work."""
+    prompt = REWRITE_PROMPTS.get(kind, REWRITE_PROMPTS["grammar"]) + (text or "")
+
+    def payload(_m):
+        return {"contents": [{"parts": [{"text": prompt}]}]}
+
+    r = with_fallback(STT_CHAIN, payload)
+    if not r["ok"]:
+        return r
+    out = "".join(p.get("text", "") for c in r["data"].get("candidates", [])
+                  for p in c.get("content", {}).get("parts", []))
+    return {"ok": True, "text": out.strip(), "model": r["model"], "key": r["label"]}
+
+
 def budget():
     """What is left today, in requests and in hours."""
     d = read_ledger()
@@ -1296,17 +1333,10 @@ The direction goes in the text itself, in plain English. For two speakers, pick 
 <audio id="player" class="idle" controls></audio>
 </section>
 
-<section class="tab">
-<a href="/transcribe" style="text-decoration:none"><button class="go">OPEN MAHA TRANSCRIBE</button></a>
-<div class="note">The whole app: recording, the queue, the archive, copying,
-correction, translation. Same app, this engine.</div>
-<label>OR TRANSCRIBE ONE FILE HERE</label>
-<label>AUDIO FILE</label>
-<input type="file" id="file" accept="audio/*">
-<label>LANGUAGE HINT</label>
-<input id="lang" placeholder="Croatian, English, or leave it to decide">
-<button class="go" id="lgo" onclick="doListen()">TRANSCRIBE</button>
-<div class="out idle" id="lout">nothing transcribed yet</div>
+<section class="tab" id="listenTab">
+<!-- Maha Transcribe itself, in the tab. Not a link to it: a link is a second
+     step and a second page, and you cannot open a file in the tab you left. -->
+<iframe id="mt" title="Maha Transcribe" style="width:100%;height:78vh;border:1px solid var(--line);border-radius:10px;background:var(--bg)"></iframe>
 </section>
 
 <section class="tab">
@@ -1339,7 +1369,11 @@ const api=(u,o={})=>fetch(u,Object.assign({},o,{headers:Object.assign({},H,o.hea
 const GLYPH={working:'\\u25cf',busy:'\\u25d0','no credit':'\\uff04',refused:'\\u2717',
              unknown:'?',untested:'\\u25cb',testing:'\\u2026'};
 function cls(v){return v.replace(' ','')}
-function tab(i){document.querySelectorAll('.tab-btn').forEach((b,j)=>b.classList.toggle('active',i==j));
+function tab(i){
+ // the transcribe app is loaded the first time its tab is opened, and then
+ // left alone: reloading it would throw away a recording in progress
+ if(i==1&&!mt.src)mt.src='/transcribe';
+ document.querySelectorAll('.tab-btn').forEach((b,j)=>b.classList.toggle('active',i==j));
  document.querySelectorAll('.tab').forEach((s,j)=>s.classList.toggle('active',i==j));
  if(i==2){loadBudget();loadHealth();checkGrave();}}
 window.addEventListener('load',loadBudget);
@@ -1353,14 +1387,6 @@ async function doSpeak(){
  if(r.ok){sout.textContent=r.seconds+'s of audio, '+r.model+' on ['+r.key+']'+(r.log&&r.log.length?'\\n'+r.log.join('\\n'):'');
   player.src='/out/'+r.file;player.classList.remove('idle');}
  else sout.textContent='no: '+r.error+'\\n'+((r.log||[]).join('\\n'));}
-
-async function doListen(){
- if(!file.files[0]){lout.classList.remove('idle');lout.textContent='pick a file first';return;}
- lgo.disabled=true;lout.classList.remove('idle');lout.textContent='listening…';
- const fd=new FormData();fd.append('audio',file.files[0]);fd.append('lang',lang.value);
- const r=await(await api('/api/listen',{method:'POST',body:fd})).json();
- lgo.disabled=false;
- lout.textContent=r.ok?r.text+'\\n\\n\\u2014 '+r.seconds+'s heard, '+r.model+' on ['+r.key+']':'no: '+r.error;}
 
 async function doImport(){
  if(!kf.files[0])return;
@@ -1741,6 +1767,14 @@ def serve():
         if len(raw) > MAX_IMPORT_BYTES:
             return jsonify({"ok": False, "error": "that file is over 8 MB, which is not a key file"})
         return jsonify(import_keys(raw.decode("utf-8", "replace"), f.filename or "a file"))
+
+    @app.post("/api/rewrite")
+    def api_rewrite():
+        j = request.get_json(force=True) or {}
+        txt = (j.get("text") or "").strip()
+        if not txt:
+            return jsonify({"ok": False, "error": "nothing to rewrite"})
+        return jsonify(rewrite(j.get("kind") or "grammar", txt))
 
     @app.get("/api/health")
     def api_health():
@@ -2172,7 +2206,6 @@ cat > "$APPHOME/transcribe.html.new" <<'GTT_TRANSCRIBE_EOF'
   <div class="tabs" role="tablist">
     <button class="tab-btn active" id="recPill" data-tab="rec"><span class="hot-r" id="recPillLabel">REC</span></button>
     <button class="tab-btn" data-tab="transcribe">transcribe</button>
-    <button class="tab-btn" data-tab="translate">translate</button>
   </div>
 
   <div class="meter idle" id="meter" aria-hidden="true"></div>
@@ -2287,24 +2320,20 @@ cat > "$APPHOME/transcribe.html.new" <<'GTT_TRANSCRIBE_EOF'
   <div class="tab" id="settingsPanel">
     <div class="rec-settings-label">SETTINGS</div>
     <button class="tab-btn" data-tab="arh">ARCHIVE</button>
-    <label class="field-label">reshape and grammar model</label>
-    <div class="row" id="corrProviderList" style="flex-wrap:wrap;"></div>
-    <label class="field-label">claude api model</label>
-    <div class="row" id="claudeModelList" style="flex-wrap:wrap;"></div>
-    <label class="field-label">claude session budget (usd)</label>
-    <input type="number" step="0.5" min="0.5" id="claudeBudget" class="text-input" />
-    <label class="field-label">gemini correction model</label>
-    <div class="row" id="corrModelList" style="flex-wrap:wrap;"></div>
-    <label class="field-label">assemblyai transcription model</label>
-    <div class="row" id="aaiModelList" style="flex-wrap:wrap;"></div>
+    <label class="field-label">engine</label>
+    <div class="key-list">
+      Gemini, and the model is chosen for you from the ones the account can
+      actually reach. There is nothing to pick here and nothing to keep current.
+    </div>
     <label class="field-label">api keys</label>
     <div class="key-list">
-      no key is stored in this file. keys live only in this browser, imported by you below.
+      The keys are not in this browser. They live in one ring on the server,
+      shared with the rest of this app, and the KEYS tab is where they are
+      imported, tested and deleted.
     </div>
-    <div id="keyringPanels"></div>
     <div class="about">
-      assembly models: <b>universal-3-pro, universal-2</b><br>
-      reshape/grammar: <b>claude or gemini</b><br>
+      engine: <b>Gemini, model chosen automatically</b><br>
+      keys: <b>the shared ring, in the KEYS tab</b><br>
       file picker: <b>any format ffmpeg can read, optimized before upload</b><br>
       version: <b id="appVersion">v28 (a)</b>
     </div>
@@ -2657,6 +2686,10 @@ cat > "$APPHOME/transcribe.html.new" <<'GTT_TRANSCRIBE_EOF'
   // ---- AssemblyAI transcription model selector (settings) ----
   const aaiModelList = document.getElementById('aaiModelList');
   function renderAaiModels() {
+    // the AssemblyAI picker is gone from settings, so this element is not
+    // there any more. Guard rather than delete: the function is called from
+    // several places and a null.innerHTML throws before any of them run.
+    if (!aaiModelList) return;
     const cur = getAaiModel();
     aaiModelList.innerHTML = AAI_MODELS.map(m =>
       '<button type="button" class="lang-btn aai-model' + (m === cur ? ' active' : '') + '" data-model="' + m + '">' + m + '</button>'
@@ -2873,6 +2906,8 @@ cat > "$APPHOME/transcribe.html.new" <<'GTT_TRANSCRIBE_EOF'
   ];
   const corrModelList = document.getElementById('corrModelList');
   function renderCorrModels() {
+    // likewise: the model is chosen by the server now, so there is no list
+    if (!corrModelList) return;
     const cur = getQModel();
     corrModelList.innerHTML = CORR_MODELS.map(m =>
       '<button type="button" class="lang-btn corr-model' + (m.id === cur ? ' active' : '') + '" data-model="' + m.id + '">' + m.label + '</button>'
@@ -3942,29 +3977,39 @@ cat > "$APPHOME/transcribe.html.new" <<'GTT_TRANSCRIBE_EOF'
   const reshapeBtn = document.getElementById('reshapeBtn');
   function getCorrProvider() { return localStorage.getItem('maha_corr_provider') === 'gemini' ? 'gemini' : 'claude'; }
   function getClaudeEffort() { const e = localStorage.getItem('maha_claude_effort'); return ['low', 'medium', 'high'].includes(e) ? e : 'low'; }
+  // ONE ENGINE. Upstream this chose between Claude and Gemini, then a model
+  // within whichever was chosen, and a spend budget for one of them. All of
+  // that is gone: the server picks from the models the ring can actually reach
+  // and answers on /api/rewrite. A model list in a settings panel is a list
+  // that goes stale, and a dated model name is a time bomb that fails before
+  // the request runs.
   async function runCorrection(kind) {
     const text = (transcriptEl.value || '').trim();
     if (!text) { setGrammarStatus('the transcript box is empty', 'err'); return; }
-    const provider = getCorrProvider();
-    const prompt = kind === 'grammar' ? GRAMMAR_PROMPT : RESHAPE_PROMPT;
     const verb = kind === 'grammar' ? 'correcting' : 're-shaping';
     grammarBtn.disabled = true; reshapeBtn.disabled = true; setMeter('busy');
-    if (provider === 'claude') {
-      const name = CLAUDE_MODELS[getClaudeModel()].name;
-      const effort = getClaudeEffort();
-      setGrammarStatus(verb + ' with Claude ' + name + ' ' + effort);
-      const res = await claudeGenerate(prompt + text.slice(0, 200000), effort, setGrammarStatus);
-      if (res) { transcriptCorr.value = res.text; setMeter('ok'); setGrammarStatus('done  \u00b7  Claude ' + name + ' ' + effort + '  \u00b7  this call $' + res.cost.toFixed(4), 'ok'); bumpUsage('corr'); }
-      else { setMeter('err'); }
-    } else {
-      if (!ringHasKeys('gemini')) { setGrammarStatus('no gemini keys', 'err'); setMeter('err'); grammarBtn.disabled = false; reshapeBtn.disabled = false; return; }
-      const model = getQModel();
-      setGrammarStatus(verb + ' with Gemini ' + model);
-      const res = await geminiGenerate(prompt + text.slice(0, 60000), model, setGrammarStatus);
-      if (res) { transcriptCorr.value = res.text; setMeter('ok'); setGrammarStatus('done  \u00b7  Gemini ' + model + ', key ' + maskKey(res.key), 'ok'); bumpUsage('corr'); }
-      else { setMeter('err'); }
+    setGrammarStatus(verb + '\u2026');
+    try {
+      const r = await fetch('/api/rewrite', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Gtt-Local': '1' },
+        body: JSON.stringify({ kind: kind, text: text.slice(0, 60000) })
+      });
+      const j = await r.json();
+      if (j.ok) {
+        transcriptCorr.value = j.text;
+        setMeter('ok');
+        setGrammarStatus('done  \u00b7  ' + j.model + ' on [' + j.key + ']', 'ok');
+        bumpUsage('corr');
+      } else {
+        setMeter('err');
+        setGrammarStatus(j.error || 'failed', 'err');
+      }
+    } catch (e) {
+      setMeter('err'); setGrammarStatus(e.message, 'err');
     }
-    grammarBtn.disabled = false; reshapeBtn.disabled = false; setTimeout(() => setMeter('idle'), 1600);
+    grammarBtn.disabled = false; reshapeBtn.disabled = false;
+    setTimeout(() => setMeter('idle'), 1600);
   }
   grammarBtn.addEventListener('click', () => runCorrection('grammar'));
   reshapeBtn.addEventListener('click', () => runCorrection('reshape'));

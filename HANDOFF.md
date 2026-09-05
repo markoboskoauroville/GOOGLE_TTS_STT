@@ -20,31 +20,46 @@ own word:
 
 The v6 numbers still work and are no longer drawn.
 
-## Maha Transcribe, whole
+## Maha Transcribe, inside the LISTEN tab
 
-`/transcribe` serves `MAHA_TRANSCRIBE_TERMUX_TERMINAL/maha_transcribe.html`
-**byte for byte**, vendored at `src/30_transcribe.html`. Recording, the queue,
-the archive, copy, correction, translation, the settings, the language picker,
-all of it is the app already in use. Nothing was reimplemented and nothing was
-redesigned.
+The LISTEN tab **is** the app. Not a link to it: a link is a second step and a
+second page, and you cannot open a file in the tab you just left. It loads the
+first time that tab is opened and is then left alone, because reloading it would
+throw away a recording in progress.
 
-**Only the engine changed**, and the swap is three anchors in
-`tools/engine_patches.py`, applied at build time so the vendored file stays
-identical to upstream and every change is visible in one readable place:
+`src/30_transcribe.html` is `MAHA_TRANSCRIBE_TERMUX_TERMINAL/maha_transcribe.html`
+vendored, and `tools/engine_patches.py` holds nine edits applied at build time,
+so the vendored file stays identical to upstream and every change is in one
+readable place. A missing anchor is **fatal at build time**.
 
-| anchor | upstream | here |
+**One engine, and nothing to choose.**
+
+| what | upstream | here |
 |---|---|---|
-| `transcribeDispatch` | `aaiTranscribe`, AssemblyAI, keys in the browser's localStorage | POSTs the blob to `/api/listen`, so the server ring answers and the rotation, ledger and daily budget cover it |
-| `serviceReady` | "does localStorage hold an assembly key" | asks `/api/health` whether the server ring holds any |
-| the startup message | "no assemblyai keys" | comes from that health check |
+| transcription | AssemblyAI, keys in localStorage | `/api/listen`, the server ring |
+| correction and reshape | Claude or Gemini, then a model, then a spend budget | `/api/rewrite`, and the server picks |
+| the model | four pickers in settings | none. The chain is tried in order and the first that answers wins |
+| translate | a third tab | gone |
+| keys | a ring per provider in this browser | the one shared ring, in the KEYS tab |
 
-A missing anchor is **fatal at build time**. Shipping the page untouched would
-leave it calling AssemblyAI with keys it does not have, and it would look like a
-working app right up to the first recording.
+**The model is not a setting.** `modules/model-names.md`: a dated model string
+is a time bomb — it fails with not_found before the request runs, so it never
+shows in usage and looks exactly like a dead key. A picker in a settings panel
+is a list that goes stale in somebody's localStorage.
 
-The AssemblyAI code is all still in the file, unreached. That is deliberate:
-deleting it would be editing somebody else's app rather than changing its
-engine, and the dispatch point is the seam its author already built.
+What is left is recording, transcribing, correcting and the archive. The
+AssemblyAI and Claude code is still in the file and unreached; deleting it would
+be editing the app rather than changing its engine, and the two renderers that
+wrote into the removed settings elements are guarded rather than cut, because
+each is called from several places and a `null.innerHTML` throws during setup
+and takes the whole page with it.
+
+## The settings are shared
+
+There is one ring, on the server, at `~/.gemini_keys`. The transcribe page has
+no keys of its own and no key panels: its settings say where they live, and the
+KEYS tab is where they are imported, tested and deleted. Both halves of the app
+spend from the same ledger and the same daily budget.
 
 ## What was ported, and from where
 
