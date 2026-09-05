@@ -119,9 +119,9 @@ exist, or a third speaker when Gemini takes two, all come back with the audio
 and are shown. A line read in the wrong voice sounds like a bad model rather
 than a typo.
 
-## Maha Transcribe, inside the LISTEN tab
+## Maha Transcribe, inside the TRANSCRIBE tab
 
-The LISTEN tab **is** the app. Not a link to it: a link is a second step and a
+The TRANSCRIBE tab **is** the app. Not a link to it: a link is a second step and a
 second page, and you cannot open a file in the tab you just left. It loads the
 first time that tab is opened and is then left alone, because reloading it would
 throw away a recording in progress.
@@ -173,6 +173,36 @@ Nothing here was written fresh where a file already solved it.
 | `Key_Tester/item_key.xml` | a card per account with its actions on the row they act on |
 | `Key_Tester` HANDOFF | the status glyphs and the five words |
 | `MAHA_TRANSCRIBE_STREAMLIT/ttt/keyring.py` | the ring rules: never drop a key for its shape, a key file is a working note |
+
+## The vendored page needs its server
+
+Maha Transcribe was written against **its own** server. It calls endpoints by
+name and sends its own header, `X-Maha-Local`, on every one of them. Vendoring
+the page without those is vendoring half an app, and the half that is missing
+does not report as missing: the page asks `/api/ffmpeg`, gets a 403 or a 404,
+and says **"ffmpeg not found on the server"** — on a phone with ffmpeg
+installed.
+
+So this server answers what that page asks for:
+
+| endpoint | what it is |
+|---|---|
+| `/api/ffmpeg` | is the server side of the pipeline there |
+| `/api/optimize-audio` | any file ffmpeg can decode, back as 16 kHz mono Opus |
+| `/api/listen` | the engine swap |
+| `/api/rewrite` | correction and reshape |
+| `/api/health` | is the ring loaded |
+
+`audioprep.py` came across whole, target and reasoning included: 16 kHz because
+ASR resamples to it anyway, mono for the same argument about channels, Opus at
+32 kbps tuned for voip because that is what carries a phone call. A two-hour
+video becomes a same-length mono file usually under 20 MB. Measured here: a
+1.17 MB WAV came back 96 KB, and that 96 KB transcribed correctly.
+
+**The guard accepts both headers.** Test 1 now reads the BUILT page, collects
+every `/api/` call in it and fails if this server does not answer one — the
+check has to be on the built page, because the engine patches add calls the
+vendored file does not contain.
 
 ## The guard
 

@@ -307,6 +307,32 @@ check("an mp3 counts as a hit too, which is how the shipped ones arrive",
       bool(app.preview_path(h1)), True)
 check("the cache reports what it holds", app.cache_state()["count"] >= 1, True)
 
+# ------------------------------------------ what the vendored page asks for
+# The page was written against its own server and calls endpoints by name with
+# a header of its own. Anything it asks for and does not get, it reports as its
+# server lacking the feature — which is how "ffmpeg not found on the server"
+# appeared on a phone that has ffmpeg.
+# the BUILT page, because the engine patches add calls of their own that are
+# not in the vendored file. Testing the vendored one would have missed
+# /api/listen, /api/rewrite and /api/health entirely.
+import importlib.util as _iu2
+_bspec = _iu2.spec_from_file_location("bi", os.path.join(ROOT, "tools", "build_installer.py"))
+_bi = _iu2.module_from_spec(_bspec)
+_bspec.loader.exec_module(_bi)
+_tp = _bi.engine_swapped()
+_app_src = open(os.path.join(ROOT, "src", "10_app.py")).read()
+_wants = sorted(set(re.findall(r"fetch\('(/api/[a-z0-9\-/]+)'", _tp)))
+_missing = [u for u in _wants
+            if ('"%s"' % u) not in _app_src and ("'%s'" % u) not in _app_src]
+check("every endpoint the vendored page calls exists here: %s" % ", ".join(_wants),
+      _missing, [])
+check("and its own guard header is accepted",
+      "X-Maha-Local" in _app_src, True)
+check("the header it sends is the one the guard checks for",
+      "X-Maha-Local" in _tp, True)
+check("and the patched-in calls are counted too, not just the vendored ones",
+      "/api/listen" in _wants and "/api/rewrite" in _wants, True)
+
 # ------------------------------------------------------------- THE PAGE
 # v13 shipped a page whose script died at parse. On the phone that looked like
 # "counting the cache" forever and a SPEAK button that did nothing, because

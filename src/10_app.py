@@ -41,7 +41,7 @@ try:
 except Exception:
     PACIFIC = timezone(timedelta(hours=-8))
 
-VERSION = 15
+VERSION = 16
 PORT = int(os.environ.get("GTTS_PORT", "7311"))
 KEYFILE = os.environ.get("GEMINI_KEYS", os.path.expanduser("~/.gemini_keys"))
 HOME = os.path.expanduser("~/.google_tts_stt")
@@ -860,6 +860,106 @@ MIME = {".mp3": "audio/mp3", ".wav": "audio/wav", ".flac": "audio/flac",
         ".aiff": "audio/aiff"}
 
 
+# --------------------------------------------------- audioprep, ported whole
+#
+# From MAHA_TRANSCRIBE_TERMUX_TERMINAL/audioprep.py, target and reasoning kept:
+#
+#     16 kHz, mono, Opus, ~32 kbps VBR, "voip" tuning
+#
+# 16 kHz because ASR resamples to it anyway, so anything higher pays for bytes
+# thrown away downstream. Mono for the same reason about channels. Opus at 32k
+# tuned for voip is what carries a phone call; lower starts costing
+# intelligibility on noisy recordings, higher pays for fidelity no
+# transcription model uses. A two-hour phone video becomes a same-length mono
+# Opus file typically under 20 MB, which is the whole point of doing it here
+# rather than uploading gigabytes.
+PREP_RATE = 16000
+PREP_BITRATE = "32k"
+PREP_TIMEOUT = 900        # a backstop against a corrupt file that hangs ffmpeg
+MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024
+
+
+class AudioPrepError(Exception):
+    """Raised with a message safe to show to the person as it is."""
+
+
+def ffmpeg_bin():
+    import shutil
+    return shutil.which("ffmpeg")
+
+
+def probe_duration(path):
+    """Seconds, or None. Never raises: a duration is not worth a failure."""
+    import shutil
+    ffprobe = shutil.which("ffprobe")
+    if not ffprobe:
+        return None
+    try:
+        out = subprocess.run([ffprobe, "-v", "error", "-show_entries",
+                              "format=duration", "-of",
+                              "default=noprint_wrappers=1:nokey=1", path],
+                             capture_output=True, text=True, timeout=30)
+        return float(out.stdout.strip())
+    except Exception:
+        return None
+
+
+def optimize_audio(input_bytes, original_name=""):
+    import shutil
+    ff = ffmpeg_bin()
+    if not ff:
+        raise AudioPrepError(
+            "ffmpeg is not installed on this machine, so audio cannot be "
+            "optimized and video cannot be read. Termux `pkg install ffmpeg`, "
+            "macOS `brew install ffmpeg`.")
+    if len(input_bytes) > MAX_UPLOAD_BYTES:
+        raise AudioPrepError("that file is %.0f MB, over the %d MB limit."
+                             % (len(input_bytes) / 1048576.0,
+                                MAX_UPLOAD_BYTES // 1048576))
+    suffix = os.path.splitext(original_name)[1][:8] if original_name else ""
+    if not suffix or any(c in suffix for c in ("/", "\\", "\x00")):
+        suffix = ".input"
+    workdir = tempfile.mkdtemp(prefix="gttprep_")
+    in_path = os.path.join(workdir, "in" + suffix)
+    out_path = os.path.join(workdir, "out.ogg")
+    try:
+        with open(in_path, "wb") as fh:
+            fh.write(input_bytes)
+        duration = probe_duration(in_path)
+        t0 = time.time()
+        proc = subprocess.run(
+            [ff, "-y", "-i", in_path, "-vn", "-ac", "1", "-ar", str(PREP_RATE),
+             "-c:a", "libopus", "-b:a", PREP_BITRATE, "-application", "voip",
+             "-f", "ogg", out_path],
+            capture_output=True, text=True, timeout=PREP_TIMEOUT)
+        took = time.time() - t0
+        if proc.returncode != 0 or not os.path.exists(out_path):
+            # prefer the line that names the problem with the INPUT: "invalid
+            # data found" is far more useful than "error opening output files",
+            # which is what ffmpeg says about the same failure from the far end
+            lines = [l.strip() for l in (proc.stderr or "").splitlines() if l.strip()]
+            reason = next((l for l in reversed(lines)
+                           if "invalid data found" in l.lower()
+                           or "error opening input" in l.lower()
+                           or "does not contain any stream" in l.lower()
+                           or "moov atom not found" in l.lower()),
+                          lines[-1] if lines else "unknown ffmpeg error")
+            raise AudioPrepError("could not read that file as audio or video: %s" % reason)
+        out_bytes = open(out_path, "rb").read()
+        if not out_bytes:
+            raise AudioPrepError("the conversion produced an empty file, the "
+                                 "source may have no audio track.")
+        return out_bytes, {"original_bytes": len(input_bytes),
+                           "optimized_bytes": len(out_bytes),
+                           "duration_seconds": duration,
+                           "convert_seconds": round(took, 2)}
+    except subprocess.TimeoutExpired:
+        raise AudioPrepError("conversion did not finish within %ds, the file may "
+                             "be corrupt or unusually long." % PREP_TIMEOUT)
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
+
+
 def have_ffmpeg():
     try:
         subprocess.run(["ffmpeg", "-version"], capture_output=True, timeout=10)
@@ -1291,7 +1391,13 @@ PAGE = "@@PAGE@@"   # src/15_page.html, inlined by tools/build_installer.py
 # =========================================================================
 
 MAX_PORT_TRIES = 16          # 7311 through 7326, then the OS decides
+# TWO headers, because there are two pages. The vendored Maha Transcribe page
+# sends the one its own server taught it, X-Maha-Local, on every call it makes.
+# The guard was refusing all of them, and the page read that as its server
+# lacking the endpoints — which is how "ffmpeg not found on the server" appeared
+# on a phone that has ffmpeg.
 GUARD_HEADER = "X-Gtt-Local"
+GUARD_HEADERS = ("X-Gtt-Local", "X-Maha-Local")
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "[::1]", "::1"}
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 OPEN_ENDPOINTS = {"index", "out", "favicon_ico", "transcribe_page", "preview_file"}
@@ -1425,7 +1531,7 @@ def guard(port):
     changes = request.method not in SAFE_METHODS
     is_api = (request.path or "").startswith("/api/")
     if (changes or is_api) and request.endpoint not in OPEN_ENDPOINTS:
-        if not request.headers.get(GUARD_HEADER):
+        if not any(request.headers.get(h) for h in GUARD_HEADERS):
             return (jsonify({"error": "That request did not come from this app's own "
                                       "page. Nothing was changed."}), 403)
     return None
@@ -1609,6 +1715,31 @@ def serve():
         if not txt:
             return jsonify({"ok": False, "error": "nothing to rewrite"})
         return jsonify(rewrite(j.get("kind") or "grammar", txt))
+
+    @app.get("/api/ffmpeg")
+    def api_ffmpeg():
+        """So the page can ask, before offering a video file, whether the
+        server side of the pipeline is there to receive it."""
+        return jsonify({"available": bool(ffmpeg_bin())})
+
+    @app.post("/api/optimize-audio")
+    def api_optimize_audio():
+        f = request.files.get("file")
+        if f is None:
+            return jsonify({"error": "no file arrived"}), 400
+        raw = f.read()
+        if not raw:
+            return jsonify({"error": "that file is empty"}), 400
+        try:
+            out, meta = optimize_audio(raw, f.filename or "")
+        except AudioPrepError as e:
+            return jsonify({"error": str(e)}), 400
+        except Exception as e:
+            return jsonify({"error": str(e)[:200]}), 400
+        from flask import Response
+        return Response(out, mimetype="audio/ogg", headers={
+            "X-Original-Bytes": str(meta["original_bytes"]),
+            "X-Optimized-Bytes": str(meta["optimized_bytes"])})
 
     @app.get("/api/health")
     def api_health():

@@ -736,3 +736,47 @@ The installer also checks the port on its way out. If something is still serving
 on 7311 it says that the copy on screen is still the old one and how to stop it.
 A silent finish underneath a running old version is indistinguishable from a
 hang, and that is the whole of what happened here.
+
+---
+
+## 5.9.2026 — v16, the vendored page was talking to a server that was not there
+
+Baba: *the listen page is broken. When I record sound and stop recording, I'm
+not getting any transcription. And it also said in red letters, there is no
+FFmpeg. I have it 100%. So that's a bad coding.*
+
+He is right on both counts, and they are the same fault.
+
+Maha Transcribe was written against **its own** server. It calls `/api/ffmpeg`
+and `/api/optimize-audio` by name, and it sends its own header, `X-Maha-Local`,
+on every request it makes. I vendored the page, swapped the transcription
+dispatch, and never asked what else it talks to.
+
+So two things happened at once. The guard was refusing every call the page made,
+because it only accepted `X-Gtt-Local`. And the two endpoints did not exist at
+all. The page asked whether the server had ffmpeg, got nothing back, and
+concluded — correctly, from where it stood — that its server has no ffmpeg. The
+red line was the page reporting my omission accurately.
+
+Fixed by giving that page the server it expects. `audioprep.py` came across
+whole with its reasoning intact: 16 kHz because ASR resamples to it anyway, mono
+for the same argument about channels, Opus at 32k tuned for voip because that is
+the codec a phone call runs on. Measured: a 1.17 MB WAV came back as 96 KB of
+16 kHz mono Opus, and that 96 KB transcribed correctly.
+
+### The test that would have caught it
+
+Test 1 now takes the BUILT page, collects every `/api/` call in it, and fails if
+this server does not answer one of them. It has to be the built page rather than
+the vendored file, because the engine patches add `/api/listen`, `/api/rewrite`
+and `/api/health`, none of which are in the file on disk — testing the vendored
+one would have found two endpoints and missed three.
+
+That check is the general form of the mistake: a vendored app is not just its
+markup, it is its markup and everything it expects to be able to call.
+
+### And the tab is called what it does
+
+TRANSCRIBE, not LISTEN. Baba: *that's the right title.* SPEAK and TRANSCRIBE are
+both verbs for what happens there; LISTEN was a verb for what the app does,
+which is not the thing the person is doing.
