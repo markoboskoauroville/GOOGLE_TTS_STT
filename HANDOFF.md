@@ -1,6 +1,6 @@
 # HANDOFF
 
-**GOOGLE TTS AND STT v1. The finished state, nothing historical.**
+**GOOGLE TTS AND STT v2. The finished state, nothing historical.**
 
 ## What it is
 
@@ -8,12 +8,43 @@ A Flask server on `localhost:7311` with three tabs, installed by one file and
 started by one word. Speak makes audio from text. Listen makes text from audio.
 Keys tests every account and shows what is left of today.
 
+## The file picker
+
+One parser, one merge, one place a duplicate could be created and therefore one
+place it is prevented. It is reached three ways and all three run the same code:
+
+    bash get.sh --keys FILE     during the install
+    gtt import FILE             from the terminal
+    Keys tab → Add accounts     from the browser
+
+**Finding keys and naming them are kept apart on purpose.** Finding is a regular
+expression over the raw text and is never wrong about what a key looks like.
+Naming is guesswork, allowed to be wrong, because a bad label costs nothing —
+the key still works and the name can be edited. Keeping them separate means no
+clever labelling idea can ever lose a key.
+
+Names are taken, in this order: from the JSON if the whole file parses, from
+the same line in front of the key, from the same line after it, then from the
+nearest line above that is neither blank nor a comment. Nothing found means
+`account 1`, `account 2`.
+
+Merging never duplicates. A key already in the ring is skipped whatever name
+the new file gives it, and the name already in the ring is the one kept. A new
+key wanting a name that is taken is numbered. The ring is appended to, so
+comments and hand edits in it survive. Written to a `.new` file and renamed
+over the top, chmod 600.
+
+A receipt is written to `~/.google_tts_stt/imports/` saying what was added and
+what was skipped. It holds no key: the keys live in exactly one file and that
+is not it.
+
 ## Where everything is
 
     ~/.gemini_keys              the ring, chmod 600, shared with gemini_vo.py
     ~/.google_tts_stt/app.py    the app, written by the installer
     ~/.google_tts_stt/ledger.json
     ~/.google_tts_stt/out/      every WAV Speak has made
+    ~/.google_tts_stt/imports/  what each import added, with no keys in it
     $PREFIX/bin/gtt             Termux
     ~/bin/gtt                   macOS
 
@@ -96,5 +127,6 @@ filename carries it at both ends.
     gtt run          the server
     gtt test         the four tests
     gtt keys         edit the ring
+    gtt import FILE  add accounts from any file, without duplicating
     gtt out          list what Speak has made
     gtt-update       fetch the next version and run it

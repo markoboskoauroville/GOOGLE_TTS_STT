@@ -35,6 +35,7 @@ bash "$INST" --verify >/dev/null && printf "   ok   %s verifies\n" "$(basename "
   || FAILED="$FAILED verify"
 
 "$PY" "$ROOT/tests/test1_mechanism.py" || FAILED="$FAILED test1"
+"$PY" "$ROOT/tests/test1b_parser.py" || FAILED="$FAILED test1b"
 
 if [ "$OFFLINE" = "0" ]; then
   "$PY" "$ROOT/tests/test2_real.py" || FAILED="$FAILED test2"

@@ -14,7 +14,13 @@ wrong by the evening.
 
 ## Install
 
-    bash 1-google-tts-stt-v1.sh
+    curl -fsSL https://raw.githubusercontent.com/markoboskoauroville/GOOGLE_TTS_STT/main/get.sh -o get.sh && bash get.sh
+
+`get.sh` has no version number in it, so the command never goes stale. It asks
+the repository which installer is newest, checks the download is whole, and
+runs it. To hand it your keys at the same time:
+
+    bash get.sh --keys ~/Downloads/whatever-the-file-is-called.txt
 
 Termux and macOS. It finds the platform itself, installs Flask and waitress if
 they are missing, notices whether ffmpeg is there, creates the key ring if you
@@ -25,19 +31,31 @@ Two words are left behind:
     gtt          the menu, and the app on localhost:7311
     gtt-update   fetch the newest installer from this repository and run it
 
-## The key ring
+## The keys, and never copying a file by hand
 
-`~/.gemini_keys`, chmod 600. Label line, key line, blank line.
+Give the app the file however it was saved. A note with the account names
+above the keys, a `.env`, a JSON export, a CSV, a markdown table, a page of
+prose with the keys somewhere in it. It finds them, takes the account names
+where they are there, invents them where they are not, and adds **only the
+keys the ring does not already hold**.
 
-    mantreshvar
-    AQ.…
+    bash get.sh --keys ~/Downloads/keys.json      while installing
+    gtt import ~/Downloads/more-keys.txt          any time after
+    Keys tab → Add accounts from a file           without the terminal
 
-    kukljica
-    AQ.…
+The ring lives at `~/.gemini_keys`, chmod 600, shared with `gemini_vo.py` and
+`gemini_quota.py`. An import appends to it: comments already in the file
+survive, existing entries are never rewritten, and **a key already in the ring
+is never added twice**, whatever name the new file gives it. A new key that
+wants a name already taken is numbered rather than overwriting anything.
 
-Both Gemini key formats are read, `AIza…` and the newer `AQ.…`. No key is in
-this repository and none is ever sent to the page: the Keys tab shows six
-characters at the front and four at the back.
+Both Gemini formats are read, `AIza…` and the newer `AQ.…`, by one regular
+expression the ring reader and the picker share. A long token in a format
+neither recognises is reported rather than imported, because Google has
+changed the format once and will do it again.
+
+No key is in this repository and none is ever sent to the page: six characters
+at the front, four at the back.
 
 ## Which document to open
 
@@ -54,5 +72,5 @@ The installer is generated. `src/` is the truth.
 
     python3 tools/build_installer.py            write the installer
     python3 tools/build_installer.py --check    fail if the shipped file is stale
-    bash tests/gate.sh                          the four tests
+    bash tests/gate.sh                          the tests
     bash tests/gate.sh --offline                1, 3 and the build check, no keys spent

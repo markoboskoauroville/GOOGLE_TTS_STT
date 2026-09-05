@@ -45,7 +45,7 @@ print("TEST 1 — the mechanism, alone")
 # Both Gemini key formats, plus the things that are not keys. A filter written
 # for AIza alone finds nothing in a file full of AQ. keys, and that exact
 # mistake is what leaked a key once. So both, and nothing else.
-open(os.environ["GEMINI_KEYS"], "w").write("""# a comment line
+TWO_KEYS = """# a comment line
 
 tribal
 AQ.Ab8RN6AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
@@ -57,11 +57,21 @@ label with no key
 
 not a key at all
 hello world
-""")
+"""
+open(os.environ["GEMINI_KEYS"], "w").write(TWO_KEYS)
 ring = app.load_ring()
 check("ring finds both key formats", [l for l, _ in ring], ["tribal", "old format"])
 check("a label with no key is dropped", len(ring), 2)
 check("a line with a space is not a key", any(" " in k for _, k in ring), False)
+# the reader and the picker must agree, or an import succeeds into a ring that
+# then reads back empty. This is the check that binds them together.
+short = "AQ.Ab8RN6" + "S" * 14
+open(os.environ["GEMINI_KEYS"], "w").write("short one\n%s\n" % short)
+check("a key the picker accepts is a key the ring reads back",
+      [k for _, k in app.parse_keys("x\n%s\n" % short)[0]],
+      [k for _, k in app.load_ring()])
+open(os.environ["GEMINI_KEYS"], "w").write(TWO_KEYS)   # put the ring back
+check("the two key ring is restored for the checks below", len(app.load_ring()), 2)
 masked = app.mask("AQ.Ab8RN6QWERTYUIOPASDFGH")
 check("masking keeps six at the front and four at the back", masked, "AQ.Ab8\u2026DFGH")
 check("masking drops the middle", "RN6QWERTYUIOPAS" in masked, False)

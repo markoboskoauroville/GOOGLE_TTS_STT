@@ -56,12 +56,12 @@ should not have to learn a second layout.
   |  thirty voices      |  any format ffmpeg  |
   +---------------------+---------------------+
   |3 Keys               |4 free               |
-  |  test every account |                     |
+  |  import a key file  |                     |
   |  what is left today |  room for a fourth  |
   +---------------------+---------------------+
 
   1 run      2 test     3 keys     4 output
-  5 update   0 quit
+  5 update   6 import   0 quit
 ```
 
 Three lines to a quadrant, always three. The label, what it does, what it is
@@ -118,6 +118,20 @@ that is the question. The per-model table is underneath for when the single
 number is not enough, and a row whose daily limit has never actually been
 reached is marked with a star and explained, rather than being presented as
 though it were measured.
+
+### The picker sits above the test button, not behind a dialogue
+
+Adding accounts and testing accounts are the same job five minutes apart, so
+they are on the same tab in the order they happen: the file input first, then
+what the import did, then the test button, then what the test found. No modal,
+no wizard, no second screen. The import result box is drawn before there is an
+import, saying *nothing imported this session*, like every other output box in
+the app.
+
+What it reports is what was actually done, in three lines: how many keys were in
+the file, how many were added, how many were already held. A key that was
+skipped is listed with the name it already has in the ring, because the useful
+question at that moment is *which one was this* and not *how many*.
 
 ### Never the whole key
 

@@ -260,6 +260,33 @@ check("eight at once, no exception escapes", errs, [])
 total = sum(app.read_ledger()["spend"].values())
 check("and every one of the eight is counted exactly once", total, 8)
 
+# ------------------------------------------------------------ UGLY IMPORTS
+# The file picker takes whatever it is handed. None of these may raise and
+# none of them may put the same key in the ring twice.
+reset()
+check("importing an empty file adds nothing", app.import_keys("", "empty")["added"], [])
+check("importing whitespace adds nothing", app.import_keys("  \n\n ", "ws")["added"], [])
+check("importing a PNG adds nothing",
+      app.import_keys(open(os.devnull).read() if False else
+                      (b"\x89PNG\r\n\x1a\n" + bytes(range(256)) * 20).decode("utf-8", "replace"),
+                      "picture.png")["added"], [])
+huge = "not a key\n" * 200000
+check("a two megabyte file of noise does not raise",
+      isinstance(app.import_keys(huge, "huge.txt"), dict))
+before = open(KEYS).read()
+K1 = "AQ.Ab8RN6" + "1" * 24
+r = app.import_keys("one\n%s\n" % K1, "a.txt")
+check("a real key is added", len(r["added"]), 1)
+r = app.import_keys("one\n%s\n" % K1, "a.txt")
+check("the same file twice adds nothing the second time", r["added"], [])
+r = app.import_keys("%s %s %s" % (K1, K1, K1), "repeated.txt")
+check("the same key three times in one file is still not re-added", r["added"], [])
+check("and the ring holds it exactly once", open(KEYS).read().count(K1), 1)
+r = app.import_keys("one\n%s\n" % ("AQ.Ab8RN6" + "2" * 24), "clash.txt")
+check("a second key wanting the same name is numbered", r["added"][0]["label"], "one 2")
+check("the ring parses cleanly after all of that", len(app.load_ring()) >= 2)
+check("the ring file is still 600", oct(os.stat(KEYS).st_mode)[-3:], "600")
+
 # --------------------------------------------------------- LEDGER SABOTAGE
 open(app.LEDGER, "w").write("{ this is not json")
 check("a corrupted ledger is rebuilt, not fatal", isinstance(app.read_ledger(), dict))

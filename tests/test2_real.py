@@ -45,15 +45,15 @@ def post_json(path, obj, timeout=400):
         return json.loads(r.read().decode())
 
 
-def post_file(path, filepath, fields=None, timeout=400):
+def post_file(path, filepath, fields=None, timeout=400, field="audio"):
     boundary = "----gtt%d" % int(time.time())
     body = b""
     for k, v in (fields or {}).items():
         body += ("--%s\r\nContent-Disposition: form-data; name=\"%s\"\r\n\r\n%s\r\n"
                  % (boundary, k, v)).encode()
-    body += ("--%s\r\nContent-Disposition: form-data; name=\"audio\"; filename=\"%s\"\r\n"
+    body += ("--%s\r\nContent-Disposition: form-data; name=\"%s\"; filename=\"%s\"\r\n"
              "Content-Type: application/octet-stream\r\n\r\n"
-             % (boundary, os.path.basename(filepath))).encode()
+             % (boundary, field, os.path.basename(filepath))).encode()
     body += open(filepath, "rb").read() + ("\r\n--%s--\r\n" % boundary).encode()
     req = urllib.request.Request(BASE + path, data=body,
                                  headers={"Content-Type": "multipart/form-data; boundary=" + boundary})
@@ -129,6 +129,31 @@ try:
     check("the ledger counted both calls", after >= before + 2)
     check("seconds made were written down", b2["audio_out"] > 0)
     check("seconds heard were written down", b2["audio_in"] > 0)
+
+    h = json.loads(get("/api/health")[1].decode())
+    check("health reports what is installed", h["flask"], True)
+    check("health reports the ring it is using", h["keys"] > 0)
+    check("health carries the version", h["version"] >= 2)
+
+    # the picker, over HTTP, with a file shaped like nothing in particular
+    # a key that has never existed and never will, different on every run so
+    # the test can be run twice without the first run making the second lie
+    fake = "AQ.Ab8RN6TEST" + ("%019d" % int(time.time() * 1000))
+    imp = tempfile.mktemp(suffix=".md")
+    open(imp, "w").write("| account | key |\n|---|---|\n| an imported one | %s |\n" % fake)
+    i1 = post_file("/api/import", imp, {}, timeout=60, field="keyfile")
+    check("the picker imports from a markdown table over HTTP", i1["ok"], True)
+    check("it added exactly one", len(i1["added"]), 1)
+    # startswith, not equals: run the gate twice and the second run's label is
+    # numbered, which is the ring refusing to hold two accounts with one name
+    check("it took the account name out of the table",
+          i1["added"][0]["label"].startswith("an imported one"))
+    check("it never returns a whole key", fake not in json.dumps(i1))
+    i2 = post_file("/api/import", imp, {}, timeout=60, field="keyfile")
+    check("the same file a second time adds nothing", i2["added"], [])
+    check("and says it is already there", len(i2["duplicates"]), 1)
+    check("the ring did not grow twice", i2["ring"], i1["ring"])
+    os.remove(imp)
 
     rows = json.loads(get("/api/keys", timeout=180)[1].decode())
     check("every account in the ring is reported", len(rows) > 0)

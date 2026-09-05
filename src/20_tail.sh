@@ -28,6 +28,7 @@ case "\${1:-menu}" in
   run|"") ;;
   test)   exec "\$PY" "\$APP" test ;;
   keys)   exec \${EDITOR:-nano} "\$KEYS" ;;
+  import) shift; exec "\$PY" "\$APP" import "\$@" ;;
   out)    exec ls -la "\$OUT" ;;
   update) exec gtt-update ;;
 esac
@@ -45,7 +46,7 @@ while true; do
   printf "  +---------------------+---------------------+\n"
   printf "  \${DIM}1 2 3 all open the same page on localhost:7311\${OFF}\n\n"
   printf "  1 run      2 test     3 keys     4 output\n"
-  printf "  5 update   0 quit\n\n  > "
+  printf "  5 update   6 import   0 quit\n\n  > "
   read -rsn1 k; printf "\n\n"
   case "\$k" in
     1|r|R) "\$PY" "\$APP" ;;
@@ -53,6 +54,7 @@ while true; do
     3|k|K) \${EDITOR:-nano} "\$KEYS" ;;
     4|o|O) ls -la "\$OUT" ;;
     5|u|U) gtt-update ;;
+    6|i|I) printf "  path to the key file: "; read -r f; [ -n "\$f" ] && "\$PY" "\$APP" import "\$f" ;;
     0|q|Q) exit 0 ;;
   esac
 done
@@ -106,6 +108,20 @@ case ":$PATH:" in
     ;;
 esac
 
+# ---------------------------------------------------------------- keys in
+# Done AFTER the app is written, because the app owns the parser. One parser,
+# one merge, one place where a duplicate could be created and therefore one
+# place where it is prevented.
+if [ -n "$IMPORT" ]; then
+  blank
+  if [ -f "$IMPORT" ]; then
+    say "${DIM}reading keys from $IMPORT${OFF}"
+    "$PY" "$APP" import "$IMPORT"
+  else
+    say "${BAD}no file at $IMPORT${OFF}, nothing imported"
+  fi
+fi
+
 # ---------------------------------------------------------------- the gate
 blank
 KEYCOUNT=$(grep -cE '^(AIza[A-Za-z0-9_-]{20,}|AQ\.[A-Za-z0-9_-]{20,})$' "$KEYS" 2>/dev/null || echo 0)
@@ -127,6 +143,7 @@ if [ "$RC" -eq 0 ]; then
   say "${OK}installed${OFF} $GTT_VERSION"
   say "  ${SAND}gtt${OFF}          the menu, and the app on localhost:7311"
   say "  ${SAND}gtt test${OFF}     the four tests"
+  say "  ${SAND}gtt import F${OFF} add accounts from any file, without duplicating"
   say "  ${SAND}gtt-update${OFF}   fetch the next version"
 else
   say "${BAD}a test failed.${OFF} The app is installed. Fix the ring and run ${SAND}gtt test${OFF}"

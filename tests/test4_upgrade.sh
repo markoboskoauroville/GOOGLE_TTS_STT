@@ -21,7 +21,9 @@ set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 INSTALLER="$(ls "$ROOT"/[0-9]*-google-tts-stt-v[0-9]*.sh 2>/dev/null | head -1)"
 SANDBOX="$(mktemp -d)"
+PY="$(command -v python3 || command -v python)"
 REALKEYS="${GEMINI_KEYS:-$HOME/.gemini_keys}"
+[ -f "$REALKEYS" ] || REALKEYS="$HOME/.gemini_keys"
 PASS=0; FAIL=0
 
 ok()   { printf "   ok   %s\n" "$1"; PASS=$((PASS+1)); }
@@ -32,6 +34,7 @@ printf "TEST 4 — the upgrade, over what is already there\n"
 [ -z "$INSTALLER" ] && { printf "   no installer built, run tools/build_installer.py\n"; exit 1; }
 
 export HOME="$SANDBOX"
+unset GEMINI_KEYS        # the sandbox has its own ring; the real one is not it
 mkdir -p "$HOME"
 APPHOME="$HOME/.google_tts_stt"
 BIN="$HOME/bin"
@@ -66,10 +69,18 @@ mkdir -p "$APPHOME/out"
 printf 'RIFF....WAVEfake' > "$APPHOME/out/speak_before_upgrade.wav"
 printf 'my own note\n' > "$APPHOME/notes.txt"
 
+# a key imported by the OLD version, which the new one must not lose and must
+# not import a second time when the same file is handed over again
+IMPKEY="AQ.Ab8RN6UPGRADEUPGRADEUPGRADEUPGRADE"
+printf 'imported before the upgrade\n%s\n' "$IMPKEY" > "$SANDBOX/oldimport.txt"
+"$PY" "$APPHOME/app.py" import "$SANDBOX/oldimport.txt" >/dev/null 2>&1
+KEYSUM_BEFORE="$(cksum < "$HOME/.gemini_keys")"
+grep -q "$IMPKEY" "$HOME/.gemini_keys" && ok "the old version imported a key" \
+  || bad "the old version imported a key"
+
 # --- 3. leave it running ---------------------------------------------------
 # Started the way the launcher starts it, absolute path and all. A test that
 # starts it differently proves nothing about the real thing.
-PY="$(command -v python3 || command -v python)"
 GTTS_PORT=7398 GEMINI_KEYS="$HOME/.gemini_keys" "$PY" "$APPHOME/app.py" >/dev/null 2>&1 &
 OLDPID=$!
 sleep 3
@@ -106,6 +117,14 @@ grep -q "gtt-update" "$BIN/gtt-update" && ok "gtt-update was rewritten" || bad "
 [ -x "$BIN/gtt" ] && ok "gtt is still executable" || bad "gtt is still executable"
 [ ! -f "$BIN/gtt.new" ] && [ ! -f "$BIN/gtt-update.new" ] && [ ! -f "$APPHOME/app.py.new" ] \
   && ok "no half written .new file was left behind" || bad "no half written .new file was left behind"
+
+# the same file handed to the NEW version must add nothing
+NEWOUT="$("$PY" "$APPHOME/app.py" import "$SANDBOX/oldimport.txt" 2>&1)"
+COUNT="$(grep -c "$IMPKEY" "$HOME/.gemini_keys")"
+want "a key imported before the upgrade is not imported again" "$COUNT" "1"
+printf '%s' "$NEWOUT" | grep -q "already in the ring" \
+  && ok "and the new version says it is already there" \
+  || bad "and the new version says it is already there"
 
 # the rename rule, tested for what it actually protects: a script being READ
 # by a running shell must survive being replaced mid-read.

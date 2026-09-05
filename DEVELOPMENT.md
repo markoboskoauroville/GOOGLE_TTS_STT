@@ -91,3 +91,74 @@ matched nothing and printed everything. This is the exact trap `apis/gemini.md`
 records, and it caused the same leak once before. All twenty-one keys need
 rotating. Nothing in this repository holds a key, and the Keys tab never sends
 a whole one to the page.
+
+---
+
+## 5.9.2026 — v2, the file picker
+
+### Why
+
+Copying a key file into place by hand is a step that gets skipped, done wrong,
+or done twice. Done twice is the expensive one: the same keys land in the ring
+again under slightly different names, the rotation then thinks it has thirty-six
+budgets when it has eighteen, and every second request hits a wall the ledger
+did not expect.
+
+So the app takes the file and does the copying itself, and the merge is the
+part that had to be right.
+
+### Finding keys and naming them are two different jobs
+
+Kept in separate functions on purpose. Finding is a regular expression and is
+never wrong about what a key looks like. Naming is guesswork over the shape of
+whatever file this was — JSON, CSV, a markdown table, a note. A wrong label
+costs nothing, and separating them means a clever labelling idea can never lose
+a key. Test 1b tests the two halves separately for the same reason.
+
+### The picker and the ring reader disagreed about what a key is
+
+Found by the new binding check in test 1. The picker accepted
+`AQ.` plus twenty characters, and `load_ring` required a line longer than
+thirty. A key between those two lengths imported successfully, reported
+success, and then read back as an empty ring. There is now one `KEY_RE`,
+defined above `load_ring`, used by both. Two definitions of the same thing are
+two places to drift apart, and the drift here was silent in the worst way: the
+app said it had done the thing it had not done.
+
+### JSON exports were being labelled with fragments of JSON
+
+The first version walked the JSON and used the dict key as the name, which
+works for `{"tribal": "AQ..."}` and fails for `{"name": "tribal", "key":
+"AQ..."}` — the field holding the key is called `key`, which strips to nothing,
+so it fell back to the line above, which inside JSON is a fragment of JSON. The
+first real file tried, a two-record export, produced accounts named
+`{"name":"tribal","key`.
+
+Now the walk looks for a sibling `name`, `label`, `account`, `title`, `id` or
+`alias` field in the same object, and when the whole file parses as JSON the
+JSON names REPLACE the line-based guesses instead of filling in beside them.
+
+### Dependencies say when they are already there
+
+`already there` in grey rather than `ok` in green. The green tick was being read
+as "I installed this for you", which mattered on a machine where ffmpeg was
+already present and the run looked identical to one where it had just been
+fetched.
+
+### get.sh, because the install command must not carry a version
+
+The installer filename carries its number at both ends, which is right for a
+file you keep and wrong for a command you type: `bash 1-google-tts-stt-v1.sh`
+went stale the moment v2 existed, and it had already been handed over. `get.sh`
+has no number, asks the repository which installer is newest, verifies the
+download and runs it, passing its arguments through. MAHA_COMMUTE solved this
+the same way and this is that shape.
+
+### Two faults in the tests themselves
+
+A test that overwrote the ring mid-file and left the five checks below it
+looking at one key instead of two. And test 4 inheriting `GEMINI_KEYS` from the
+environment, so the sandbox's import went into the real ring and the sandbox's
+own ring stayed empty. Both were the test lying rather than the app breaking,
+which is the failure mode the manifest warns about: any detail the system keys
+on has to match reality or the test proves nothing about reality.

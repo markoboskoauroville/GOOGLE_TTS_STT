@@ -1,16 +1,17 @@
 # DELIVERY RECORD
 
-**v1, 5.9.2026.** What was measured, and what was not tested.
+**v2, 5.9.2026.** What was measured, and what was not tested.
 
 ## The gate
 
-    build is fresh          1-google-tts-stt-v1.sh matches src/
+    build is fresh          2-google-tts-stt-v2.sh matches src/
     installer is whole      --verify passes
-    TEST 1  mechanism       32 checks   0 failed
-    TEST 2  running app     22 checks   0 failed
-    TEST 3  ugly cases      33 checks   0 failed
-    TEST 4  upgrade         19 checks   0 failed
-                           106 checks   0 failed
+    TEST 1   mechanism       34 checks   0 failed
+    TEST 1b  the parser      70 checks   0 failed
+    TEST 2   running app     32 checks   0 failed
+    TEST 3   ugly cases      44 checks   0 failed
+    TEST 4   upgrade         22 checks   0 failed
+                            202 checks   0 failed
 
 Run on Linux with real keys, 5.9.2026.
 
@@ -27,13 +28,36 @@ Run on Linux with real keys, 5.9.2026.
 | audio in | also 25 tokens a second; 1M context is about 11 hours |
 | the loop | Speak's WAV fed back to Listen returns the words that went in |
 
-## Two bugs found by the tests, not by use
+## The parser, measured
+
+Seventeen file shapes, each holding the same two keys, each parsed correctly:
+the plain ring, a bare list, everything on one line, dotenv, a JSON object,
+JSON records with the name in a sibling field, CSV both ways round, a markdown
+table, YAML, a handwritten note, quoted and comma'd, Windows line endings, no
+trailing newline, inside a code fence, HTML, and keys buried in prose next to a
+URL.
+
+Eight shapes that contain no key and must yield none: empty, whitespace, prose,
+a git sha, padded base64, a URL, a short lookalike, and the bare word `AIza`.
+Plus a PNG, which must not raise, and a PNG with a key hidden in it, which must
+still give the key. A megabyte of noise around one key finds the key.
+
+Never duplicating, measured: the same file twice, an overlapping file, the same
+key under a different name, the same key three times in one file, and a new key
+wanting a name that is taken.
+
+## Four bugs found by the tests, not by use
 
 Both would have passed any hand test against the real API. Written up in
 `DEVELOPMENT.md`.
 
 - the quota parser read every daily wall as a minute limit
 - a prepaid account with no credit was retried forever
+- the picker and the ring reader disagreed about what a key is, so a key in
+  between their two definitions imported successfully into a ring that then
+  read back empty
+- JSON exports with the name in a sibling field were labelled with fragments of
+  JSON
 
 ## NOT TESTED
 
@@ -48,10 +72,18 @@ Named rather than left to silence.
   v1. Test 4 installs v1 over itself and hand-writes a ledger in an older shape
   so there is genuinely something from before to misread. From v2 the test uses
   the actual previous release and the stand-in comes out.
-- **`gtt-update` end to end.** It cannot be run until this repository has two
-  versions in it. Its parts were checked: the listing call, the version compare,
-  and `--verify` on the download. The path that actually replaces a running
-  updater is covered by the rename check in test 4.
+- **`gtt-update` and `get.sh` end to end.** Both ask GitHub which installer is
+  newest and neither could be run against a repository holding v2 until v2 was
+  pushed. Their parts were checked: the listing call, the version compare, and
+  `--verify` on the download. The path that replaces a running updater is
+  covered by the rename check in test 4. Run `gtt-update` once v3 exists and it
+  will be proven or it will not.
+- **A key file in a character encoding other than UTF-8.** Bytes are decoded
+  with `errors="replace"`, which cannot corrupt a key — every character a
+  Gemini key can contain is ASCII — but it has not been tried with a real
+  UTF-16 or Latin-1 file.
+- **A file over 8 MB.** Refused by size rather than parsed, which is a guess
+  about what a key file is rather than a measurement.
 - **waitress.** Installed and imported, but the app still starts the Flask
   development server. Wiring waitress in is v2.
 - **The daily limit for `gemini-3.1-flash-lite`.** Never reached, so the budget

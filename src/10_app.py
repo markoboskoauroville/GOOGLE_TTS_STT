@@ -41,7 +41,7 @@ try:
 except Exception:
     PACIFIC = timezone(timedelta(hours=-8))
 
-VERSION = 1
+VERSION = 2
 PORT = int(os.environ.get("GTTS_PORT", "7311"))
 KEYFILE = os.environ.get("GEMINI_KEYS", os.path.expanduser("~/.gemini_keys"))
 HOME = os.path.expanduser("~/.google_tts_stt")
@@ -74,13 +74,20 @@ _lock = threading.Lock()
 
 # ----------------------------------------------------------------- key ring
 
+# Both formats Google has used, in one place. The ring reader and the file
+# picker MUST agree about what a key looks like: an earlier version had the
+# picker accepting a key the reader then refused to read back, so an import
+# reported success and the ring stayed empty.
+KEY_RE = re.compile(r"(AIza[A-Za-z0-9_\-]{20,}|AQ\.[A-Za-z0-9_\-]{20,})")
+
+
 def load_ring():
     if not os.path.exists(KEYFILE):
         return []
     lines = [l.strip() for l in open(KEYFILE).read().splitlines()]
     out, i = [], 0
     while i < len(lines) - 1:
-        if lines[i] and lines[i + 1] and " " not in lines[i + 1] and len(lines[i + 1]) > 30:
+        if lines[i] and KEY_RE.fullmatch(lines[i + 1]):
             out.append((lines[i], lines[i + 1]))
             i += 2
         else:
@@ -90,6 +97,248 @@ def load_ring():
 
 def mask(key):
     return key[:6] + "…" + key[-4:]
+
+
+# ------------------------------------------------------- the file picker
+#
+# Keys arrive in whatever shape they were saved in: a note with the account
+# name above each key, a .env, a JSON export, a CSV, a markdown table, a
+# screenshot's OCR, a WhatsApp message pasted into a text file. The parser's
+# job is to find the keys in any of those without being told which it is, take
+# the account names where they exist, invent them where they do not, and never
+# fall over on a file that turns out to be a PDF.
+#
+# It is deliberately in two halves. FINDING keys is a regex over the raw text
+# and is never wrong about what a key looks like. NAMING them is guesswork, and
+# guesswork is allowed to be wrong because a wrong label costs nothing — the
+# key still works and the label can be edited. Keeping the two apart means a
+# clever labelling idea can never lose a key.
+
+# A filter written for AIza alone finds NOTHING in a file full of AQ. keys,
+# which is how a key once ended up printed in full. KEY_RE is defined once,
+# above load_ring, and both halves use that one.
+
+# Google has changed the format once and will change it again. This catches a
+# line that is nothing but one long opaque token, so a third format is
+# REPORTED rather than silently dropped. It is never imported on its own.
+MAYBE_RE = re.compile(r"^[A-Za-z0-9_\-\.]{32,}$")
+NOT_A_KEY = re.compile(r"^(?:[0-9a-f]{32,}|[A-Za-z0-9+/]+={1,2}|https?[:/].*)$", re.I)
+
+LABEL_SEP = re.compile(r"^\s*[\"'\[\|\-\*\d\.\)]*\s*(.{1,60}?)\s*[\"']?\s*[:=,\|]\s*[\"']?$")
+MAX_IMPORT_BYTES = 8 * 1024 * 1024
+
+
+def clean_label(raw):
+    """Whatever surrounded the name in the original file, take it off."""
+    if not raw:
+        return ""
+    s = raw.strip()
+    s = re.sub(r"^[\s>#\-\*\u2022\|,;:=]+", "", s)       # markdown, bullets, pipes, stray commas
+    s = re.sub(r"[\s\|,:=;]+$", "", s)
+    s = s.strip().strip("\"'`").strip()
+    # GEMINI_API_KEY_TRIBAL is called tribal. Strip the noise words one at a
+    # time, because they come stacked and one pass leaves half of them behind.
+    for _ in range(4):
+        s2 = re.sub(r"^(api|key|token|secret|gemini|google|account|name)[\s_\-:=]*", "",
+                    s, flags=re.I)
+        if s2 == s:
+            break
+        s = s2
+    s = s.strip(" _-:=").strip()
+    s = re.sub(r"\s+", " ", s)
+    if KEY_RE.search(s) or len(s) > 40:
+        return ""
+    if not re.search(r"[A-Za-z0-9]", s):
+        return ""
+    return s
+
+
+def label_before(text, start, lines, line_no):
+    """Three places a name hides, in the order they are trustworthy."""
+    line = lines[line_no]
+    col = start - sum(len(l) + 1 for l in lines[:line_no])
+
+    # 1. on the same line, in front of the key:  tribal: AQ...   "tribal","AQ..."
+    head = line[:col]
+    if head.strip():
+        m = LABEL_SEP.match(head)
+        cand = clean_label(m.group(1) if m else head)
+        if cand:
+            return cand
+
+    # 2. on the same line, after the key:  AQ...,tribal   | AQ... | tribal |
+    tail = line[col:]
+    tail = KEY_RE.sub("", tail, count=1)
+    cand = clean_label(tail)
+    if cand:
+        return cand
+
+    # 3. the nearest line above that is not blank and holds no key of its own
+    for j in range(line_no - 1, max(line_no - 4, -1), -1):
+        prev = lines[j]
+        if not prev.strip() or KEY_RE.search(prev):
+            continue
+        if re.match(r"^\s*(#|//|;)", prev):      # a comment is not an account name
+            break
+        cand = clean_label(prev)
+        if cand:
+            return cand
+        break
+    return ""
+
+
+def parse_keys(text):
+    """Find every key in any text. Returns (pairs, maybes).
+
+    pairs is [(label, key)] in the order they appear, one entry per DISTINCT
+    key — a key written twice in one file is one key. maybes is a list of
+    long opaque tokens that look like they could be a format we do not know.
+    """
+    if isinstance(text, bytes):
+        text = text.decode("utf-8", "replace")
+    lines = text.splitlines()
+    starts, pos = [], 0
+    for l in lines:
+        starts.append(pos)
+        pos += len(l) + 1
+
+    pairs, seen = [], set()
+    for m in KEY_RE.finditer(text):
+        key = m.group(1)
+        if key in seen:
+            continue
+        seen.add(key)
+        line_no = 0
+        for i, s in enumerate(starts):
+            if s <= m.start():
+                line_no = i
+            else:
+                break
+        pairs.append((label_before(text, m.start(), lines, line_no), key))
+
+    maybes = []
+    for l in lines:
+        s = l.strip().strip("\"',")
+        if (MAYBE_RE.match(s) and not KEY_RE.search(s)
+                and not NOT_A_KEY.match(s) and s not in maybes):
+            maybes.append(s)
+
+    # A JSON export names its keys better than the line above ever could, and
+    # the line above a key inside JSON is a fragment of JSON. So when the whole
+    # file parses, the JSON names REPLACE the line-based guesses rather than
+    # filling in beside them.
+    #
+    # Two shapes, both common:
+    #     {"tribal": "AQ..."}                     the dict key is the name
+    #     {"name": "tribal", "key": "AQ..."}      a sibling field is the name
+    # The second one is why a plain dict-key lookup is not enough: the key
+    # holding the key is called "key", which strips to nothing.
+    NAME_FIELDS = ("name", "label", "account", "title", "id", "alias")
+    try:
+        obj = json.loads(text)
+        named = {}
+
+        def walk(node, name="", sibling=""):
+            if isinstance(node, dict):
+                sib = ""
+                for f in NAME_FIELDS:
+                    for k, v in node.items():
+                        if k.lower() == f and isinstance(v, str) and not KEY_RE.search(v):
+                            sib = v
+                            break
+                    if sib:
+                        break
+                for k, v in node.items():
+                    walk(v, str(k), sib)
+            elif isinstance(node, list):
+                for v in node:
+                    walk(v, name, sibling)
+            elif isinstance(node, str):
+                for mm in KEY_RE.finditer(node):
+                    named[mm.group(1)] = clean_label(name) or clean_label(sibling)
+
+        walk(obj)
+        if named:
+            pairs = [(named.get(k, ""), k) for _, k in pairs]
+    except Exception:
+        pass
+
+    return pairs, maybes
+
+
+def unique_label(label, taken, n):
+    """A name already in use gets a number, so two accounts never share one."""
+    base = label or ("account %d" % n)
+    if base not in taken:
+        return base
+    i = 2
+    while "%s %d" % (base, i) in taken:
+        i += 1
+    return "%s %d" % (base, i)
+
+
+def import_keys(text, source_name=""):
+    """Merge new keys into the ring. Existing keys are never touched, never
+    rewritten, and never duplicated. The file is appended to, so comments and
+    the order already in it survive."""
+    pairs, maybes = parse_keys(text)
+    existing = load_ring()
+    have = {k for _, k in existing}
+    taken = {l for l, _ in existing}
+
+    added, dupes = [], []
+    n = len(existing)
+    for label, key in pairs:
+        if key in have:
+            dupes.append({"label": next((l for l, k in existing if k == key), ""),
+                          "masked": mask(key)})
+            continue
+        n += 1
+        lab = unique_label(label, taken, n)
+        taken.add(lab)
+        have.add(key)
+        added.append((lab, key))
+
+    if added:
+        os.makedirs(os.path.dirname(KEYFILE) or ".", exist_ok=True)
+        old = open(KEYFILE).read() if os.path.exists(KEYFILE) else ""
+        if old and not old.endswith("\n"):
+            old += "\n"
+        if old and not old.endswith("\n\n"):
+            old += "\n"
+        block = "".join("%s\n%s\n\n" % (l, k) for l, k in added)
+        tmp = KEYFILE + ".new"
+        with open(tmp, "w") as f:
+            f.write(old + block)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, KEYFILE)          # rename, never truncate
+        os.chmod(KEYFILE, 0o600)
+        receipt(source_name, added, dupes, maybes)
+
+    return {"ok": True,
+            "found": len(pairs),
+            "added": [{"label": l, "masked": mask(k)} for l, k in added],
+            "duplicates": dupes,
+            "maybes": [m[:6] + "\u2026" for m in maybes],
+            "ring": len(load_ring()),
+            "source": source_name}
+
+
+def receipt(source_name, added, dupes, maybes):
+    """A record of what was imported, with no key in it. The keys themselves
+    live in exactly one place and this is not that place."""
+    d = os.path.join(HOME, "imports")
+    os.makedirs(d, exist_ok=True)
+    p = os.path.join(d, time.strftime("%Y%m%d_%H%M%S") + ".txt")
+    with open(p, "w") as f:
+        f.write("imported %s\nfrom %s\n\n" % (time.strftime("%d.%m.%Y %H:%M"), source_name or "?"))
+        for l, k in added:
+            f.write("  added    %-24s %s\n" % (l, mask(k)))
+        for x in dupes:
+            f.write("  already  %-24s %s\n" % (x["label"], x["masked"]))
+        for m in maybes:
+            f.write("  unknown format, not imported: %s\u2026\n" % m[:6])
+    os.chmod(p, 0o600)
 
 
 # ------------------------------------------------------------------ ledger
@@ -406,6 +655,26 @@ def listen(path, language="", verbatim=True):
 
 # -------------------------------------------------------------------- KEYS
 
+def health():
+    """What is installed and what is not. The Keys tab shows this so a missing
+    ffmpeg is discovered here rather than by a transcription that fails."""
+    import shutil
+    def mod(name):
+        try:
+            __import__(name)
+            return True
+        except Exception:
+            return False
+    return {"python": "%d.%d.%d" % sys.version_info[:3],
+            "flask": mod("flask"),
+            "waitress": mod("waitress"),
+            "ffmpeg": bool(shutil.which("ffmpeg")),
+            "keyfile": KEYFILE,
+            "keys": len(load_ring()),
+            "outdir": OUTDIR,
+            "version": VERSION}
+
+
 def test_all_keys():
     """One cheap call per key. Costs one flash-lite request each, which is the
     model with the most daily room, so this is the cheapest honest test there is."""
@@ -596,8 +865,17 @@ Direction goes in the text itself, in plain English. For two speakers, tick the 
 
 <section>
 <div id="bud" class="idle">reading the ledger…</div>
+
+<label>Add accounts from a file</label>
+<input type="file" id="kf" onchange="doImport()">
+<div class="note" id="knote">Any file. A note, a .env, a JSON export, a CSV, a
+markdown table. It finds the keys, takes the account names where they are
+there, and adds only the ones the ring does not already have.</div>
+<div class="out idle" id="kimp">nothing imported this session</div>
+
 <button class="go" onclick="testKeys()">Test every key</button>
 <div id="keys" class="out idle">no key tested this session</div>
+<div id="dep" class="note idle">checking what is installed…</div>
 </section>
 </div>
 <script>
@@ -606,7 +884,7 @@ V.forEach(v=>{v1.add(new Option(v,v));v2.add(new Option(v,v))});
 v1.value="Charon";
 window.addEventListener('load',loadBudget);
 function tab(i){document.querySelectorAll('nav button').forEach((b,j)=>b.classList.toggle('on',i==j));
- document.querySelectorAll('section').forEach((s,j)=>s.classList.toggle('on',i==j));if(i==2)loadBudget();}
+ document.querySelectorAll('section').forEach((s,j)=>s.classList.toggle('on',i==j));if(i==2){loadBudget();loadHealth();}}
 async function doSpeak(){
  sgo.disabled=true;sout.textContent='generating, about half the length of the audio…';
  const r=await(await fetch('/api/speak',{method:'POST',headers:{'Content-Type':'application/json'},
@@ -636,6 +914,25 @@ async function loadBudget(){
    +'<div class="bar"><i style="width:'+pct+'%"></i></div></td></tr>';});
  s+='</table><div class="note">* daily limit never actually reached, so this row is a guess of '+%%ASSUMED%%+' a key.</div>';
  bud.innerHTML=s;bud.classList.remove('idle');}
+async function doImport(){
+ if(!kf.files[0])return;
+ kimp.classList.remove('idle');kimp.textContent='reading '+kf.files[0].name+'…';
+ const fd=new FormData();fd.append('keyfile',kf.files[0]);
+ const r=await(await fetch('/api/import',{method:'POST',body:fd})).json();
+ if(!r.ok){kimp.textContent='no: '+r.error;return;}
+ let s=r.found+' key'+(r.found==1?'':'s')+' found in '+r.source+'\\n';
+ s+=r.added.length+' added, '+r.duplicates.length+' already in the ring\\n';
+ r.added.forEach(a=>{s+='\\n  + '+a.label+'   '+a.masked});
+ r.duplicates.forEach(a=>{s+='\\n  = '+(a.label||'already here')+'   '+a.masked});
+ if(r.maybes.length)s+='\\n\\nnot a format I know, left alone: '+r.maybes.join(', ');
+ s+='\\n\\nthe ring now holds '+r.ring;
+ kimp.textContent=s;kf.value='';loadBudget();}
+async function loadHealth(){
+ const h=await(await fetch('/api/health')).json();
+ const y=b=>b?'yes':'no';
+ dep.textContent='python '+h.python+' · flask '+y(h.flask)+' · waitress '+y(h.waitress)
+  +' · ffmpeg '+y(h.ffmpeg)+' · ring '+h.keys+' accounts at '+h.keyfile;
+ dep.classList.remove('idle');}
 async function testKeys(){
  keys.innerHTML='<div class="note">testing, one request per key…</div>';
  const rows=await(await fetch('/api/keys')).json();
@@ -687,6 +984,20 @@ def serve():
             except Exception:
                 pass
 
+    @app.post("/api/import")
+    def api_import():
+        f = request.files.get("keyfile")
+        if not f:
+            return jsonify({"ok": False, "error": "no file"})
+        raw = f.read(MAX_IMPORT_BYTES + 1)
+        if len(raw) > MAX_IMPORT_BYTES:
+            return jsonify({"ok": False, "error": "that file is over 8 MB, which is not a key file"})
+        return jsonify(import_keys(raw.decode("utf-8", "replace"), f.filename or "a file"))
+
+    @app.get("/api/health")
+    def api_health():
+        return jsonify(health())
+
     @app.get("/api/keys")
     def api_keys():
         return jsonify(test_all_keys())
@@ -701,9 +1012,28 @@ def serve():
     app.run(host="127.0.0.1", port=PORT, threaded=True)
 
 
+def cli_import(path):
+    if not os.path.exists(path):
+        sys.exit("no file at %s" % path)
+    if os.path.getsize(path) > MAX_IMPORT_BYTES:
+        sys.exit("that file is over 8 MB, which is not a key file")
+    r = import_keys(open(path, "rb").read().decode("utf-8", "replace"), os.path.basename(path))
+    print("  %d key(s) found in %s" % (r["found"], r["source"]))
+    for a in r["added"]:
+        print("  + %-24s %s" % (a["label"], a["masked"]))
+    for a in r["duplicates"]:
+        print("  = %-24s %s   already in the ring" % (a["label"] or "", a["masked"]))
+    for m in r["maybes"]:
+        print("  ? %s  not a format I know, left alone" % m)
+    print("  the ring now holds %d" % r["ring"])
+    return 0
+
+
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "test":
         sys.exit(run_tests())
+    if len(sys.argv) > 2 and sys.argv[1] == "import":
+        sys.exit(cli_import(sys.argv[2]))
     if not load_ring():
         sys.exit("no keys found in %s" % KEYFILE)
     serve()

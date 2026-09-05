@@ -13,9 +13,16 @@
 # ledgers, and two ledgers that each think they own the daily budget are both
 # wrong by dinner time.
 #
-#   bash @@FILENAME@@            install, then run the four tests
-#   bash @@FILENAME@@ --quiet    install, no tests
-#   bash @@FILENAME@@ --verify   check this file is whole, change nothing
+#   bash @@FILENAME@@                 install, then run the tests
+#   bash @@FILENAME@@ --keys FILE     install, and take the keys out of FILE
+#   bash @@FILENAME@@ --quiet         install, no tests
+#   bash @@FILENAME@@ --verify        check this file is whole, change nothing
+#
+# --keys takes ANY file: a note, a .env, a JSON export, a CSV, a markdown
+# table. It finds the keys, keeps the account names where they are there, and
+# adds only the ones the ring does not already hold. Nothing is ever
+# duplicated and nothing already in the ring is rewritten. The same picker is
+# in the Keys tab, so a file can be dropped in later without the terminal.
 #
 # Leaves two words behind:
 #
@@ -47,11 +54,17 @@ OUT="$APPHOME/out"
 
 VERIFY_ONLY=0
 QUIET=0
+IMPORT=""
+NEXT_IS_KEYS=0
 for a in "$@"; do
+  if [ "$NEXT_IS_KEYS" = "1" ]; then IMPORT="$a"; NEXT_IS_KEYS=0; continue; fi
   case "$a" in
     --verify) VERIFY_ONLY=1 ;;
     --quiet|--no-test) QUIET=1 ;;
-    -h|--help) printf 'usage: bash %s [--quiet] [--verify]\n' "$GTT_FILE"; exit 0 ;;
+    --keys) NEXT_IS_KEYS=1 ;;
+    --keys=*) IMPORT="${a#--keys=}" ;;
+    -h|--help)
+      printf 'usage: bash %s [--keys FILE] [--quiet] [--verify]\n' "$GTT_FILE"; exit 0 ;;
   esac
 done
 
@@ -112,7 +125,7 @@ printf "%s\n" "$($PY -V 2>&1 | awk '{print $2}')"
 # ---------------------------------------------------------------- flask
 step "flask"
 if $PY -c "import flask" >/dev/null 2>&1; then
-  done_
+  skip_ "already there"
 else
   printf "${DIM}installing${OFF}"
   $PY -m pip install flask --break-system-packages -q >/dev/null 2>&1 \
@@ -124,7 +137,7 @@ fi
 # waitress if it is there, the dev server with a warning if it is not
 step "waitress"
 if $PY -c "import waitress" >/dev/null 2>&1; then
-  done_
+  skip_ "already there"
 else
   $PY -m pip install waitress --break-system-packages -q >/dev/null 2>&1 \
     || $PY -m pip install waitress -q >/dev/null 2>&1
@@ -134,7 +147,7 @@ fi
 # ---------------------------------------------------------------- ffmpeg
 step "ffmpeg"
 if command -v ffmpeg >/dev/null 2>&1; then
-  done_
+  skip_ "already there"
 else
   skip_ "Listen takes wav mp3 flac ogg aac only"
   say "${DIM}Termux: pkg install ffmpeg   macOS: brew install ffmpeg${OFF}"
