@@ -5,7 +5,8 @@
 #   src/00_head.sh   9b27f46ee8bc
 #   src/30_transcribe.html   67e73826805d   vendored, engine swapped at build
 #   src/seed/                 47 cached previews
-#   src/10_app.py    d4fc79b76408
+#   src/10_app.py    05d6feef4f77
+#   src/15_page.html 50980abed4e6
 #   src/20_tail.sh   d0718c3a7841
 #
 # GOOGLE TTS AND STT, one roof over the two halves of the same job.
@@ -20,10 +21,10 @@
 # ledgers, and two ledgers that each think they own the daily budget are both
 # wrong by dinner time.
 #
-#   bash 13-google-tts-stt-v13.sh                 install
-#   bash 13-google-tts-stt-v13.sh --keys FILE     install, and take the keys out of FILE
-#   bash 13-google-tts-stt-v13.sh --test          install, then run the four tests
-#   bash 13-google-tts-stt-v13.sh --verify        check this file is whole, change nothing
+#   bash 14-google-tts-stt-v14.sh                 install
+#   bash 14-google-tts-stt-v14.sh --keys FILE     install, and take the keys out of FILE
+#   bash 14-google-tts-stt-v14.sh --test          install, then run the four tests
+#   bash 14-google-tts-stt-v14.sh --verify        check this file is whole, change nothing
 #
 # INSTALLING SPENDS NOTHING. The four tests make real calls against a real
 # ring, and a TTS account has ten requests a day, so they run when you ask for
@@ -46,8 +47,8 @@
 
 set -u
 
-GTT_VERSION="v13"
-GTT_FILE="13-google-tts-stt-v13.sh"
+GTT_VERSION="v14"
+GTT_FILE="14-google-tts-stt-v14.sh"
 GTT_REPO="markoboskoauroville/GOOGLE_TTS_STT"
 
 # --- the platform layer, and nothing below this block knows the platform ---
@@ -247,7 +248,7 @@ try:
 except Exception:
     PACIFIC = timezone(timedelta(hours=-8))
 
-VERSION = 13
+VERSION = 14
 PORT = int(os.environ.get("GTTS_PORT", "7311"))
 KEYFILE = os.environ.get("GEMINI_KEYS", os.path.expanduser("~/.gemini_keys"))
 HOME = os.path.expanduser("~/.google_tts_stt")
@@ -1483,365 +1484,7 @@ def run_tests():
 
 # --------------------------------------------------------------------- web
 
-# The page. Built on the AGY tokens at the top of maha_transcribe.html, which
-# are the same ones ma-reader-web uses, so moving between the apps is moving
-# between tabs of one thing rather than between two products. Monospace
-# throughout, one centred unit on a dark ground, pill tabs, amber for the one
-# lit thing. The key rows are Key_Tester's item_key.xml: a card per account,
-# the status as a glyph and a word, and the actions on the row they act on.
-PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Google TTS and STT</title><style>
-:root{
- --bg:#0b0d10; --surface:#0d1117; --surface-2:#141a21; --line:#23303d;
- --amber:#f59e0b; --amber-hi:#fbbf24; --amber-lo:#b45309;
- --prose:#f2ddb4; --dim:#8a7a5c;
- --red:#ef4444; --green:#22c55e; --coral:#d97757; --grey:#6b655c;
- --mono:ui-monospace,"JetBrains Mono","Cascadia Mono","SF Mono",Menlo,Consolas,monospace;
-}
-*{box-sizing:border-box}
-*:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
-@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
-html,body{margin:0;background:var(--bg);color:var(--prose);font-family:var(--mono);min-height:100vh}
-body{display:flex;justify-content:center;align-items:flex-start;
- padding:calc(14px + env(safe-area-inset-top)) 8px calc(14px + env(safe-area-inset-bottom))}
-.unit{width:100%;max-width:640px;background:var(--surface);border:1px solid var(--line);
- border-radius:10px;padding:14px}
-header{margin-bottom:8px;display:flex;justify-content:space-between;align-items:flex-start}
-h1{font-size:18px;letter-spacing:.12em;margin:0;font-weight:700}
-h1 span{color:var(--amber)}
-.tagline{font-size:11px;color:var(--dim);letter-spacing:.06em;margin-top:2px}
-.ver{font-size:11px;color:var(--dim);letter-spacing:.06em}
-.tabs{display:flex;gap:3px;margin-bottom:10px}
-.tab-btn{flex:1 0 auto;background:var(--surface-2);border:1px solid var(--line);color:var(--dim);
- font-family:var(--mono);font-size:11px;letter-spacing:.03em;padding:15px 6px;border-radius:999px;
- cursor:pointer;white-space:nowrap}
-.tab-btn.active{color:var(--bg);background:var(--amber);border-color:var(--amber);font-weight:700}
-.tab{display:none}.tab.active{display:block}
-label{display:block;color:var(--dim);font-size:11px;letter-spacing:.06em;margin:14px 0 5px}
-textarea,input,select{width:100%;background:var(--surface-2);border:1px solid var(--line);
- color:var(--prose);font-family:var(--mono);font-size:13px;padding:11px;border-radius:8px}
-textarea{min-height:150px;resize:vertical;line-height:1.5}
-.row{display:flex;gap:8px}.row>*{flex:1}
-button.go{width:100%;margin-top:14px;background:var(--amber);color:var(--bg);border:0;padding:14px;
- border-radius:999px;font-family:var(--mono);font-size:12px;font-weight:700;letter-spacing:.08em;cursor:pointer}
-button.go:active{transform:scale(.985)}
-button.go.ghost{background:var(--surface-2);color:var(--prose);border:1px solid var(--line);font-weight:400}
-button.go.danger{background:var(--surface-2);color:var(--red);border:1px solid var(--line);font-weight:400}
-button.go:disabled{opacity:.4}
-.out{margin-top:14px;padding:12px;background:var(--surface-2);border:1px solid var(--line);
- border-radius:8px;white-space:pre-wrap;font-size:12px;line-height:1.55;min-height:46px}
-.idle{opacity:.38;pointer-events:none}
-audio{width:100%;margin-top:12px}
-.note{font-size:11px;color:var(--dim);line-height:1.6;margin:6px 0 0}
-.big{font-size:30px;font-weight:300;letter-spacing:-.01em;margin:2px 0;color:var(--prose)}
-.bar{height:4px;background:var(--line);border-radius:3px;overflow:hidden;margin-top:5px}
-.bar i{display:block;height:100%;background:var(--amber)}
-table{width:100%;border-collapse:collapse;font-size:12px}
-td,th{text-align:left;padding:7px 5px;border-bottom:1px solid var(--line)}
-th{color:var(--dim);font-weight:400;letter-spacing:.06em}
-/* a card per account, from Key_Tester item_key.xml */
-.kcard{background:var(--surface-2);border:1px solid var(--line);border-radius:10px;
- padding:12px;margin-bottom:9px}
-.khead{display:flex;justify-content:space-between;align-items:center;gap:8px}
-.klabel{color:var(--coral);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.kstatus{font-size:12px;font-weight:700;white-space:nowrap}
-.kkey{color:var(--prose);font-size:12px;margin-top:8px}
-.kwhy{color:var(--dim);font-size:11px;margin-top:3px;line-height:1.5}
-.kdetail{margin-top:9px;padding:9px;background:var(--surface);border:1px solid var(--line);
- border-radius:6px;color:var(--green);font-size:11px;white-space:pre-wrap;line-height:1.5}
-.kacts{display:flex;gap:6px;margin-top:11px}
-.kacts button{flex:1;background:var(--surface);border:1px solid var(--line);color:var(--prose);
- font-family:var(--mono);font-size:11px;padding:10px 4px;border-radius:7px;cursor:pointer}
-.kacts button.gold{color:var(--amber)}
-.kacts button.red{color:var(--red)}
-.kacts button:disabled{opacity:.4}
-.working{color:var(--green)}
-.busy{color:var(--amber)}
-.nocredit{color:var(--amber-hi)}
-.refused{color:var(--red)}
-.unknown{color:var(--grey)}
-.untested{color:var(--grey)}
-</style></head><body><div class="unit">
-<header>
-<div><h1>GOOGLE <span>TTS</span> AND <span>STT</span></h1>
-<div class="tagline">speak &middot; listen &middot; one ring</div></div>
-<div class="ver">v%%VERSION%%</div>
-</header>
-<div class="tabs">
-<button class="tab-btn active" onclick="tab(0)">SPEAK</button>
-<button class="tab-btn" onclick="tab(1)">LISTEN</button>
-<button class="tab-btn" onclick="tab(2)">KEYS</button>
-</div>
-
-<section class="tab active">
-<!-- SAMPLE_PLAYER's shape: two slots, a browser with a search box and facet
-     chips, and a bank of directions you insert rather than type. A free text
-     box is a blank page, and a blank page while choosing a voice is where
-     somebody takes the default. -->
-<div class="row">
-<div><label>VOICE 1 NAME</label><input id="n1" value="VIVEKA"></div>
-<div><label>VOICE 2 NAME</label><input id="n2" value="MANAN"></div>
-</div>
-<div class="row">
-<div><label>VOICE 1</label><button class="go ghost" id="pick1" onclick="openBrowser(1)">Charon &middot; informative</button></div>
-<div><label>VOICE 2</label><button class="go ghost" id="pick2" onclick="openBrowser(2)">Puck &middot; upbeat</button></div>
-</div>
-
-<div id="browser" class="kcard" style="display:none">
-<input id="vq" placeholder="search a voice by name or timbre" oninput="drawVoices()">
-<div id="vfacets" class="kacts" style="flex-wrap:wrap"></div>
-<div id="vlist" style="max-height:38vh;overflow:auto;margin-top:8px"></div>
-</div>
-
-<label>SCRIPT</label>
-<textarea id="text" placeholder="&lt;VIVEKA: Amused&gt; Ah. There you are. I was expecting you.
-&lt;MANAN: Anxious: slow&gt; I am trying.
-&lt;VIVEKA: Firm&gt; I know."></textarea>
-<div class="note">A tag sets who is speaking, how, and how fast:
-<b>&lt;NAME&gt;</b>, <b>&lt;NAME: Weary&gt;</b>, <b>&lt;NAME: Weary: slow&gt;</b>.
-Put the cursor where you want one and pick below.</div>
-
-<div class="row">
-<div><label>INSERT FOR</label><select id="who"></select></div>
-<div><label>PACE</label><select id="pace"></select></div>
-</div>
-<input id="eq" placeholder="search a direction: angry, whisper, teaching…" oninput="drawEmotions()">
-<div id="egroups" class="kacts" style="flex-wrap:wrap"></div>
-<div id="elist" style="max-height:30vh;overflow:auto;margin-top:8px"></div>
-<div class="note" id="cachenote">counting the cache…</div>
-
-<button class="go" id="sgo" onclick="doSpeak()">SPEAK</button>
-<div class="out idle" id="sout">nothing spoken yet</div>
-<audio id="player" class="idle" controls></audio>
-</section>
-
-<section class="tab" id="listenTab">
-<!-- Maha Transcribe itself, in the tab. Not a link to it: a link is a second
-     step and a second page, and you cannot open a file in the tab you left. -->
-<iframe id="mt" title="Maha Transcribe" style="width:100%;height:78vh;border:1px solid var(--line);border-radius:10px;background:var(--bg)"></iframe>
-</section>
-
-<section class="tab">
-<div id="bud" class="idle">reading the ledger…</div>
-<label>ADD ACCOUNTS FROM A FILE</label>
-<input type="file" id="kf" onchange="doImport()">
-<div class="note">Any file. A note, a .env, a JSON export, a CSV, a markdown
-table. It finds the keys, takes the account names where they are there, and
-adds only the ones the ring does not already hold.</div>
-<div class="out idle" id="kimp">nothing imported this session</div>
-<div class="row">
-<button class="go ghost" onclick="testKeys()">TEST ALL</button>
-<button class="go danger" id="del" onclick="deleteRefused()" disabled>DELETE REFUSED</button>
-</div>
-<button class="go ghost" id="undel" onclick="putBack()" disabled>PUT BACK</button>
-<div id="keys" class="note">no account tested this session. Every row has its
-own test and delete, so one account can be answered without spending the other
-twenty.</div>
-<div id="dep" class="note idle">checking what is installed…</div>
-</section>
-</div>
-<script>
-let VOICES=[], EMO=[], PACES=[], STAR=[];
-let SLOT={1:{voice:'Charon'},2:{voice:'Puck'}}, browsing=0, efacet='', vfacet='';
-try{STAR=JSON.parse(localStorage.getItem('gtt_star')||'[]')}catch(e){STAR=[]}
-function star(n){STAR=STAR.includes(n)?STAR.filter(x=>x!=n):STAR.concat([n]);
- localStorage.setItem('gtt_star',JSON.stringify(STAR));drawVoices();}
-// The header a cross-site request cannot set. Its value does not matter, its
-// presence does.
-const H={'X-Gtt-Local':'1'};
-const api=(u,o={})=>fetch(u,Object.assign({},o,{headers:Object.assign({},H,o.headers||{})}));
-const GLYPH={working:'\\u25cf',busy:'\\u25d0','no credit':'\\uff04',refused:'\\u2717',
-             unknown:'?',untested:'\\u25cb',testing:'\\u2026'};
-function cls(v){return v.replace(' ','')}
-function tab(i){
- // the transcribe app is loaded the first time its tab is opened, and then
- // left alone: reloading it would throw away a recording in progress
- if(i==1&&!mt.src)mt.src='/transcribe';
- document.querySelectorAll('.tab-btn').forEach((b,j)=>b.classList.toggle('active',i==j));
- document.querySelectorAll('.tab').forEach((s,j)=>s.classList.toggle('active',i==j));
- if(i==2){loadBudget();loadHealth();checkGrave();}}
-window.addEventListener('load',()=>{loadBudget();loadCatalogues();});
-async function loadCatalogues(){
- VOICES=await(await api('/api/voices')).json();
- EMO=await(await api('/api/emotions')).json();
- const timbres=[...new Set(VOICES.map(v=>v.timbre))].sort();
- vfacets.innerHTML='<button onclick="setVFacet(\'\')">all</button>'
-  +'<button onclick="setVFacet(\'*\')">starred</button>'
-  +timbres.map(t=>'<button onclick="setVFacet(\''+t+'\')">'+t+'</button>').join('');
- const groups=[...new Set(EMO.map(e=>e.group))];
- egroups.innerHTML='<button onclick="setEFacet(\'\')">all</button>'
-  +groups.map(g=>'<button onclick="setEFacet(\''+g+'\')">'+g.toLowerCase()+'</button>').join('');
- ['normal','slow','fast','very slow'].forEach(p=>pace.add(new Option(p,p)));
- drawVoices();drawEmotions();refreshWho();loadCache();}
-function refreshWho(){
- const cur=who.value;
- who.innerHTML='';
- [n1.value.trim()||'VOICE 1', n2.value.trim()||'VOICE 2'].forEach(n=>who.add(new Option(n,n)));
- if(cur)who.value=cur;}
-n1.addEventListener('input',refreshWho);n2.addEventListener('input',refreshWho);
-function setVFacet(f){vfacet=f;drawVoices();}
-function setEFacet(f){efacet=f;drawEmotions();}
-function openBrowser(slot){browsing=slot;browser.style.display='block';drawVoices();}
-function drawVoices(){
- const q=(vq.value||'').toLowerCase();
- const rows=VOICES.filter(v=>
-   (vfacet==''||(vfacet=='*'?STAR.includes(v.name):v.timbre==vfacet))
-   &&(v.name.toLowerCase().includes(q)||v.timbre.includes(q)));
- vlist.innerHTML=rows.length?rows.map(v=>
-  '<div class="kcard" style="margin-bottom:6px"><div class="khead">'
-  +'<div class="klabel">'+v.name+'</div><div class="kwhy">'+v.timbre+'</div></div>'
-  +'<div class="kacts">'
-  +'<button class="gold" onclick="chooseVoice(\''+v.name+'\')">use for '+(browsing||1)+'</button>'
-  +'<button onclick="hear(\''+v.name+'\',\'Neutral\',this)">\u25b6 hear</button>'
-  +'<button onclick="star(\''+v.name+'\')">'+(STAR.includes(v.name)?'\u2605 starred':'\u2606 star')+'</button>'
-  +'</div></div>').join(''):'<div class="note">nothing matches</div>';}
-
-// A preview is the same request every time, so the second press is free. The
-// button says which it was: a preview that quietly spends a request looks free
-// and the person finds out at the daily wall.
-let PLAYER=null;
-async function hear(voice,label,btn){
- const was=btn.textContent;
- btn.textContent='\u2026';btn.disabled=true;
- const r=await(await api('/api/preview?voice='+encodeURIComponent(voice)
-   +'&emotion='+encodeURIComponent(label))).json();
- btn.disabled=false;
- if(!r.ok){btn.textContent='no';setTimeout(()=>btn.textContent=was,1800);return;}
- btn.textContent=r.cached?'\u25b6 cached':'\u25b6 new';
- setTimeout(()=>btn.textContent=was,2500);
- if(PLAYER)PLAYER.pause();
- PLAYER=new Audio('/preview/'+r.file);PLAYER.play();
- loadCache();}
-async function loadCache(){
- const c=await(await api('/api/cache')).json();
- cachenote.textContent=c.count+' preview'+(c.count==1?'':'s')+' cached, '
-  +Math.round(c.bytes/1024)+' KB. A preview is the same request every time, so it '
-  +'is asked for once and then never again.';}
-function chooseVoice(name){
- const s=browsing||1;SLOT[s].voice=name;
- const v=VOICES.find(x=>x.name==name)||{timbre:''};
- (s==1?pick1:pick2).innerHTML=name+' &middot; '+v.timbre;
- browser.style.display='none';}
-function drawEmotions(){
- const q=(eq.value||'').toLowerCase();
- const rows=EMO.filter(e=>(efacet==''||e.group==efacet)
-   &&(e.label.toLowerCase().includes(q)||e.text.includes(q)||e.group.toLowerCase().includes(q)));
- elist.innerHTML=rows.length?rows.map(e=>
-  '<button class="go ghost" style="text-align:left;margin-top:4px;border-radius:8px"'
-  +' onclick="insertTag(\''+e.label+'\')">'+e.glyph+'  '+e.label
-  +'<span class="kwhy">  '+e.text+'</span></button>'
-  +'<button class="go ghost" style="width:auto;margin:4px 0 0 6px;padding:10px 12px;border-radius:8px"'
-  +' onclick="hear(SLOT[1].voice,\''+e.label+'\',this)">\u25b6</button>').join('')
-  :'<div class="note">nothing matches</div>';}
-function insertTag(label){
- const p=pace.value&&pace.value!='normal'?(': '+pace.value):'';
- const tag='<'+who.value+': '+label+p+'> ';
- const s=text.selectionStart||0,e=text.selectionEnd||0;
- text.value=text.value.slice(0,s)+tag+text.value.slice(e);
- text.focus();text.selectionStart=text.selectionEnd=s+tag.length;}
-
-async function doSpeak(){
- sgo.disabled=true;sout.classList.remove('idle');
- sout.textContent='generating, about half the length of the audio…';
- const r=await(await api('/api/speak',{method:'POST',headers:{'Content-Type':'application/json'},
-  body:JSON.stringify({text:text.value,speakers:[
-   {name:n1.value.trim(),voice:SLOT[1].voice},
-   {name:n2.value.trim(),voice:SLOT[2].voice}]})})).json();
- sgo.disabled=false;
- if(r.ok){sout.textContent=r.seconds+'s of audio, '+r.model+' on ['+r.key+']'
-   +((r.problems&&r.problems.length)?'\\n\\n'+r.problems.join('\\n'):'')
-   +(r.log&&r.log.length?'\\n'+r.log.join('\\n'):'');
-  player.src='/out/'+r.file;player.classList.remove('idle');}
- else sout.textContent='no: '+r.error+'\\n'+((r.log||[]).join('\\n'));}
-
-async function doImport(){
- if(!kf.files[0])return;
- kimp.classList.remove('idle');kimp.textContent='reading '+kf.files[0].name+'\\u2026';
- const fd=new FormData();fd.append('keyfile',kf.files[0]);
- const r=await(await api('/api/import',{method:'POST',body:fd})).json();
- if(!r.ok){kimp.textContent='no: '+r.error;return;}
- let s=r.found+' key'+(r.found==1?'':'s')+' found in '+r.source+'\\n';
- s+=r.added.length+' added, '+r.duplicates.length+' already in the ring\\n';
- r.added.forEach(a=>{s+='\\n  + '+a.label+'   '+a.masked});
- r.duplicates.forEach(a=>{s+='\\n  = '+(a.label||'already here')+'   '+a.masked});
- if(r.maybes.length)s+='\\n\\nnot a shape I know, left alone: '+r.maybes.join(', ');
- s+='\\n\\nthe ring now holds '+r.ring;
- kimp.textContent=s;kf.value='';loadBudget();testKeys();}
-
-let ROWS=[];
-function card(r){
- const v=r.verdict||'untested';
- return '<div class="kcard" id="k_'+encodeURIComponent(r.label)+'">'
-  +'<div class="khead"><div class="klabel">'+esc(r.label)+'</div>'
-  +'<div class="kstatus '+cls(v)+'">'+GLYPH[v]+' '+v+'</div></div>'
-  +'<div class="kkey">'+r.masked+(r.ms?'   <span class="kwhy">'+r.ms+' ms</span>':'')+'</div>'
-  +(r.why?'<div class="kwhy">'+esc(r.why)+'</div>':'')
-  +'<div class="kdetail" style="display:none"></div>'
-  +'<div class="kacts">'
-  +'<button onclick="one(\\''+esc(r.label)+'\\')">test</button>'
-  +'<button class="gold" onclick="models(\\''+esc(r.label)+'\\')">models</button>'
-  +'<button class="red" onclick="drop(\\''+esc(r.label)+'\\')">delete</button>'
-  +'</div></div>';}
-function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
-function draw(){
- keys.innerHTML=ROWS.length?ROWS.map(card).join(''):'<div class="note">the ring is empty. Pick a key file above.</div>';
- const n=ROWS.filter(r=>r.verdict=='refused').length;
- del.disabled=n==0;del.textContent=n?('DELETE '+n+' REFUSED'):'DELETE REFUSED';}
-async function testKeys(){
- const r0=await(await api('/api/ring')).json();
- ROWS=r0.keys.map(k=>({label:k.label,masked:k.masked,verdict:'testing',why:''}));draw();
- ROWS=await(await api('/api/keys')).json();draw();loadBudget();checkGrave();}
-async function one(label){
- const i=ROWS.findIndex(r=>r.label==label);
- if(i>=0){ROWS[i].verdict='testing';ROWS[i].why='';draw();}
- const r=await(await api('/api/key/'+encodeURIComponent(label)+'/test',{method:'POST'})).json();
- if(r.ok&&i>=0){ROWS[i]=Object.assign(ROWS[i],r);draw();}
- loadBudget();}
-async function models(label){
- const r=await(await api('/api/key/'+encodeURIComponent(label)+'/models')).json();
- const box=document.querySelector('#k_'+CSS.escape(encodeURIComponent(label))+' .kdetail');
- if(!box)return;
- box.style.display='block';
- box.textContent=r.ok?(r.count+' models reachable\\ntts:   '+(r.tts.join(', ')||'none')
-   +'\\nimage: '+(r.image.join(', ')||'none')+'\\ntext:  '+r.text.join(', ')):('no: '+r.error);}
-async function drop(label){
- const r=await(await api('/api/delete',{method:'POST',headers:{'Content-Type':'application/json'},
-  body:JSON.stringify({labels:[label]})})).json();
- ROWS=ROWS.filter(x=>x.label!=label);draw();loadBudget();checkGrave();}
-async function deleteRefused(){
- const labels=ROWS.filter(r=>r.verdict=='refused').map(r=>r.label);
- if(!labels.length)return;
- await api('/api/delete',{method:'POST',headers:{'Content-Type':'application/json'},
-  body:JSON.stringify({labels:labels})});
- ROWS=ROWS.filter(r=>r.verdict!='refused');draw();loadBudget();checkGrave();}
-async function putBack(){
- const r=await(await api('/api/restore',{method:'POST'})).json();
- testKeys();}
-async function checkGrave(){
- const g=await(await api('/api/removed')).json();
- undel.disabled=g.count==0;
- undel.textContent=g.count?('PUT BACK '+g.count):'PUT BACK';}
-async function loadHealth(){
- const h=await(await api('/api/health')).json();
- const y=b=>b?'yes':'no';
- dep.textContent='python '+h.python+' \\u00b7 flask '+y(h.flask)+' \\u00b7 waitress '+y(h.waitress)
-  +' \\u00b7 ffmpeg '+y(h.ffmpeg)+' \\u00b7 ring '+h.keys+' at '+h.keyfile;
- dep.classList.remove('idle');}
-async function loadBudget(){
- const b=await(await api('/api/budget')).json();
- const h=Math.floor(b.reset_in/3600),m=Math.floor(b.reset_in%3600/60);
- let s='<div class="big">'+b.speak_hours_real+' h</div><div class="note">of speech left today at a '
-  +'normal take length, '+b.speak_hours_max+' h if every call is run to its eight minute ceiling. '
-  +b.keys_live+' accounts. Resets in '+h+'h'+m+'m, at midnight Pacific.</div>'
-  +'<div class="note">Today: '+b.audio_out+'s made, '+b.audio_in+'s transcribed.</div><table>'
-  +'<tr><th>model</th><th>for</th><th>left today</th></tr>';
- b.models.forEach(m=>{const pct=m.total?100*m.left/m.total:0;
-  s+='<tr><td>'+m.model+(m.measured?'':' *')+'</td><td>'+m.use+'</td><td>'+m.left+' / '+m.total
-   +'<div class="bar"><i style="width:'+pct+'%"></i></div></td></tr>';});
- s+='</table><div class="note">* the daily limit for that one has never been reached, so the row is a guess of '+%%ASSUMED%%+' an account.</div>';
- bud.innerHTML=s;bud.classList.remove('idle');}
-</script></body></html>"""
+PAGE = '<!doctype html><html lang="en"><head><meta charset="utf-8">\n<meta name="viewport" content="width=device-width,initial-scale=1">\n<title>Google TTS and STT</title><style>\n:root{\n --bg:#0b0d10; --surface:#0d1117; --surface-2:#141a21; --line:#23303d;\n --amber:#f59e0b; --amber-hi:#fbbf24;\n --prose:#f2ddb4; --dim:#8a7a5c;\n --red:#ef4444; --green:#22c55e; --coral:#d97757; --grey:#6b655c;\n --mono:ui-monospace,"JetBrains Mono","Cascadia Mono","SF Mono",Menlo,Consolas,monospace;\n}\n*{box-sizing:border-box}\n*:focus-visible{outline:2px solid var(--amber);outline-offset:2px}\n@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important}}\nhtml,body{margin:0;background:var(--bg);color:var(--prose);font-family:var(--mono);min-height:100vh}\nbody{display:flex;justify-content:center;align-items:flex-start;\n padding:calc(10px + env(safe-area-inset-top)) 8px calc(14px + env(safe-area-inset-bottom))}\n.unit{width:100%;max-width:640px;background:var(--surface);border:1px solid var(--line);\n border-radius:10px;padding:12px}\n.top{display:flex;gap:6px;align-items:center;margin-bottom:10px}\n.tabs{display:flex;gap:3px;flex:1}\n.tab-btn{flex:1;background:var(--surface-2);border:1px solid var(--line);color:var(--dim);\n font-family:var(--mono);font-size:11px;letter-spacing:.06em;padding:14px 6px;border-radius:999px;\n cursor:pointer}\n.tab-btn.active{color:var(--bg);background:var(--amber);border-color:var(--amber);font-weight:700}\n.cog{flex:0 0 auto;width:44px;height:44px;border-radius:50%;background:var(--surface-2);\n border:1px solid var(--line);color:var(--amber);font-size:17px;cursor:pointer;line-height:1}\n.cog.on{background:var(--amber);color:var(--bg);border-color:var(--amber)}\n.tab{display:none}.tab.active{display:block}\nlabel{display:block;color:var(--dim);font-size:11px;letter-spacing:.06em;margin:12px 0 5px}\ntextarea,input,select{width:100%;background:var(--surface-2);border:1px solid var(--line);\n color:var(--prose);font-family:var(--mono);font-size:13px;padding:11px;border-radius:8px}\ntextarea{min-height:150px;resize:vertical;line-height:1.5}\n.row{display:flex;gap:8px}.row>*{flex:1}\nbutton.go{width:100%;margin-top:12px;background:var(--amber);color:var(--bg);border:0;padding:14px;\n border-radius:999px;font-family:var(--mono);font-size:12px;font-weight:700;letter-spacing:.08em;\n cursor:pointer}\nbutton.go.ghost{background:var(--surface-2);color:var(--prose);border:1px solid var(--line);font-weight:400}\nbutton.go.danger{background:var(--surface-2);color:var(--red);border:1px solid var(--line);font-weight:400}\nbutton.go:disabled{opacity:.45}\n.out{margin-top:12px;padding:12px;background:var(--surface-2);border:1px solid var(--line);\n border-radius:8px;white-space:pre-wrap;font-size:12px;line-height:1.55;min-height:44px}\n.idle{opacity:.38;pointer-events:none}\naudio{width:100%;margin-top:10px}\n.note{font-size:11px;color:var(--dim);line-height:1.6;margin:6px 0 0}\n.big{font-size:30px;font-weight:300;margin:2px 0;color:var(--prose)}\n.bar{height:4px;background:var(--line);border-radius:3px;overflow:hidden;margin-top:5px}\n.bar i{display:block;height:100%;background:var(--amber)}\ntable{width:100%;border-collapse:collapse;font-size:12px}\ntd,th{text-align:left;padding:7px 5px;border-bottom:1px solid var(--line)}\nth{color:var(--dim);font-weight:400;letter-spacing:.06em}\n.kcard{background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:11px;margin-bottom:8px}\n.khead{display:flex;justify-content:space-between;align-items:center;gap:8px}\n.klabel{color:var(--coral);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}\n.kstatus{font-size:12px;font-weight:700;white-space:nowrap}\n.kkey{color:var(--prose);font-size:12px;margin-top:7px}\n.kwhy{color:var(--dim);font-size:11px;margin-top:3px;line-height:1.5}\n.kdetail{margin-top:8px;padding:8px;background:var(--surface);border:1px solid var(--line);\n border-radius:6px;color:var(--green);font-size:11px;white-space:pre-wrap;line-height:1.5}\n.kacts{display:flex;gap:6px;margin-top:10px}\n.kacts button{flex:1;background:var(--surface);border:1px solid var(--line);color:var(--prose);\n font-family:var(--mono);font-size:11px;padding:10px 4px;border-radius:7px;cursor:pointer}\n.kacts button.gold{color:var(--amber)}\n.kacts button.red{color:var(--red)}\n.kacts button:disabled{opacity:.4}\n.working{color:var(--green)}.busy{color:var(--amber)}.nocredit{color:var(--amber-hi)}\n.refused{color:var(--red)}.unknown{color:var(--grey)}.untested{color:var(--grey)}\n.chip{display:inline-block;background:var(--surface-2);border:1px solid var(--line);\n border-radius:999px;padding:9px 13px;margin:0 5px 5px 0;font-size:11px;color:var(--prose);cursor:pointer}\n.chip.on{border-color:var(--amber);color:var(--amber)}\n.info{background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:11px;\n display:flex;gap:10px;align-items:center;margin-top:6px}\n.info .n{flex:1;min-width:0}\n.info .who{font-size:12px;color:var(--coral)}\n.info .v{font-size:11px;color:var(--dim);margin-top:2px}\n.info button{flex:0 0 auto;background:var(--surface);border:1px solid var(--line);color:var(--amber);\n font-family:var(--mono);font-size:11px;padding:11px 14px;border-radius:8px;cursor:pointer}\n/* the spinner. One braille cell, cycled. It is the only thing on the screen\n   that moves, so movement always means the same thing: something is running. */\n.spin{display:inline-block;width:1ch;color:var(--amber)}\n</style></head><body><div class="unit">\n\n<div class="top">\n  <div class="tabs">\n    <button class="tab-btn active" data-tab="0">SPEAK</button>\n    <button class="tab-btn" data-tab="1">LISTEN</button>\n    <button class="tab-btn" data-tab="2">KEYS</button>\n  </div>\n  <button class="cog" id="cog" title="settings">&#9881;</button>\n</div>\n\n<!-- SETTINGS. One panel, and what is in it depends on the tab underneath, so\n     the cog always means "the settings for what I am looking at". -->\n<section id="settings" style="display:none">\n  <div id="setSpeak">\n    <label>VOICE 1 &mdash; NAME AND VOICE</label>\n    <div class="row"><input id="n1" value="VIVEKA"><select id="s1"></select></div>\n    <label>VOICE 2 &mdash; NAME AND VOICE</label>\n    <div class="row"><input id="n2" value="MANAN"><select id="s2"></select></div>\n    <label>FIND A VOICE</label>\n    <input id="vq" placeholder="search by name or timbre">\n    <div id="vfacets" style="margin-top:8px"></div>\n    <div id="vlist" style="max-height:44vh;overflow:auto;margin-top:8px"></div>\n  </div>\n  <div id="setListen">\n    <div class="note">Maha Transcribe keeps its own settings inside its own\n    panel, on the LISTEN tab. The keys it uses are the ones on the KEYS tab.</div>\n  </div>\n  <div id="setKeys">\n    <div class="note" id="dep">checking what is installed<span class="spin"></span></div>\n    <div class="note" id="cachenote">counting the cache<span class="spin"></span></div>\n  </div>\n  <div class="note" id="verline"></div>\n</section>\n\n<section class="tab active" id="tab0">\n  <div class="info">\n    <div class="n"><div class="who" id="w1">VIVEKA</div><div class="v" id="d1">Charon &middot; informative</div></div>\n    <button data-hear="1">&#9654; hear</button>\n  </div>\n  <div class="info">\n    <div class="n"><div class="who" id="w2">MANAN</div><div class="v" id="d2">Puck &middot; upbeat</div></div>\n    <button data-hear="2">&#9654; hear</button>\n  </div>\n\n  <label>SCRIPT</label>\n  <textarea id="text" placeholder="&lt;VIVEKA: Amused&gt; Ah. There you are. I was expecting you.\n&lt;MANAN: Anxious: slow&gt; I am trying.\n&lt;VIVEKA: Firm&gt; I know."></textarea>\n  <div class="note">A tag sets who speaks, how, and how fast:\n  &lt;NAME&gt;, &lt;NAME: Weary&gt;, &lt;NAME: Weary: slow&gt;. Put the cursor\n  where you want one and pick below.</div>\n\n  <div class="row">\n    <div><label>INSERT FOR</label><select id="who"></select></div>\n    <div><label>PACE</label><select id="pace"></select></div>\n  </div>\n  <input id="eq" placeholder="search a direction: angry, whisper, teaching">\n  <div id="egroups" style="margin-top:8px"></div>\n  <div id="elist" style="max-height:32vh;overflow:auto;margin-top:8px"></div>\n\n  <button class="go" id="sgo">SPEAK</button>\n  <div class="out idle" id="sout">nothing spoken yet</div>\n  <audio id="player" class="idle" controls></audio>\n</section>\n\n<section class="tab" id="tab1">\n  <iframe id="mt" title="Maha Transcribe"\n    style="width:100%;height:78vh;border:1px solid var(--line);border-radius:10px;background:var(--bg)"></iframe>\n</section>\n\n<section class="tab" id="tab2">\n  <div id="bud" class="idle">reading the ledger<span class="spin"></span></div>\n  <label>ADD ACCOUNTS FROM A FILE</label>\n  <input type="file" id="kf">\n  <div class="note">Any file. A note, a .env, a JSON export, a CSV, a markdown\n  table. It finds the keys, keeps the account names where they are there, and\n  adds only the ones the ring does not already hold.</div>\n  <div class="out idle" id="kimp">nothing imported this session</div>\n  <div class="row">\n    <button class="go ghost" id="testall">TEST ALL</button>\n    <button class="go danger" id="del" disabled>DELETE REFUSED</button>\n  </div>\n  <button class="go ghost" id="undel" disabled>PUT BACK</button>\n  <div id="keys" class="note">no account tested this session. Every row has its\n  own test and delete, so one account can be answered without spending the\n  other twenty.</div>\n</section>\n\n</div>\n<script>\n"use strict";\nvar VERSION = "@@VERSION@@";\nvar ASSUMED = "@@ASSUMED@@";\n\n// The header a cross-site request cannot set. Its value does not matter.\nvar H = {"X-Gtt-Local": "1"};\nfunction api(u, o) {\n  o = o || {};\n  o.headers = Object.assign({}, H, o.headers || {});\n  return fetch(u, o).then(function (r) { return r.json(); });\n}\nfunction el(id) { return document.getElementById(id); }\nfunction esc(s) {\n  return String(s).replace(/[&<>"\']/g, function (c) {\n    return {"&": "&amp;", "<": "&lt;", ">": "&gt;", \'"\': "&quot;", "\'": "&#39;"}[c];\n  });\n}\n\n// ---------------------------------------------------------------- spinner\n// Braille, one cell, eighty milliseconds. It runs on ANY wait: an app that\n// spins for the slow things and freezes for the quick ones teaches you that a\n// still screen means broken, and then a genuinely quick answer looks broken too.\nvar FRAMES = "\\u280b\\u2819\\u2839\\u2838\\u283c\\u2834\\u2826\\u2827\\u2807\\u280f";\nvar spinners = [];\nfunction spin(node) {\n  if (!node) return function () {};\n  var i = 0;\n  var t = setInterval(function () {\n    node.textContent = FRAMES[i++ % FRAMES.length];\n  }, 80);\n  spinners.push(t);\n  return function stop(txt) {\n    clearInterval(t);\n    node.textContent = txt === undefined ? "" : txt;\n  };\n}\nfunction busy(node, label) {\n  var was = node.innerHTML;\n  var wasDisabled = node.disabled;\n  node.disabled = true;\n  node.innerHTML = (label || "") + \' <span class="sp"></span>\';\n  var stop = spin(node.querySelector(".sp"));\n  return function done(text) {\n    stop();\n    node.innerHTML = text === undefined ? was : text;\n    node.disabled = wasDisabled;\n    if (text !== undefined) setTimeout(function () { node.innerHTML = was; }, 2200);\n  };\n}\nfunction working(node, msg) {\n  node.classList.remove("idle");\n  node.innerHTML = esc(msg || "working") + \' <span class="sp"></span>\';\n  return spin(node.querySelector(".sp"));\n}\n\n// ------------------------------------------------------------------ state\nvar VOICES = [], EMO = [], ROWS = [], STAR = [];\nvar SLOT = {1: {voice: "Charon"}, 2: {voice: "Puck"}};\nvar vfacet = "", efacet = "", tabNow = 0, settingsOpen = false;\ntry { STAR = JSON.parse(localStorage.getItem("gtt_star") || "[]"); } catch (e) { STAR = []; }\ntry {\n  var saved = JSON.parse(localStorage.getItem("gtt_slots") || "null");\n  if (saved) SLOT = saved;\n} catch (e) {}\nfunction saveSlots() { localStorage.setItem("gtt_slots", JSON.stringify(SLOT)); }\n\n// ------------------------------------------------------------------- tabs\nfunction showTab(i) {\n  tabNow = i;\n  var b = document.querySelectorAll(".tab-btn");\n  for (var k = 0; k < b.length; k++) b[k].classList.toggle("active", k === i);\n  for (var k = 0; k < 3; k++) el("tab" + k).classList.toggle("active", k === i && !settingsOpen);\n  el("settings").style.display = settingsOpen ? "block" : "none";\n  el("setSpeak").style.display = i === 0 ? "block" : "none";\n  el("setListen").style.display = i === 1 ? "block" : "none";\n  el("setKeys").style.display = i === 2 ? "block" : "none";\n  if (i === 1 && !el("mt").src) el("mt").src = "/transcribe";\n  if (i === 2) { loadBudget(); checkGrave(); }\n  if (settingsOpen && i === 2) { loadHealth(); loadCache(); }\n}\ndocument.querySelectorAll(".tab-btn").forEach(function (b) {\n  b.addEventListener("click", function () {\n    settingsOpen = false;\n    el("cog").classList.remove("on");\n    showTab(parseInt(b.dataset.tab, 10));\n  });\n});\nel("cog").addEventListener("click", function () {\n  settingsOpen = !settingsOpen;\n  el("cog").classList.toggle("on", settingsOpen);\n  showTab(tabNow);\n});\n\n// ------------------------------------------------------------- catalogues\nfunction loadCatalogues() {\n  var stopB = working(el("bud"), "reading the ledger");\n  Promise.all([api("/api/voices"), api("/api/emotions")]).then(function (r) {\n    VOICES = r[0];\n    EMO = r[1];\n    var timbres = [];\n    VOICES.forEach(function (v) { if (timbres.indexOf(v.timbre) < 0) timbres.push(v.timbre); });\n    timbres.sort();\n    var f = \'<span class="chip on" data-vf="">all</span><span class="chip" data-vf="*">starred</span>\';\n    timbres.forEach(function (t) { f += \'<span class="chip" data-vf="\' + esc(t) + \'">\' + esc(t) + "</span>"; });\n    el("vfacets").innerHTML = f;\n    var groups = [];\n    EMO.forEach(function (e) { if (groups.indexOf(e.group) < 0) groups.push(e.group); });\n    var g = \'<span class="chip on" data-ef="">all</span>\';\n    groups.forEach(function (x) { g += \'<span class="chip" data-ef="\' + esc(x) + \'">\' + esc(x.toLowerCase()) + "</span>"; });\n    el("egroups").innerHTML = g;\n    ["normal", "slow", "fast", "very slow"].forEach(function (p) {\n      el("pace").add(new Option(p, p));\n    });\n    VOICES.forEach(function (v) {\n      el("s1").add(new Option(v.name + "  " + v.timbre, v.name));\n      el("s2").add(new Option(v.name + "  " + v.timbre, v.name));\n    });\n    el("s1").value = SLOT[1].voice;\n    el("s2").value = SLOT[2].voice;\n    drawVoices();\n    drawEmotions();\n    refreshWho();\n    stopB();\n    loadBudget();\n  });\n}\nfunction timbreOf(name) {\n  for (var i = 0; i < VOICES.length; i++) if (VOICES[i].name === name) return VOICES[i].timbre;\n  return "";\n}\nfunction refreshWho() {\n  var cur = el("who").value;\n  el("who").innerHTML = "";\n  [el("n1").value.trim() || "VOICE 1", el("n2").value.trim() || "VOICE 2"].forEach(function (n) {\n    el("who").add(new Option(n, n));\n  });\n  if (cur) el("who").value = cur;\n  el("w1").textContent = el("n1").value.trim() || "VOICE 1";\n  el("w2").textContent = el("n2").value.trim() || "VOICE 2";\n  el("d1").innerHTML = esc(SLOT[1].voice) + " &middot; " + esc(timbreOf(SLOT[1].voice));\n  el("d2").innerHTML = esc(SLOT[2].voice) + " &middot; " + esc(timbreOf(SLOT[2].voice));\n}\nel("n1").addEventListener("input", refreshWho);\nel("n2").addEventListener("input", refreshWho);\nel("s1").addEventListener("change", function () { SLOT[1].voice = el("s1").value; saveSlots(); refreshWho(); });\nel("s2").addEventListener("change", function () { SLOT[2].voice = el("s2").value; saveSlots(); refreshWho(); });\n\n// ------------------------------------------------------- the voice browser\nel("vq").addEventListener("input", drawVoices);\nel("eq").addEventListener("input", drawEmotions);\ndocument.addEventListener("click", function (ev) {\n  var c = ev.target.closest ? ev.target.closest(".chip") : null;\n  if (!c) return;\n  if (c.dataset.vf !== undefined) {\n    vfacet = c.dataset.vf;\n    el("vfacets").querySelectorAll(".chip").forEach(function (x) { x.classList.toggle("on", x === c); });\n    drawVoices();\n  }\n  if (c.dataset.ef !== undefined) {\n    efacet = c.dataset.ef;\n    el("egroups").querySelectorAll(".chip").forEach(function (x) { x.classList.toggle("on", x === c); });\n    drawEmotions();\n  }\n});\nfunction drawVoices() {\n  var q = (el("vq").value || "").toLowerCase();\n  var rows = VOICES.filter(function (v) {\n    var okf = vfacet === "" || (vfacet === "*" ? STAR.indexOf(v.name) >= 0 : v.timbre === vfacet);\n    return okf && (v.name.toLowerCase().indexOf(q) >= 0 || v.timbre.indexOf(q) >= 0);\n  });\n  el("vlist").innerHTML = rows.length ? rows.map(function (v) {\n    return \'<div class="kcard"><div class="khead"><div class="klabel">\' + esc(v.name) +\n      \'</div><div class="kwhy">\' + esc(v.timbre) + "</div></div>" +\n      \'<div class="kacts">\' +\n      \'<button data-use="1" data-v="\' + esc(v.name) + \'">voice 1</button>\' +\n      \'<button data-use="2" data-v="\' + esc(v.name) + \'">voice 2</button>\' +\n      \'<button class="gold" data-play="\' + esc(v.name) + \'" data-emo="Neutral">&#9654;</button>\' +\n      \'<button data-star="\' + esc(v.name) + \'">\' +\n      (STAR.indexOf(v.name) >= 0 ? "\\u2605" : "\\u2606") + "</button></div></div>";\n  }).join("") : \'<div class="note">nothing matches</div>\';\n}\nfunction drawEmotions() {\n  var q = (el("eq").value || "").toLowerCase();\n  var rows = EMO.filter(function (e) {\n    return (efacet === "" || e.group === efacet) &&\n      (e.label.toLowerCase().indexOf(q) >= 0 || e.text.indexOf(q) >= 0 ||\n       e.group.toLowerCase().indexOf(q) >= 0);\n  });\n  el("elist").innerHTML = rows.length ? rows.map(function (e) {\n    return \'<div class="kcard" style="padding:9px"><div class="khead">\' +\n      \'<div class="klabel">\' + esc(e.glyph) + "  " + esc(e.label) + "</div>" +\n      \'<div class="kacts" style="margin:0;flex:0 0 auto">\' +\n      \'<button data-insert="\' + esc(e.label) + \'">insert</button>\' +\n      \'<button class="gold" data-play="" data-emo="\' + esc(e.label) + \'">&#9654;</button>\' +\n      "</div></div><div class=\\"kwhy\\">" + esc(e.text) + "</div></div>";\n  }).join("") : \'<div class="note">nothing matches</div>\';\n}\n\n// one listener for every button that carries data. No quoting, no escaping,\n// nothing to get wrong twice.\ndocument.addEventListener("click", function (ev) {\n  var b = ev.target.closest ? ev.target.closest("button") : null;\n  if (!b) return;\n  if (b.dataset.use) {\n    SLOT[b.dataset.use].voice = b.dataset.v;\n    el("s" + b.dataset.use).value = b.dataset.v;\n    saveSlots();\n    refreshWho();\n  } else if (b.dataset.star) {\n    var n = b.dataset.star;\n    STAR = STAR.indexOf(n) >= 0 ? STAR.filter(function (x) { return x !== n; }) : STAR.concat([n]);\n    localStorage.setItem("gtt_star", JSON.stringify(STAR));\n    drawVoices();\n  } else if (b.dataset.play !== undefined) {\n    hear(b.dataset.play || SLOT[1].voice, b.dataset.emo || "Neutral", b);\n  } else if (b.dataset.hear) {\n    hear(SLOT[b.dataset.hear].voice, "Neutral", b);\n  } else if (b.dataset.insert) {\n    insertTag(b.dataset.insert);\n  } else if (b.dataset.one) {\n    testOne(b.dataset.one, b);\n  } else if (b.dataset.models) {\n    showModels(b.dataset.models, b);\n  } else if (b.dataset.drop) {\n    dropKey(b.dataset.drop);\n  }\n});\n\nfunction insertTag(label) {\n  var p = el("pace").value && el("pace").value !== "normal" ? ": " + el("pace").value : "";\n  var tag = "<" + el("who").value + ": " + label + p + "> ";\n  var t = el("text"), s = t.selectionStart || 0, e = t.selectionEnd || 0;\n  t.value = t.value.slice(0, s) + tag + t.value.slice(e);\n  t.focus();\n  t.selectionStart = t.selectionEnd = s + tag.length;\n}\n\n// ---------------------------------------------------------------- preview\nvar PLAYER = null;\nfunction hear(voice, label, btn) {\n  var done = busy(btn, "");\n  api("/api/preview?voice=" + encodeURIComponent(voice) + "&emotion=" + encodeURIComponent(label))\n    .then(function (r) {\n      if (!r.ok) { done("no"); return; }\n      done(r.cached ? "cached" : "new");\n      if (PLAYER) PLAYER.pause();\n      PLAYER = new Audio("/preview/" + r.file);\n      PLAYER.play();\n      loadCache();\n    }).catch(function () { done("no"); });\n}\n\n// ------------------------------------------------------------------ speak\nel("sgo").addEventListener("click", function () {\n  var stop = working(el("sout"), "generating, about half the length of the audio");\n  el("sgo").disabled = true;\n  api("/api/speak", {\n    method: "POST",\n    headers: {"Content-Type": "application/json"},\n    body: JSON.stringify({\n      text: el("text").value,\n      speakers: [{name: el("n1").value.trim(), voice: SLOT[1].voice},\n                 {name: el("n2").value.trim(), voice: SLOT[2].voice}]\n    })\n  }).then(function (r) {\n    stop();\n    el("sgo").disabled = false;\n    if (r.ok) {\n      var s = r.seconds + "s of audio, " + r.model + " on [" + r.key + "]";\n      if (r.problems && r.problems.length) s += "\\n\\n" + r.problems.join("\\n");\n      if (r.log && r.log.length) s += "\\n" + r.log.join("\\n");\n      el("sout").textContent = s;\n      el("player").src = "/out/" + r.file;\n      el("player").classList.remove("idle");\n    } else {\n      el("sout").textContent = "no: " + (r.error || "failed") +\n        "\\n" + ((r.log || []).join("\\n"));\n    }\n    loadBudget();\n  }).catch(function (e) {\n    stop();\n    el("sgo").disabled = false;\n    el("sout").textContent = "no: " + e.message;\n  });\n});\n\n// ------------------------------------------------------------------- keys\nel("kf").addEventListener("change", function () {\n  if (!el("kf").files[0]) return;\n  var stop = working(el("kimp"), "reading " + el("kf").files[0].name);\n  var fd = new FormData();\n  fd.append("keyfile", el("kf").files[0]);\n  api("/api/import", {method: "POST", body: fd}).then(function (r) {\n    stop();\n    if (!r.ok) { el("kimp").textContent = "no: " + r.error; return; }\n    var s = r.found + " key" + (r.found === 1 ? "" : "s") + " found in " + r.source + "\\n";\n    s += r.added.length + " added, " + r.duplicates.length + " already in the ring\\n";\n    r.added.forEach(function (a) { s += "\\n  + " + a.label + "   " + a.masked; });\n    r.duplicates.forEach(function (a) { s += "\\n  = " + (a.label || "already here") + "   " + a.masked; });\n    if (r.maybes.length) s += "\\n\\nnot a shape I know, left alone: " + r.maybes.join(", ");\n    s += "\\n\\nthe ring now holds " + r.ring;\n    el("kimp").textContent = s;\n    el("kf").value = "";\n    loadBudget();\n    testAll();\n  });\n});\nfunction card(r) {\n  var v = r.verdict || "untested";\n  var G = {working: "\\u25cf", busy: "\\u25d0", "no credit": "\\uff04", refused: "\\u2717",\n           unknown: "?", untested: "\\u25cb", testing: "\\u2026"};\n  return \'<div class="kcard"><div class="khead"><div class="klabel">\' + esc(r.label) +\n    \'</div><div class="kstatus \' + v.replace(" ", "") + \'">\' + G[v] + " " + v + "</div></div>" +\n    \'<div class="kkey">\' + esc(r.masked) + (r.ms ? \'   <span class="kwhy">\' + r.ms + " ms</span>" : "") + "</div>" +\n    (r.why ? \'<div class="kwhy">\' + esc(r.why) + "</div>" : "") +\n    \'<div class="kdetail" style="display:none"></div><div class="kacts">\' +\n    \'<button data-one="\' + esc(r.label) + \'">test</button>\' +\n    \'<button class="gold" data-models="\' + esc(r.label) + \'">models</button>\' +\n    \'<button class="red" data-drop="\' + esc(r.label) + \'">delete</button></div></div>\';\n}\nfunction draw() {\n  el("keys").innerHTML = ROWS.length ? ROWS.map(card).join("")\n    : \'<div class="note">the ring is empty. Pick a key file above.</div>\';\n  var n = ROWS.filter(function (r) { return r.verdict === "refused"; }).length;\n  el("del").disabled = n === 0;\n  el("del").textContent = n ? "DELETE " + n + " REFUSED" : "DELETE REFUSED";\n}\nfunction testAll() {\n  var done = busy(el("testall"), "TESTING");\n  api("/api/ring").then(function (r0) {\n    ROWS = r0.keys.map(function (k) {\n      return {label: k.label, masked: k.masked, verdict: "testing", why: ""};\n    });\n    draw();\n    return api("/api/keys");\n  }).then(function (rows) {\n    ROWS = rows;\n    draw();\n    done();\n    loadBudget();\n    checkGrave();\n  }).catch(function () { done(); });\n}\nel("testall").addEventListener("click", testAll);\nfunction testOne(label, btn) {\n  var done = busy(btn, "");\n  api("/api/key/" + encodeURIComponent(label) + "/test", {method: "POST"}).then(function (r) {\n    done();\n    if (!r.ok) return;\n    for (var i = 0; i < ROWS.length; i++) if (ROWS[i].label === label) ROWS[i] = r;\n    draw();\n    loadBudget();\n  }).catch(function () { done(); });\n}\nfunction showModels(label, btn) {\n  var done = busy(btn, "");\n  api("/api/key/" + encodeURIComponent(label) + "/models").then(function (r) {\n    done();\n    var cards = el("keys").querySelectorAll(".kcard");\n    for (var i = 0; i < cards.length; i++) {\n      if (cards[i].querySelector(".klabel").textContent === label) {\n        var box = cards[i].querySelector(".kdetail");\n        box.style.display = "block";\n        box.textContent = r.ok\n          ? r.count + " models reachable\\ntts:   " + (r.tts.join(", ") || "none") +\n            "\\nimage: " + (r.image.join(", ") || "none") + "\\ntext:  " + r.text.join(", ")\n          : "no: " + r.error;\n      }\n    }\n  }).catch(function () { done(); });\n}\nfunction dropKey(label) {\n  api("/api/delete", {method: "POST", headers: {"Content-Type": "application/json"},\n    body: JSON.stringify({labels: [label]})}).then(function () {\n    ROWS = ROWS.filter(function (x) { return x.label !== label; });\n    draw();\n    loadBudget();\n    checkGrave();\n  });\n}\nel("del").addEventListener("click", function () {\n  var labels = ROWS.filter(function (r) { return r.verdict === "refused"; })\n    .map(function (r) { return r.label; });\n  if (!labels.length) return;\n  var done = busy(el("del"), "DELETING");\n  api("/api/delete", {method: "POST", headers: {"Content-Type": "application/json"},\n    body: JSON.stringify({labels: labels})}).then(function () {\n    ROWS = ROWS.filter(function (r) { return r.verdict !== "refused"; });\n    draw();\n    done();\n    loadBudget();\n    checkGrave();\n  });\n});\nel("undel").addEventListener("click", function () {\n  var done = busy(el("undel"), "PUTTING BACK");\n  api("/api/restore", {method: "POST"}).then(function () { done(); testAll(); });\n});\nfunction checkGrave() {\n  api("/api/removed").then(function (g) {\n    el("undel").disabled = g.count === 0;\n    el("undel").textContent = g.count ? "PUT BACK " + g.count : "PUT BACK";\n  });\n}\nfunction loadHealth() {\n  var stop = working(el("dep"), "checking what is installed");\n  api("/api/health").then(function (h) {\n    stop();\n    var y = function (b) { return b ? "yes" : "no"; };\n    el("dep").textContent = "python " + h.python + " \\u00b7 flask " + y(h.flask) +\n      " \\u00b7 waitress " + y(h.waitress) + " \\u00b7 ffmpeg " + y(h.ffmpeg) +\n      " \\u00b7 ring " + h.keys + " at " + h.keyfile;\n  });\n}\nfunction loadCache() {\n  var stop = working(el("cachenote"), "counting the cache");\n  api("/api/cache").then(function (c) {\n    stop();\n    el("cachenote").textContent = c.count + " preview" + (c.count === 1 ? "" : "s") +\n      " cached, " + Math.round(c.bytes / 1024) + " KB. A preview is the same request " +\n      "every time, so it is asked for once and then never again.";\n  }).catch(function () { stop("could not count the cache"); });\n}\nfunction loadBudget() {\n  api("/api/budget").then(function (b) {\n    var h = Math.floor(b.reset_in / 3600), m = Math.floor((b.reset_in % 3600) / 60);\n    var s = \'<div class="big">\' + b.speak_hours_real + " h</div>" +\n      \'<div class="note">of speech left today at a normal take length, \' +\n      b.speak_hours_max + " h if every call is run to its eight minute ceiling. " +\n      b.keys_live + " accounts. Resets in " + h + "h" + m + "m, at midnight Pacific.</div>" +\n      \'<div class="note">Today: \' + b.audio_out + "s made, " + b.audio_in +\n      "s transcribed.</div><table><tr><th>model</th><th>for</th><th>left today</th></tr>";\n    b.models.forEach(function (m2) {\n      var pct = m2.total ? 100 * m2.left / m2.total : 0;\n      s += "<tr><td>" + m2.model + (m2.measured ? "" : " *") + "</td><td>" + m2.use +\n        "</td><td>" + m2.left + " / " + m2.total +\n        \'<div class="bar"><i style="width:\' + pct + \'%"></i></div></td></tr>\';\n    });\n    s += \'</table><div class="note">* the daily limit for that one has never been \' +\n      "reached, so the row is a guess of " + ASSUMED + " an account.</div>";\n    el("bud").innerHTML = s;\n    el("bud").classList.remove("idle");\n  }).catch(function () {});\n}\n\nel("verline").textContent = "Google TTS and STT " + VERSION +\n  "  \\u00b7  one ring, one ledger, one roof";\nshowTab(0);\nloadCatalogues();\n</script></body></html>\n'   # src/15_page.html, inlined by tools/build_installer.py
 
 
 # =========================================================================
@@ -2075,9 +1718,8 @@ def serve():
 
     @app.get("/")
     def index():
-        return (PAGE.replace("%%VOICES%%", "[]")
-                .replace("%%ASSUMED%%", str(RPD_UNKNOWN_ASSUMED))
-                .replace("%%VERSION%%", str(VERSION)))
+        return (PAGE.replace("@@ASSUMED@@", str(RPD_UNKNOWN_ASSUMED))
+                .replace("@@VERSION@@", "v%d" % VERSION))
 
     @app.get("/transcribe")
     def transcribe_page():

@@ -20,6 +20,41 @@ own word:
 
 The v6 numbers still work and are no longer drawn.
 
+## The screen
+
+Three pills and a cogwheel, and nothing else above the work. No title bar, no
+tagline, no version: on a phone that was four lines of chrome before anything
+you came for. The version lives in the settings panel.
+
+**The cog is per tab.** It opens the settings for whatever is underneath it, so
+it always means the same thing. On SPEAK that is the two voice slots, the actor
+names and the voice browser. On KEYS it is what is installed and what the cache
+holds. On LISTEN it points at Maha Transcribe's own panel.
+
+**Choosing is in settings, the main screen is information.** The two slots on
+SPEAK show who is speaking and in which voice, with a ▶ to hear it. They are not
+controls; the controls are behind the cog.
+
+**One spinner, and it runs on everything.** A braille cell, one character, 80 ms
+a frame. It is the only thing on the screen that moves, so movement always means
+the same thing. It runs on the quick things too: an app that spins for the slow
+ones and freezes for the quick ones teaches you that a still screen means broken,
+and then a fast answer looks like a fault.
+
+## The page is an HTML file
+
+`src/15_page.html`, inlined into the app by the build tool. It used to be a
+triple-quoted python string, and that is what broke v13: a patch meant to reach
+the JavaScript as `\'` went through two levels of escaping and arrived as a bare
+quote, every `onclick` lost its argument, and the script died at parse. On the
+phone that looked like *counting the cache* forever and a SPEAK button that did
+nothing, because every function defined after the bad line never existed.
+
+An HTML file cannot do that to itself, and there are no `onclick` attributes left
+either: one delegated listener reads `data-` attributes, so there is no quoting
+to get wrong. **Test 1 runs `node --check` over the script**, so a syntax error
+now stops the build instead of the app.
+
 ## SPEAK, which is Sample Player with Hume swapped for Gemini
 
 Ported from `SAMPLE_PLAYER`: two slots, a browser with a search box and facet

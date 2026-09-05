@@ -24,6 +24,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HEAD = os.path.join(ROOT, "src", "00_head.sh")
 TRANSCRIBE = os.path.join(ROOT, "src", "30_transcribe.html")
 SEED = os.path.join(ROOT, "src", "seed")
+PAGE = os.path.join(ROOT, "src", "15_page.html")
 APP = os.path.join(ROOT, "src", "10_app.py")
 TAIL = os.path.join(ROOT, "src", "20_tail.sh")
 
@@ -37,6 +38,23 @@ def version():
 
 def sha(path):
     return hashlib.sha256(open(path, "rb").read()).hexdigest()[:12]
+
+
+def page_inlined():
+    """The page is an HTML file, not a python string.
+
+    It used to be a triple-quoted literal, and a patch written for it went
+    through two levels of escaping: a \\' meant to reach the JavaScript as \'
+    arrived as a bare quote and every onclick lost its argument. The whole
+    script then died at parse, which on the phone looked like "counting the
+    cache" forever and a SPEAK button that did nothing.
+
+    An HTML file cannot do that to itself. And tests/test1 runs `node --check`
+    over this script, so a syntax error stops the build rather than the app."""
+    html = open(PAGE).read()
+    if "GTT_APP_EOF" in html:
+        sys.exit("the page contains the app heredoc marker")
+    return html
 
 
 def seed_block():
@@ -87,6 +105,7 @@ def build():
         "#   src/seed/                 %d cached previews" % len(
             [f for f in os.listdir(SEED) if f.endswith(".mp3")] if os.path.isdir(SEED) else []),
         "#   src/10_app.py    %s" % sha(APP),
+        "#   src/15_page.html %s" % sha(PAGE),
         "#   src/20_tail.sh   %s" % sha(TAIL),
     ])
     text = (open(HEAD).read()
@@ -98,6 +117,7 @@ def build():
     head = head.replace("@@VERSION@@", "v%d" % v).replace("@@FILENAME@@", name)
     tail = open(TAIL).read().replace("@@VERSION@@", "v%d" % v).replace("@@FILENAME@@", name)
     app = open(APP).read()
+    app = app.replace('PAGE = "@@PAGE@@"', "PAGE = " + repr(page_inlined()))
     if "GTT_APP_EOF" in app:
         sys.exit("src/10_app.py contains the heredoc marker, which would end it early")
     page = engine_swapped()

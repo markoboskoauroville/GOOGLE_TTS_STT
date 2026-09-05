@@ -648,3 +648,57 @@ the first time they are pressed, or tomorrow.
 
 That is the argument for the cache stated by the thing itself: testing every
 emotion once, on eighteen accounts, is most of a day's budget.
+
+---
+
+## 5.9.2026 — v14, the page was dead and I shipped it
+
+Baba, from the phone: *this app is definitely stuck counting the cache forever.
+And if I say speak, nothing happened. The app is broken.*
+
+It was. One syntax error, and everything after it never existed.
+
+    vfacets.innerHTML='<button onclick="setVFacet('')">all</button>'
+
+That should have been `setVFacet(\\'\\')`. The page was a triple-quoted python
+string inside `10_app.py`, and the patch that wrote it was itself a python
+string, so the escaping went through two rounds: `\\\\'` in the patch became `\\'`
+in the file, and `\\'` inside a `"""` literal is just `'`. Both backslashes were
+eaten one layer at a time and the JavaScript lost its quotes.
+
+Everything visible followed from that one line. The script died at parse, so
+`loadCache` never ran — *counting the cache* forever — the PACE and INSERT FOR
+dropdowns were never filled, and `doSpeak` was never defined, so SPEAK did
+nothing at all. Not slow. Not broken at the far end. Simply not there.
+
+**Three things changed so it cannot happen again.**
+
+The page is now `src/15_page.html`, an HTML file, inlined by the build tool. An
+HTML file cannot escape itself twice.
+
+There are no `onclick` attributes left. One delegated listener reads `data-`
+attributes, so no JavaScript is ever written inside an HTML attribute inside
+another string, which is where the quoting had to be got right three times.
+
+**Test 1 runs `node --check` over the script**, and checks that every id the
+script reaches for exists in the markup. A dead page now fails the gate. It
+would have failed v13 immediately, which is the whole argument for it.
+
+### The screen, rebuilt to what was asked for
+
+*Google TTS and STT title is beautiful but it takes real estate.* Correct: the
+title, the tagline and the version were four lines of chrome above the work, on
+a phone. Gone. The version is in the settings panel, which is where you look
+when you want to know it.
+
+The cogwheel is top right and it is **per tab** — it opens the settings for what
+is underneath, so it always means one thing. Voice and actor names moved behind
+it. What is left on SPEAK is two lines of information, who is speaking in which
+voice, each with a ▶ to hear it.
+
+### The spinner runs on everything
+
+Braille, one cell, 80 ms. On every call, including the ones that return in eight
+milliseconds. An app that spins for the slow things and freezes for the quick
+ones teaches the hand that a still screen means broken — and then the fast path,
+which is the cache doing its job, looks like the fault.

@@ -1,0 +1,620 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Google TTS and STT</title><style>
+:root{
+ --bg:#0b0d10; --surface:#0d1117; --surface-2:#141a21; --line:#23303d;
+ --amber:#f59e0b; --amber-hi:#fbbf24;
+ --prose:#f2ddb4; --dim:#8a7a5c;
+ --red:#ef4444; --green:#22c55e; --coral:#d97757; --grey:#6b655c;
+ --mono:ui-monospace,"JetBrains Mono","Cascadia Mono","SF Mono",Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+*:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important}}
+html,body{margin:0;background:var(--bg);color:var(--prose);font-family:var(--mono);min-height:100vh}
+body{display:flex;justify-content:center;align-items:flex-start;
+ padding:calc(10px + env(safe-area-inset-top)) 8px calc(14px + env(safe-area-inset-bottom))}
+.unit{width:100%;max-width:640px;background:var(--surface);border:1px solid var(--line);
+ border-radius:10px;padding:12px}
+.top{display:flex;gap:6px;align-items:center;margin-bottom:10px}
+.tabs{display:flex;gap:3px;flex:1}
+.tab-btn{flex:1;background:var(--surface-2);border:1px solid var(--line);color:var(--dim);
+ font-family:var(--mono);font-size:11px;letter-spacing:.06em;padding:14px 6px;border-radius:999px;
+ cursor:pointer}
+.tab-btn.active{color:var(--bg);background:var(--amber);border-color:var(--amber);font-weight:700}
+.cog{flex:0 0 auto;width:44px;height:44px;border-radius:50%;background:var(--surface-2);
+ border:1px solid var(--line);color:var(--amber);font-size:17px;cursor:pointer;line-height:1}
+.cog.on{background:var(--amber);color:var(--bg);border-color:var(--amber)}
+.tab{display:none}.tab.active{display:block}
+label{display:block;color:var(--dim);font-size:11px;letter-spacing:.06em;margin:12px 0 5px}
+textarea,input,select{width:100%;background:var(--surface-2);border:1px solid var(--line);
+ color:var(--prose);font-family:var(--mono);font-size:13px;padding:11px;border-radius:8px}
+textarea{min-height:150px;resize:vertical;line-height:1.5}
+.row{display:flex;gap:8px}.row>*{flex:1}
+button.go{width:100%;margin-top:12px;background:var(--amber);color:var(--bg);border:0;padding:14px;
+ border-radius:999px;font-family:var(--mono);font-size:12px;font-weight:700;letter-spacing:.08em;
+ cursor:pointer}
+button.go.ghost{background:var(--surface-2);color:var(--prose);border:1px solid var(--line);font-weight:400}
+button.go.danger{background:var(--surface-2);color:var(--red);border:1px solid var(--line);font-weight:400}
+button.go:disabled{opacity:.45}
+.out{margin-top:12px;padding:12px;background:var(--surface-2);border:1px solid var(--line);
+ border-radius:8px;white-space:pre-wrap;font-size:12px;line-height:1.55;min-height:44px}
+.idle{opacity:.38;pointer-events:none}
+audio{width:100%;margin-top:10px}
+.note{font-size:11px;color:var(--dim);line-height:1.6;margin:6px 0 0}
+.big{font-size:30px;font-weight:300;margin:2px 0;color:var(--prose)}
+.bar{height:4px;background:var(--line);border-radius:3px;overflow:hidden;margin-top:5px}
+.bar i{display:block;height:100%;background:var(--amber)}
+table{width:100%;border-collapse:collapse;font-size:12px}
+td,th{text-align:left;padding:7px 5px;border-bottom:1px solid var(--line)}
+th{color:var(--dim);font-weight:400;letter-spacing:.06em}
+.kcard{background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:11px;margin-bottom:8px}
+.khead{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.klabel{color:var(--coral);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kstatus{font-size:12px;font-weight:700;white-space:nowrap}
+.kkey{color:var(--prose);font-size:12px;margin-top:7px}
+.kwhy{color:var(--dim);font-size:11px;margin-top:3px;line-height:1.5}
+.kdetail{margin-top:8px;padding:8px;background:var(--surface);border:1px solid var(--line);
+ border-radius:6px;color:var(--green);font-size:11px;white-space:pre-wrap;line-height:1.5}
+.kacts{display:flex;gap:6px;margin-top:10px}
+.kacts button{flex:1;background:var(--surface);border:1px solid var(--line);color:var(--prose);
+ font-family:var(--mono);font-size:11px;padding:10px 4px;border-radius:7px;cursor:pointer}
+.kacts button.gold{color:var(--amber)}
+.kacts button.red{color:var(--red)}
+.kacts button:disabled{opacity:.4}
+.working{color:var(--green)}.busy{color:var(--amber)}.nocredit{color:var(--amber-hi)}
+.refused{color:var(--red)}.unknown{color:var(--grey)}.untested{color:var(--grey)}
+.chip{display:inline-block;background:var(--surface-2);border:1px solid var(--line);
+ border-radius:999px;padding:9px 13px;margin:0 5px 5px 0;font-size:11px;color:var(--prose);cursor:pointer}
+.chip.on{border-color:var(--amber);color:var(--amber)}
+.info{background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:11px;
+ display:flex;gap:10px;align-items:center;margin-top:6px}
+.info .n{flex:1;min-width:0}
+.info .who{font-size:12px;color:var(--coral)}
+.info .v{font-size:11px;color:var(--dim);margin-top:2px}
+.info button{flex:0 0 auto;background:var(--surface);border:1px solid var(--line);color:var(--amber);
+ font-family:var(--mono);font-size:11px;padding:11px 14px;border-radius:8px;cursor:pointer}
+/* the spinner. One braille cell, cycled. It is the only thing on the screen
+   that moves, so movement always means the same thing: something is running. */
+.spin{display:inline-block;width:1ch;color:var(--amber)}
+</style></head><body><div class="unit">
+
+<div class="top">
+  <div class="tabs">
+    <button class="tab-btn active" data-tab="0">SPEAK</button>
+    <button class="tab-btn" data-tab="1">LISTEN</button>
+    <button class="tab-btn" data-tab="2">KEYS</button>
+  </div>
+  <button class="cog" id="cog" title="settings">&#9881;</button>
+</div>
+
+<!-- SETTINGS. One panel, and what is in it depends on the tab underneath, so
+     the cog always means "the settings for what I am looking at". -->
+<section id="settings" style="display:none">
+  <div id="setSpeak">
+    <label>VOICE 1 &mdash; NAME AND VOICE</label>
+    <div class="row"><input id="n1" value="VIVEKA"><select id="s1"></select></div>
+    <label>VOICE 2 &mdash; NAME AND VOICE</label>
+    <div class="row"><input id="n2" value="MANAN"><select id="s2"></select></div>
+    <label>FIND A VOICE</label>
+    <input id="vq" placeholder="search by name or timbre">
+    <div id="vfacets" style="margin-top:8px"></div>
+    <div id="vlist" style="max-height:44vh;overflow:auto;margin-top:8px"></div>
+  </div>
+  <div id="setListen">
+    <div class="note">Maha Transcribe keeps its own settings inside its own
+    panel, on the LISTEN tab. The keys it uses are the ones on the KEYS tab.</div>
+  </div>
+  <div id="setKeys">
+    <div class="note" id="dep">checking what is installed<span class="spin"></span></div>
+    <div class="note" id="cachenote">counting the cache<span class="spin"></span></div>
+  </div>
+  <div class="note" id="verline"></div>
+</section>
+
+<section class="tab active" id="tab0">
+  <div class="info">
+    <div class="n"><div class="who" id="w1">VIVEKA</div><div class="v" id="d1">Charon &middot; informative</div></div>
+    <button data-hear="1">&#9654; hear</button>
+  </div>
+  <div class="info">
+    <div class="n"><div class="who" id="w2">MANAN</div><div class="v" id="d2">Puck &middot; upbeat</div></div>
+    <button data-hear="2">&#9654; hear</button>
+  </div>
+
+  <label>SCRIPT</label>
+  <textarea id="text" placeholder="&lt;VIVEKA: Amused&gt; Ah. There you are. I was expecting you.
+&lt;MANAN: Anxious: slow&gt; I am trying.
+&lt;VIVEKA: Firm&gt; I know."></textarea>
+  <div class="note">A tag sets who speaks, how, and how fast:
+  &lt;NAME&gt;, &lt;NAME: Weary&gt;, &lt;NAME: Weary: slow&gt;. Put the cursor
+  where you want one and pick below.</div>
+
+  <div class="row">
+    <div><label>INSERT FOR</label><select id="who"></select></div>
+    <div><label>PACE</label><select id="pace"></select></div>
+  </div>
+  <input id="eq" placeholder="search a direction: angry, whisper, teaching">
+  <div id="egroups" style="margin-top:8px"></div>
+  <div id="elist" style="max-height:32vh;overflow:auto;margin-top:8px"></div>
+
+  <button class="go" id="sgo">SPEAK</button>
+  <div class="out idle" id="sout">nothing spoken yet</div>
+  <audio id="player" class="idle" controls></audio>
+</section>
+
+<section class="tab" id="tab1">
+  <iframe id="mt" title="Maha Transcribe"
+    style="width:100%;height:78vh;border:1px solid var(--line);border-radius:10px;background:var(--bg)"></iframe>
+</section>
+
+<section class="tab" id="tab2">
+  <div id="bud" class="idle">reading the ledger<span class="spin"></span></div>
+  <label>ADD ACCOUNTS FROM A FILE</label>
+  <input type="file" id="kf">
+  <div class="note">Any file. A note, a .env, a JSON export, a CSV, a markdown
+  table. It finds the keys, keeps the account names where they are there, and
+  adds only the ones the ring does not already hold.</div>
+  <div class="out idle" id="kimp">nothing imported this session</div>
+  <div class="row">
+    <button class="go ghost" id="testall">TEST ALL</button>
+    <button class="go danger" id="del" disabled>DELETE REFUSED</button>
+  </div>
+  <button class="go ghost" id="undel" disabled>PUT BACK</button>
+  <div id="keys" class="note">no account tested this session. Every row has its
+  own test and delete, so one account can be answered without spending the
+  other twenty.</div>
+</section>
+
+</div>
+<script>
+"use strict";
+var VERSION = "@@VERSION@@";
+var ASSUMED = "@@ASSUMED@@";
+
+// The header a cross-site request cannot set. Its value does not matter.
+var H = {"X-Gtt-Local": "1"};
+function api(u, o) {
+  o = o || {};
+  o.headers = Object.assign({}, H, o.headers || {});
+  return fetch(u, o).then(function (r) { return r.json(); });
+}
+function el(id) { return document.getElementById(id); }
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, function (c) {
+    return {"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c];
+  });
+}
+
+// ---------------------------------------------------------------- spinner
+// Braille, one cell, eighty milliseconds. It runs on ANY wait: an app that
+// spins for the slow things and freezes for the quick ones teaches you that a
+// still screen means broken, and then a genuinely quick answer looks broken too.
+var FRAMES = "\u280b\u2819\u2839\u2838\u283c\u2834\u2826\u2827\u2807\u280f";
+var spinners = [];
+function spin(node) {
+  if (!node) return function () {};
+  var i = 0;
+  var t = setInterval(function () {
+    node.textContent = FRAMES[i++ % FRAMES.length];
+  }, 80);
+  spinners.push(t);
+  return function stop(txt) {
+    clearInterval(t);
+    node.textContent = txt === undefined ? "" : txt;
+  };
+}
+function busy(node, label) {
+  var was = node.innerHTML;
+  var wasDisabled = node.disabled;
+  node.disabled = true;
+  node.innerHTML = (label || "") + ' <span class="sp"></span>';
+  var stop = spin(node.querySelector(".sp"));
+  return function done(text) {
+    stop();
+    node.innerHTML = text === undefined ? was : text;
+    node.disabled = wasDisabled;
+    if (text !== undefined) setTimeout(function () { node.innerHTML = was; }, 2200);
+  };
+}
+function working(node, msg) {
+  node.classList.remove("idle");
+  node.innerHTML = esc(msg || "working") + ' <span class="sp"></span>';
+  return spin(node.querySelector(".sp"));
+}
+
+// ------------------------------------------------------------------ state
+var VOICES = [], EMO = [], ROWS = [], STAR = [];
+var SLOT = {1: {voice: "Charon"}, 2: {voice: "Puck"}};
+var vfacet = "", efacet = "", tabNow = 0, settingsOpen = false;
+try { STAR = JSON.parse(localStorage.getItem("gtt_star") || "[]"); } catch (e) { STAR = []; }
+try {
+  var saved = JSON.parse(localStorage.getItem("gtt_slots") || "null");
+  if (saved) SLOT = saved;
+} catch (e) {}
+function saveSlots() { localStorage.setItem("gtt_slots", JSON.stringify(SLOT)); }
+
+// ------------------------------------------------------------------- tabs
+function showTab(i) {
+  tabNow = i;
+  var b = document.querySelectorAll(".tab-btn");
+  for (var k = 0; k < b.length; k++) b[k].classList.toggle("active", k === i);
+  for (var k = 0; k < 3; k++) el("tab" + k).classList.toggle("active", k === i && !settingsOpen);
+  el("settings").style.display = settingsOpen ? "block" : "none";
+  el("setSpeak").style.display = i === 0 ? "block" : "none";
+  el("setListen").style.display = i === 1 ? "block" : "none";
+  el("setKeys").style.display = i === 2 ? "block" : "none";
+  if (i === 1 && !el("mt").src) el("mt").src = "/transcribe";
+  if (i === 2) { loadBudget(); checkGrave(); }
+  if (settingsOpen && i === 2) { loadHealth(); loadCache(); }
+}
+document.querySelectorAll(".tab-btn").forEach(function (b) {
+  b.addEventListener("click", function () {
+    settingsOpen = false;
+    el("cog").classList.remove("on");
+    showTab(parseInt(b.dataset.tab, 10));
+  });
+});
+el("cog").addEventListener("click", function () {
+  settingsOpen = !settingsOpen;
+  el("cog").classList.toggle("on", settingsOpen);
+  showTab(tabNow);
+});
+
+// ------------------------------------------------------------- catalogues
+function loadCatalogues() {
+  var stopB = working(el("bud"), "reading the ledger");
+  Promise.all([api("/api/voices"), api("/api/emotions")]).then(function (r) {
+    VOICES = r[0];
+    EMO = r[1];
+    var timbres = [];
+    VOICES.forEach(function (v) { if (timbres.indexOf(v.timbre) < 0) timbres.push(v.timbre); });
+    timbres.sort();
+    var f = '<span class="chip on" data-vf="">all</span><span class="chip" data-vf="*">starred</span>';
+    timbres.forEach(function (t) { f += '<span class="chip" data-vf="' + esc(t) + '">' + esc(t) + "</span>"; });
+    el("vfacets").innerHTML = f;
+    var groups = [];
+    EMO.forEach(function (e) { if (groups.indexOf(e.group) < 0) groups.push(e.group); });
+    var g = '<span class="chip on" data-ef="">all</span>';
+    groups.forEach(function (x) { g += '<span class="chip" data-ef="' + esc(x) + '">' + esc(x.toLowerCase()) + "</span>"; });
+    el("egroups").innerHTML = g;
+    ["normal", "slow", "fast", "very slow"].forEach(function (p) {
+      el("pace").add(new Option(p, p));
+    });
+    VOICES.forEach(function (v) {
+      el("s1").add(new Option(v.name + "  " + v.timbre, v.name));
+      el("s2").add(new Option(v.name + "  " + v.timbre, v.name));
+    });
+    el("s1").value = SLOT[1].voice;
+    el("s2").value = SLOT[2].voice;
+    drawVoices();
+    drawEmotions();
+    refreshWho();
+    stopB();
+    loadBudget();
+  });
+}
+function timbreOf(name) {
+  for (var i = 0; i < VOICES.length; i++) if (VOICES[i].name === name) return VOICES[i].timbre;
+  return "";
+}
+function refreshWho() {
+  var cur = el("who").value;
+  el("who").innerHTML = "";
+  [el("n1").value.trim() || "VOICE 1", el("n2").value.trim() || "VOICE 2"].forEach(function (n) {
+    el("who").add(new Option(n, n));
+  });
+  if (cur) el("who").value = cur;
+  el("w1").textContent = el("n1").value.trim() || "VOICE 1";
+  el("w2").textContent = el("n2").value.trim() || "VOICE 2";
+  el("d1").innerHTML = esc(SLOT[1].voice) + " &middot; " + esc(timbreOf(SLOT[1].voice));
+  el("d2").innerHTML = esc(SLOT[2].voice) + " &middot; " + esc(timbreOf(SLOT[2].voice));
+}
+el("n1").addEventListener("input", refreshWho);
+el("n2").addEventListener("input", refreshWho);
+el("s1").addEventListener("change", function () { SLOT[1].voice = el("s1").value; saveSlots(); refreshWho(); });
+el("s2").addEventListener("change", function () { SLOT[2].voice = el("s2").value; saveSlots(); refreshWho(); });
+
+// ------------------------------------------------------- the voice browser
+el("vq").addEventListener("input", drawVoices);
+el("eq").addEventListener("input", drawEmotions);
+document.addEventListener("click", function (ev) {
+  var c = ev.target.closest ? ev.target.closest(".chip") : null;
+  if (!c) return;
+  if (c.dataset.vf !== undefined) {
+    vfacet = c.dataset.vf;
+    el("vfacets").querySelectorAll(".chip").forEach(function (x) { x.classList.toggle("on", x === c); });
+    drawVoices();
+  }
+  if (c.dataset.ef !== undefined) {
+    efacet = c.dataset.ef;
+    el("egroups").querySelectorAll(".chip").forEach(function (x) { x.classList.toggle("on", x === c); });
+    drawEmotions();
+  }
+});
+function drawVoices() {
+  var q = (el("vq").value || "").toLowerCase();
+  var rows = VOICES.filter(function (v) {
+    var okf = vfacet === "" || (vfacet === "*" ? STAR.indexOf(v.name) >= 0 : v.timbre === vfacet);
+    return okf && (v.name.toLowerCase().indexOf(q) >= 0 || v.timbre.indexOf(q) >= 0);
+  });
+  el("vlist").innerHTML = rows.length ? rows.map(function (v) {
+    return '<div class="kcard"><div class="khead"><div class="klabel">' + esc(v.name) +
+      '</div><div class="kwhy">' + esc(v.timbre) + "</div></div>" +
+      '<div class="kacts">' +
+      '<button data-use="1" data-v="' + esc(v.name) + '">voice 1</button>' +
+      '<button data-use="2" data-v="' + esc(v.name) + '">voice 2</button>' +
+      '<button class="gold" data-play="' + esc(v.name) + '" data-emo="Neutral">&#9654;</button>' +
+      '<button data-star="' + esc(v.name) + '">' +
+      (STAR.indexOf(v.name) >= 0 ? "\u2605" : "\u2606") + "</button></div></div>";
+  }).join("") : '<div class="note">nothing matches</div>';
+}
+function drawEmotions() {
+  var q = (el("eq").value || "").toLowerCase();
+  var rows = EMO.filter(function (e) {
+    return (efacet === "" || e.group === efacet) &&
+      (e.label.toLowerCase().indexOf(q) >= 0 || e.text.indexOf(q) >= 0 ||
+       e.group.toLowerCase().indexOf(q) >= 0);
+  });
+  el("elist").innerHTML = rows.length ? rows.map(function (e) {
+    return '<div class="kcard" style="padding:9px"><div class="khead">' +
+      '<div class="klabel">' + esc(e.glyph) + "  " + esc(e.label) + "</div>" +
+      '<div class="kacts" style="margin:0;flex:0 0 auto">' +
+      '<button data-insert="' + esc(e.label) + '">insert</button>' +
+      '<button class="gold" data-play="" data-emo="' + esc(e.label) + '">&#9654;</button>' +
+      "</div></div><div class=\"kwhy\">" + esc(e.text) + "</div></div>";
+  }).join("") : '<div class="note">nothing matches</div>';
+}
+
+// one listener for every button that carries data. No quoting, no escaping,
+// nothing to get wrong twice.
+document.addEventListener("click", function (ev) {
+  var b = ev.target.closest ? ev.target.closest("button") : null;
+  if (!b) return;
+  if (b.dataset.use) {
+    SLOT[b.dataset.use].voice = b.dataset.v;
+    el("s" + b.dataset.use).value = b.dataset.v;
+    saveSlots();
+    refreshWho();
+  } else if (b.dataset.star) {
+    var n = b.dataset.star;
+    STAR = STAR.indexOf(n) >= 0 ? STAR.filter(function (x) { return x !== n; }) : STAR.concat([n]);
+    localStorage.setItem("gtt_star", JSON.stringify(STAR));
+    drawVoices();
+  } else if (b.dataset.play !== undefined) {
+    hear(b.dataset.play || SLOT[1].voice, b.dataset.emo || "Neutral", b);
+  } else if (b.dataset.hear) {
+    hear(SLOT[b.dataset.hear].voice, "Neutral", b);
+  } else if (b.dataset.insert) {
+    insertTag(b.dataset.insert);
+  } else if (b.dataset.one) {
+    testOne(b.dataset.one, b);
+  } else if (b.dataset.models) {
+    showModels(b.dataset.models, b);
+  } else if (b.dataset.drop) {
+    dropKey(b.dataset.drop);
+  }
+});
+
+function insertTag(label) {
+  var p = el("pace").value && el("pace").value !== "normal" ? ": " + el("pace").value : "";
+  var tag = "<" + el("who").value + ": " + label + p + "> ";
+  var t = el("text"), s = t.selectionStart || 0, e = t.selectionEnd || 0;
+  t.value = t.value.slice(0, s) + tag + t.value.slice(e);
+  t.focus();
+  t.selectionStart = t.selectionEnd = s + tag.length;
+}
+
+// ---------------------------------------------------------------- preview
+var PLAYER = null;
+function hear(voice, label, btn) {
+  var done = busy(btn, "");
+  api("/api/preview?voice=" + encodeURIComponent(voice) + "&emotion=" + encodeURIComponent(label))
+    .then(function (r) {
+      if (!r.ok) { done("no"); return; }
+      done(r.cached ? "cached" : "new");
+      if (PLAYER) PLAYER.pause();
+      PLAYER = new Audio("/preview/" + r.file);
+      PLAYER.play();
+      loadCache();
+    }).catch(function () { done("no"); });
+}
+
+// ------------------------------------------------------------------ speak
+el("sgo").addEventListener("click", function () {
+  var stop = working(el("sout"), "generating, about half the length of the audio");
+  el("sgo").disabled = true;
+  api("/api/speak", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({
+      text: el("text").value,
+      speakers: [{name: el("n1").value.trim(), voice: SLOT[1].voice},
+                 {name: el("n2").value.trim(), voice: SLOT[2].voice}]
+    })
+  }).then(function (r) {
+    stop();
+    el("sgo").disabled = false;
+    if (r.ok) {
+      var s = r.seconds + "s of audio, " + r.model + " on [" + r.key + "]";
+      if (r.problems && r.problems.length) s += "\n\n" + r.problems.join("\n");
+      if (r.log && r.log.length) s += "\n" + r.log.join("\n");
+      el("sout").textContent = s;
+      el("player").src = "/out/" + r.file;
+      el("player").classList.remove("idle");
+    } else {
+      el("sout").textContent = "no: " + (r.error || "failed") +
+        "\n" + ((r.log || []).join("\n"));
+    }
+    loadBudget();
+  }).catch(function (e) {
+    stop();
+    el("sgo").disabled = false;
+    el("sout").textContent = "no: " + e.message;
+  });
+});
+
+// ------------------------------------------------------------------- keys
+el("kf").addEventListener("change", function () {
+  if (!el("kf").files[0]) return;
+  var stop = working(el("kimp"), "reading " + el("kf").files[0].name);
+  var fd = new FormData();
+  fd.append("keyfile", el("kf").files[0]);
+  api("/api/import", {method: "POST", body: fd}).then(function (r) {
+    stop();
+    if (!r.ok) { el("kimp").textContent = "no: " + r.error; return; }
+    var s = r.found + " key" + (r.found === 1 ? "" : "s") + " found in " + r.source + "\n";
+    s += r.added.length + " added, " + r.duplicates.length + " already in the ring\n";
+    r.added.forEach(function (a) { s += "\n  + " + a.label + "   " + a.masked; });
+    r.duplicates.forEach(function (a) { s += "\n  = " + (a.label || "already here") + "   " + a.masked; });
+    if (r.maybes.length) s += "\n\nnot a shape I know, left alone: " + r.maybes.join(", ");
+    s += "\n\nthe ring now holds " + r.ring;
+    el("kimp").textContent = s;
+    el("kf").value = "";
+    loadBudget();
+    testAll();
+  });
+});
+function card(r) {
+  var v = r.verdict || "untested";
+  var G = {working: "\u25cf", busy: "\u25d0", "no credit": "\uff04", refused: "\u2717",
+           unknown: "?", untested: "\u25cb", testing: "\u2026"};
+  return '<div class="kcard"><div class="khead"><div class="klabel">' + esc(r.label) +
+    '</div><div class="kstatus ' + v.replace(" ", "") + '">' + G[v] + " " + v + "</div></div>" +
+    '<div class="kkey">' + esc(r.masked) + (r.ms ? '   <span class="kwhy">' + r.ms + " ms</span>" : "") + "</div>" +
+    (r.why ? '<div class="kwhy">' + esc(r.why) + "</div>" : "") +
+    '<div class="kdetail" style="display:none"></div><div class="kacts">' +
+    '<button data-one="' + esc(r.label) + '">test</button>' +
+    '<button class="gold" data-models="' + esc(r.label) + '">models</button>' +
+    '<button class="red" data-drop="' + esc(r.label) + '">delete</button></div></div>';
+}
+function draw() {
+  el("keys").innerHTML = ROWS.length ? ROWS.map(card).join("")
+    : '<div class="note">the ring is empty. Pick a key file above.</div>';
+  var n = ROWS.filter(function (r) { return r.verdict === "refused"; }).length;
+  el("del").disabled = n === 0;
+  el("del").textContent = n ? "DELETE " + n + " REFUSED" : "DELETE REFUSED";
+}
+function testAll() {
+  var done = busy(el("testall"), "TESTING");
+  api("/api/ring").then(function (r0) {
+    ROWS = r0.keys.map(function (k) {
+      return {label: k.label, masked: k.masked, verdict: "testing", why: ""};
+    });
+    draw();
+    return api("/api/keys");
+  }).then(function (rows) {
+    ROWS = rows;
+    draw();
+    done();
+    loadBudget();
+    checkGrave();
+  }).catch(function () { done(); });
+}
+el("testall").addEventListener("click", testAll);
+function testOne(label, btn) {
+  var done = busy(btn, "");
+  api("/api/key/" + encodeURIComponent(label) + "/test", {method: "POST"}).then(function (r) {
+    done();
+    if (!r.ok) return;
+    for (var i = 0; i < ROWS.length; i++) if (ROWS[i].label === label) ROWS[i] = r;
+    draw();
+    loadBudget();
+  }).catch(function () { done(); });
+}
+function showModels(label, btn) {
+  var done = busy(btn, "");
+  api("/api/key/" + encodeURIComponent(label) + "/models").then(function (r) {
+    done();
+    var cards = el("keys").querySelectorAll(".kcard");
+    for (var i = 0; i < cards.length; i++) {
+      if (cards[i].querySelector(".klabel").textContent === label) {
+        var box = cards[i].querySelector(".kdetail");
+        box.style.display = "block";
+        box.textContent = r.ok
+          ? r.count + " models reachable\ntts:   " + (r.tts.join(", ") || "none") +
+            "\nimage: " + (r.image.join(", ") || "none") + "\ntext:  " + r.text.join(", ")
+          : "no: " + r.error;
+      }
+    }
+  }).catch(function () { done(); });
+}
+function dropKey(label) {
+  api("/api/delete", {method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({labels: [label]})}).then(function () {
+    ROWS = ROWS.filter(function (x) { return x.label !== label; });
+    draw();
+    loadBudget();
+    checkGrave();
+  });
+}
+el("del").addEventListener("click", function () {
+  var labels = ROWS.filter(function (r) { return r.verdict === "refused"; })
+    .map(function (r) { return r.label; });
+  if (!labels.length) return;
+  var done = busy(el("del"), "DELETING");
+  api("/api/delete", {method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({labels: labels})}).then(function () {
+    ROWS = ROWS.filter(function (r) { return r.verdict !== "refused"; });
+    draw();
+    done();
+    loadBudget();
+    checkGrave();
+  });
+});
+el("undel").addEventListener("click", function () {
+  var done = busy(el("undel"), "PUTTING BACK");
+  api("/api/restore", {method: "POST"}).then(function () { done(); testAll(); });
+});
+function checkGrave() {
+  api("/api/removed").then(function (g) {
+    el("undel").disabled = g.count === 0;
+    el("undel").textContent = g.count ? "PUT BACK " + g.count : "PUT BACK";
+  });
+}
+function loadHealth() {
+  var stop = working(el("dep"), "checking what is installed");
+  api("/api/health").then(function (h) {
+    stop();
+    var y = function (b) { return b ? "yes" : "no"; };
+    el("dep").textContent = "python " + h.python + " \u00b7 flask " + y(h.flask) +
+      " \u00b7 waitress " + y(h.waitress) + " \u00b7 ffmpeg " + y(h.ffmpeg) +
+      " \u00b7 ring " + h.keys + " at " + h.keyfile;
+  });
+}
+function loadCache() {
+  var stop = working(el("cachenote"), "counting the cache");
+  api("/api/cache").then(function (c) {
+    stop();
+    el("cachenote").textContent = c.count + " preview" + (c.count === 1 ? "" : "s") +
+      " cached, " + Math.round(c.bytes / 1024) + " KB. A preview is the same request " +
+      "every time, so it is asked for once and then never again.";
+  }).catch(function () { stop("could not count the cache"); });
+}
+function loadBudget() {
+  api("/api/budget").then(function (b) {
+    var h = Math.floor(b.reset_in / 3600), m = Math.floor((b.reset_in % 3600) / 60);
+    var s = '<div class="big">' + b.speak_hours_real + " h</div>" +
+      '<div class="note">of speech left today at a normal take length, ' +
+      b.speak_hours_max + " h if every call is run to its eight minute ceiling. " +
+      b.keys_live + " accounts. Resets in " + h + "h" + m + "m, at midnight Pacific.</div>" +
+      '<div class="note">Today: ' + b.audio_out + "s made, " + b.audio_in +
+      "s transcribed.</div><table><tr><th>model</th><th>for</th><th>left today</th></tr>";
+    b.models.forEach(function (m2) {
+      var pct = m2.total ? 100 * m2.left / m2.total : 0;
+      s += "<tr><td>" + m2.model + (m2.measured ? "" : " *") + "</td><td>" + m2.use +
+        "</td><td>" + m2.left + " / " + m2.total +
+        '<div class="bar"><i style="width:' + pct + '%"></i></div></td></tr>';
+    });
+    s += '</table><div class="note">* the daily limit for that one has never been ' +
+      "reached, so the row is a guess of " + ASSUMED + " an account.</div>";
+    el("bud").innerHTML = s;
+    el("bud").classList.remove("idle");
+  }).catch(function () {});
+}
+
+el("verline").textContent = "Google TTS and STT " + VERSION +
+  "  \u00b7  one ring, one ledger, one roof";
+showTab(0);
+loadCatalogues();
+</script></body></html>

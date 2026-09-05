@@ -8,7 +8,7 @@ is written by hand and every expected answer is written next to it.
 What this cannot catch: whether any of it is ever called. That is test 2.
 """
 
-import importlib.util, json, os, sys, tempfile
+import importlib.util, json, os, re, sys, tempfile
 from datetime import datetime, timedelta
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -306,6 +306,41 @@ check("without going anywhere near a key", r_.get("key"), None)
 check("an mp3 counts as a hit too, which is how the shipped ones arrive",
       bool(app.preview_path(h1)), True)
 check("the cache reports what it holds", app.cache_state()["count"] >= 1, True)
+
+# ------------------------------------------------------------- THE PAGE
+# v13 shipped a page whose script died at parse. On the phone that looked like
+# "counting the cache" forever and a SPEAK button that did nothing, because
+# every function defined after the bad line never existed. A syntax error must
+# stop the BUILD, not the app.
+import subprocess as _sp
+_page = open(os.path.join(ROOT, "src", "15_page.html")).read()
+_i = _page.rindex("<script>")
+_j = _page.rindex("</script>")
+_js = _page[_i + 8:_j]
+open("/tmp/_gtt_page_check.js", "w").write(_js)
+_node = None
+for _c in ("node", "nodejs"):
+    try:
+        _sp.run([_c, "--version"], capture_output=True, timeout=10)
+        _node = _c
+        break
+    except Exception:
+        pass
+if _node:
+    _r = _sp.run([_node, "--check", "/tmp/_gtt_page_check.js"], capture_output=True, timeout=60)
+    if _r.returncode != 0:
+        print(_r.stderr.decode()[:400])
+    check("the page's javascript parses", _r.returncode, 0)
+else:
+    print("   SKIP the javascript check, no node on this machine")
+check("every element the script reaches for by id exists in the markup",
+      [i for i in re.findall(r'el\("([A-Za-z0-9_]+)"\)', _js)
+       if ('id="%s"' % i) not in _page], [])
+check("the spinner runs on any wait, not only the slow ones",
+      _js.count("busy(") + _js.count("working(") > 8, True)
+check("the cog is in the markup", 'id="cog"' in _page, True)
+check("the version is in the settings panel and not the header",
+      'id="verline"' in _page and "GOOGLE TTS AND STT</h1>" not in _page, True)
 
 # -------------------------------------------------- the engine anchors
 # The vendored page is only usable if the swap actually applies. A missing
