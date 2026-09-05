@@ -422,3 +422,51 @@ requests to answer a question about one.
 
 TEST ALL draws every row first as `… testing` and then fills the verdicts in,
 because twenty rows arriving one at a time is a page that jumps.
+
+---
+
+## 5.9.2026 — v9, Maha Transcribe vendored whole
+
+Baba: *port the whole app as it is, only changing the engine. Don't invent new
+apps.*
+
+So the page is not rebuilt, not redesigned and not summarised.
+`src/30_transcribe.html` is `maha_transcribe.html` byte for byte, and the
+installer carries it — the installer is 213 KB now, which is a third of
+MAHA_COMMUTE's and the same idea.
+
+The swap is three anchors in `tools/engine_patches.py`, applied at build time.
+The upstream app already had exactly one dispatch point, `transcribeDispatch`,
+and one readiness check, `serviceReady`. Those are the seams its author built,
+and using them is the difference between changing an engine and rewriting an
+app. Everything else — the recording, the queue, the archive, the correction,
+the translation, the settings — is untouched, including the AssemblyAI code,
+which is still in the file and simply no longer reached.
+
+A missing anchor kills the build. A silent no-op would ship a page that looks
+right and calls AssemblyAI with keys it does not have, and that failure would
+not appear until the first recording.
+
+### The first attempt broke on its own escaping
+
+The patch table was generated inside a string inside a generator, and the
+JavaScript escape sequences went through two layers of Python quoting and came
+out as a syntax error. It lives in its own file now, as plain literals. A patch
+table nobody can read is a patch table nobody will check.
+
+### MA Reader Web is not done, and it is not a size problem
+
+Its page is 258 KB and its server 167 KB, and both could be vendored the same
+way. The reason it is not is the engine.
+
+Edge TTS streams **word boundary events** alongside the audio, and the highlight
+rides on those. `MA_READER_ENGINE` exists to carry that alignment between two
+apps, which is how much it matters. **Gemini TTS returns audio and nothing
+else** — no timings, no marks. Swapping the engine there means either losing the
+highlight, which is the app, or producing the timing some other way: a forced
+aligner, or sentence-level timing derived from audio length. Both are new work
+with their own accuracy and their own ways of being wrong.
+
+That is a decision rather than an implementation detail, so it is written down
+here and in DELIVERY_RECORD rather than guessed at. Vendoring the reader without
+an engine would put a reader in the repository that cannot read.

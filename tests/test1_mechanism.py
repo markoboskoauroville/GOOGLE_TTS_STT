@@ -229,5 +229,20 @@ check("24 kHz", w.getframerate(), 24000)
 check("mono", w.getnchannels(), 1)
 check("16 bit", w.getsampwidth(), 2)
 
+# -------------------------------------------------- the engine anchors
+# The vendored page is only usable if the swap actually applies. A missing
+# anchor at build time is fatal; this catches it a step earlier, in the test
+# that runs without a network.
+import importlib.util as _iu
+_spec = _iu.spec_from_file_location("ep", os.path.join(ROOT, "tools", "engine_patches.py"))
+_ep = _iu.module_from_spec(_spec)
+_spec.loader.exec_module(_ep)
+_html = open(os.path.join(ROOT, "src", "30_transcribe.html")).read()
+check("the vendored page is the whole app", len(_html) > 100000, True)
+for _old, _ in _ep.PATCHES:
+    check("the engine anchor is still there: %s" % _old.strip().splitlines()[0][:44],
+          _old in _html, True)
+    check("and it appears exactly once", _html.count(_old), 1)
+
 print("\nTEST 1: %d checks, %d failed" % (CHECKS, len(fails)))
 sys.exit(1 if fails else 0)

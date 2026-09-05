@@ -17,8 +17,12 @@ The filename carries that number at both ends, per modules/versioning.md.
 
 import hashlib, os, re, subprocess, sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import engine_patches
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HEAD = os.path.join(ROOT, "src", "00_head.sh")
+TRANSCRIBE = os.path.join(ROOT, "src", "30_transcribe.html")
 APP = os.path.join(ROOT, "src", "10_app.py")
 TAIL = os.path.join(ROOT, "src", "20_tail.sh")
 
@@ -34,6 +38,18 @@ def sha(path):
     return hashlib.sha256(open(path, "rb").read()).hexdigest()[:12]
 
 
+def engine_swapped():
+    """The vendored page with its engine replaced. Loud on a missing anchor: a
+    silent no-op here would ship the upstream app still calling AssemblyAI."""
+    html = open(TRANSCRIBE).read()
+    for old, new in engine_patches.PATCHES:
+        if old not in html:
+            sys.exit("engine anchor is no longer in src/30_transcribe.html:\n    %s"
+                     % old.strip().splitlines()[0])
+        html = html.replace(old, new, 1)
+    return html
+
+
 def build():
     v = version()
     name = "%d-google-tts-stt-v%d.sh" % (v, v)
@@ -42,6 +58,7 @@ def build():
         "# Edit src/00_head.sh, src/10_app.py, src/20_tail.sh and build again.",
         "#",
         "#   src/00_head.sh   %s" % sha(HEAD),
+        "#   src/30_transcribe.html   %s   vendored, engine swapped at build" % sha(TRANSCRIBE),
         "#   src/10_app.py    %s" % sha(APP),
         "#   src/20_tail.sh   %s" % sha(TAIL),
     ])
@@ -56,6 +73,10 @@ def build():
     app = open(APP).read()
     if "GTT_APP_EOF" in app:
         sys.exit("src/10_app.py contains the heredoc marker, which would end it early")
+    page = engine_swapped()
+    if "GTT_TRANSCRIBE_EOF" in page:
+        sys.exit("the vendored page contains the heredoc marker")
+    tail = tail.replace("@@TRANSCRIBE_HTML@@", page)
     return name, head + app + tail
 
 

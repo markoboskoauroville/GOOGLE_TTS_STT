@@ -41,7 +41,7 @@ try:
 except Exception:
     PACIFIC = timezone(timedelta(hours=-8))
 
-VERSION = 8
+VERSION = 9
 PORT = int(os.environ.get("GTTS_PORT", "7311"))
 KEYFILE = os.environ.get("GEMINI_KEYS", os.path.expanduser("~/.gemini_keys"))
 HOME = os.path.expanduser("~/.google_tts_stt")
@@ -1092,6 +1092,10 @@ The direction goes in the text itself, in plain English. For two speakers, pick 
 </section>
 
 <section class="tab">
+<a href="/transcribe" style="text-decoration:none"><button class="go">OPEN MAHA TRANSCRIBE</button></a>
+<div class="note">The whole app: recording, the queue, the archive, copying,
+correction, translation. Same app, this engine.</div>
+<label>OR TRANSCRIBE ONE FILE HERE</label>
 <label>AUDIO FILE</label>
 <input type="file" id="file" accept="audio/*">
 <label>LANGUAGE HINT</label>
@@ -1256,7 +1260,7 @@ MAX_PORT_TRIES = 16          # 7311 through 7326, then the OS decides
 GUARD_HEADER = "X-Gtt-Local"
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "[::1]", "::1"}
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
-OPEN_ENDPOINTS = {"index", "out", "favicon_ico"}
+OPEN_ENDPOINTS = {"index", "out", "favicon_ico", "transcribe_page"}
 _SELF_MARKER = b"GOOGLE TTS AND STT"
 
 
@@ -1476,6 +1480,16 @@ def serve():
         return (PAGE.replace("%%VOICES%%", json.dumps(VOICES))
                 .replace("%%ASSUMED%%", str(RPD_UNKNOWN_ASSUMED))
                 .replace("%%VERSION%%", str(VERSION)))
+
+    @app.get("/transcribe")
+    def transcribe_page():
+        """Maha Transcribe, whole. Recording, the queue, the archive, copying,
+        correction, translation, the settings: the app as it is. The engine
+        behind it is this ring."""
+        f = os.path.join(HOME, "transcribe.html")
+        if not os.path.exists(f):
+            return ("transcribe.html is not installed next to app.py", 404)
+        return send_from_directory(HOME, "transcribe.html")
 
     @app.get("/favicon.ico")
     def favicon_ico():

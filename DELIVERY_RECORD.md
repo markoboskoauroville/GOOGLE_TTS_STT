@@ -1,16 +1,16 @@
 # DELIVERY RECORD
 
-**v8, 5.9.2026.** What was measured, and what was not tested.
+**v9, 5.9.2026.** What was measured, and what was not tested.
 
 ## The gate
 
-    build is fresh          8-google-tts-stt-v8.sh matches src/
+    build is fresh          9-google-tts-stt-v9.sh matches src/
     installer is whole      --verify passes
-    TEST 1   mechanism       56 checks   0 failed
+    TEST 1   mechanism       63 checks   0 failed
     TEST 1b  the parser      73 checks   0 failed
     TEST 3   ugly cases      59 checks   0 failed
-    TEST 4   upgrade         34 checks   0 failed
-                            222 checks   0 failed
+    TEST 4   upgrade         39 checks   0 failed
+                            234 checks   0 failed
 
 TEST 2 was run against a fabricated ring at v8: everything structural passed —
 the guard refuses an api call with no header, refuses another page's Origin,
@@ -78,6 +78,26 @@ Both would have passed any hand test against the real API. Written up in
                            stays 600, remove-restore twice does not duplicate
     the browser chain      written from modules/termux-app.md, unproven on a phone
     an empty ring          the server starts, the page serves, the picker works
+
+## NOT DONE YET, AND IT IS HALF THE ASK
+
+**MA Reader Web is not ported.** The page is 258 KB and its server is 167 KB,
+and the reason it is not simply vendored the way Maha Transcribe was is not
+size. It is that the reader's engine is **not** a drop-in swap:
+
+- Edge TTS streams **word boundary events** with the audio. That is what the
+  highlight rides on, and `MA_READER_ENGINE` exists specifically to carry that
+  alignment between two apps.
+- **Gemini TTS returns audio and nothing else.** No word timings, no marks.
+
+So changing the reader's engine to Gemini means either losing the highlight,
+which is the app, or generating the timing another way — a forced aligner, or
+sentence-level timing from the audio length, both of which are new work with
+their own accuracy and their own failure modes.
+
+That is a decision, not an implementation detail, and it is Baba's to make. The
+page is not vendored yet because vendoring it without an engine would put a
+reader in the repository that cannot read.
 
 ## NOT TESTED
 

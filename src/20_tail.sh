@@ -3,6 +3,15 @@ mv -f "$APP.new" "$APP"
 chmod 644 "$APP"
 done_
 
+step "transcribe page"
+# MAHA_TRANSCRIBE_TERMUX_TERMINAL's own page, whole, with one function swapped.
+cat > "$APPHOME/transcribe.html.new" <<'GTT_TRANSCRIBE_EOF'
+@@TRANSCRIBE_HTML@@
+GTT_TRANSCRIBE_EOF
+mv -f "$APPHOME/transcribe.html.new" "$APPHOME/transcribe.html"
+chmod 644 "$APPHOME/transcribe.html"
+done_
+
 # ---------------------------------------------------------------- commands
 # RENAME, NEVER TRUNCATE. gtt-update runs this installer, so while these lines
 # execute the old gtt-update is still open and bash is still reading it. A

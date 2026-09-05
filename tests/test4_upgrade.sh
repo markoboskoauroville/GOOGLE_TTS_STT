@@ -212,6 +212,24 @@ grep -q "ring is empty" "$EMPTY/t.txt" \
   || bad "gtt test on an empty ring says why, once"
 rm -rf "$EMPTY"
 
+# THE VENDORED APP. It must arrive whole, and it must arrive with its engine
+# swapped: shipping the upstream page untouched would leave it calling
+# AssemblyAI with keys it does not have.
+T="$APPHOME/transcribe.html"
+[ -f "$T" ] && ok "the Maha Transcribe page is installed" || bad "the Maha Transcribe page is installed"
+if [ -f "$T" ]; then
+  SZ=$(wc -c < "$T")
+  [ "$SZ" -gt 100000 ] && ok "and it is the whole app, not a stub ($SZ bytes)" \
+    || bad "and it is the whole app, not a stub ($SZ bytes)"
+  grep -q "fetch('/api/listen'" "$T" \
+    && ok "the engine is this server" || bad "the engine is this server"
+  grep -q "return aaiTranscribe(blob, filename, statusFn);" "$T" \
+    && bad "the upstream dispatch must be gone" || ok "the upstream dispatch is gone"
+  grep -q "aaiAttemptJob" "$T" \
+    && ok "but the rest of the app is untouched, not rewritten" \
+    || bad "but the rest of the app is untouched, not rewritten"
+fi
+
 # the generated installer must match its sources
 if $PY "$ROOT/tools/build_installer.py" --check >/dev/null 2>&1; then
   ok "the shipped installer matches src/"

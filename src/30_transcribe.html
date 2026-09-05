@@ -1,0 +1,2196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Whisper Transcriber Web</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%231c1f26%22%20stroke%3D%22%23333844%22%20stroke-width%3D%222%22/%3E%3Ctext%20x%3D%2230%22%20y%3D%2244%22%20font-family%3D%22monospace%22%20font-size%3D%2234%22%20font-weight%3D%22bold%22%20fill%3D%22%23e8e6e1%22%20text-anchor%3D%22middle%22%3EW%3C/text%3E%3Ccircle%20cx%3D%2250%22%20cy%3D%2244%22%20r%3D%225%22%20fill%3D%22%23e8a33d%22/%3E%3Crect%20x%3D%2212%22%20y%3D%2252%22%20width%3D%228%22%20height%3D%224%22%20rx%3D%221%22%20fill%3D%22%23e8a33d%22/%3E%3Crect%20x%3D%2224%22%20y%3D%2250%22%20width%3D%228%22%20height%3D%226%22%20rx%3D%221%22%20fill%3D%22%23e8a33d%22/%3E%3Crect%20x%3D%2236%22%20y%3D%2248%22%20width%3D%228%22%20height%3D%228%22%20rx%3D%221%22%20fill%3D%22%235fd98a%22/%3E%3C/svg%3E">
+<style>
+  :root {
+    /* AGY UI tokens, the single source every colour below is derived from */
+    --bg: #0b0d10;
+    --surface: #0d1117;
+    --surface-2: #141a21;
+    --line: #23303d;
+    --amber: #f59e0b;
+    --amber-hi: #fbbf24;
+    --amber-lo: #b45309;
+    --prose: #f2ddb4;
+    --dim: #8a7a5c;
+    --red: #ef4444;
+    --green: #22c55e;
+    --mono: ui-monospace, "JetBrains Mono", "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace;
+
+    /* the app's own variable names, kept so nothing below has to be renamed */
+    --border: var(--line);
+    --text: var(--prose);
+    --text-dim: var(--dim);
+    --orange: var(--amber);   /* amber is the single accent, orange folds into it */
+    --cyan: var(--amber-lo);  /* likewise for the old quiet-accent colour */
+  }
+  *:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--mono); min-height: 100vh; }
+  body { display: flex; justify-content: center; align-items: flex-start; padding: calc(14px + env(safe-area-inset-top)) 8px calc(14px + env(safe-area-inset-bottom)); }
+  .unit { width: 100%; max-width: 640px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+  header { margin-bottom: 8px; display: flex; justify-content: space-between; align-items: flex-start; }
+  h1 { font-size: 18px; letter-spacing: 0.12em; margin: 0; font-weight: 700; }
+  h1 span { color: var(--amber); }
+  .mode-row { display: flex; gap: 6px; }
+  .mode-btn { background: var(--surface-2); border: 1px solid var(--border); color: var(--text-dim); font-family: var(--mono); font-size: 11px; font-weight: 700; letter-spacing: 0.08em; padding: 12px 14px; border-radius: 999px; cursor: pointer; }
+  .mode-btn.active { background: var(--amber); border-color: var(--amber); color: var(--bg); }
+  .mode-btn:active { transform: scale(0.97); }
+  .mode-hint { font-size: 10px; color: var(--text-dim); text-align: center; letter-spacing: 0.04em; margin: 0 0 6px; font-family: var(--mono); }
+  .session-line { font-size: 10px; color: var(--text-dim); text-align: center; letter-spacing: 0.06em; margin: 2px 0 6px; font-family: var(--mono); min-height: 12px; }
+  .tagline { font-size: 11px; color: var(--text-dim); letter-spacing: 0.06em; margin-top: 2px; }
+  .gear { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 20px; padding: 8px 10px; }
+  .gear:hover { color: var(--text); }
+  .gear.active { color: var(--amber); }
+
+  .tabs { display: flex; gap: 3px; margin-bottom: 8px; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tab-btn { flex: 1 0 auto; background: var(--surface-2); border: 1px solid var(--border); color: var(--text-dim); font-family: var(--mono); font-size: 11px; letter-spacing: 0.03em; padding: 15px 6px; border-radius: 999px; cursor: pointer; white-space: nowrap; }
+  .tab-btn.active { color: var(--bg); background: var(--amber); border-color: var(--amber); font-weight: 700; }
+  /* the REC pill is the record button, color coded so it stands out from the rest */
+  .tab-btn .hot-r { color: var(--red); font-weight: 700; font-size: 11.25pt; }
+  .tab-btn.active .hot-r { color: #4a0000; }
+  .tab { display: none; }
+  .tab.active { display: block; }
+  /* Archive now lives inside Settings instead of the main tab bar, so it gets a full width row here instead of a small pill */
+  #settingsPanel .tab-btn { width: 100%; display: block; text-align: center; padding: 16px; border-radius: 14px; font-size: 13px; letter-spacing: 0.08em; margin-bottom: 10px; }
+
+  .meter { display: flex; gap: 3px; height: 12px; margin-bottom: 8px; align-items: flex-end; }
+  .meter i { flex: 1; background: var(--surface-2); border-radius: 1px; height: 12%; font-style: normal; transition: background 0.3s ease; }
+  .meter.idle i { animation: idle-pulse 3s ease-in-out infinite; }
+  .meter.busy i { background: var(--amber); animation: meter-bounce 0.9s ease-in-out infinite; }
+  .meter.ok i { background: var(--green); height: 70%; animation: none; }
+  .meter.err i { background: var(--red); height: 40%; animation: none; }
+  .meter i:nth-child(odd) { animation-delay: 0.1s; }
+  .meter i:nth-child(3n) { animation-delay: 0.2s; }
+  .meter i:nth-child(4n) { animation-delay: 0.3s; }
+  .meter i:nth-child(5n) { animation-delay: 0.4s; }
+  @keyframes idle-pulse { 0%, 100% { height: 8%; } 50% { height: 18%; } }
+  @keyframes meter-bounce { 0%, 100% { height: 20%; } 50% { height: 85%; } }
+  @media (prefers-reduced-motion: reduce) { .meter i { animation: none !important; } }
+
+  /* Step one, the file picker, amber and clearly outlined */
+  .drop {
+    display: block;
+    border: 1px solid var(--orange);
+    border-radius: 14px;
+    padding: 14px;
+    text-align: center;
+    cursor: pointer;
+    color: var(--orange);
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    font-size: 13px;
+    margin-bottom: 6px;
+    background: rgba(245, 158, 11, 0.08);
+  }
+  .drop:hover { background: rgba(245, 158, 11, 0.16); }
+  .drop.has-file { color: var(--text); border-style: solid; background: var(--surface-2); }
+  .drop input { display: none; }
+
+  .row { display: flex; gap: 4px; margin-bottom: 6px; }
+  .lang-btn { flex: 1; background: var(--surface-2); border: 1px solid var(--border); color: var(--text-dim); font-family: var(--mono); font-size: 12px; letter-spacing: 0.05em; padding: 15px 4px; border-radius: 999px; cursor: pointer; }
+  .lang-btn.active { color: var(--bg); background: var(--amber); border-color: var(--amber); font-weight: 700; }
+  .big-choice { flex: 1; background: var(--surface-2); border: 1px solid var(--border); color: var(--text-dim); font-family: var(--mono); font-size: 15px; font-weight: 700; letter-spacing: 0.08em; padding: 20px 6px; border-radius: 14px; cursor: pointer; }
+  .big-choice.active { color: var(--bg); background: var(--amber); border-color: var(--amber); }
+  .arh-lang-row { margin-bottom: 8px; }
+  .claude-effort-row .lang-btn { font-size: 11px; padding: 13px 2px; }
+
+  .transcribe-btn, .rec-btn { width: 100%; padding: 16px; background: var(--amber); color: var(--bg); border: none; border-radius: 14px; font-family: var(--mono); font-weight: 700; letter-spacing: 0.08em; font-size: 13px; cursor: pointer; margin-bottom: 6px; }
+  .transcribe-btn:disabled, .rec-btn:disabled { background: var(--surface-2); color: var(--text-dim); cursor: not-allowed; }
+
+  .status { font-size: 12px; color: var(--text-dim); min-height: 34px; line-height: 1.5; margin-bottom: 6px; white-space: pre-wrap; }
+  .status.err { color: var(--red); }
+  .status.ok { color: var(--green); }
+
+  textarea { width: 100%; min-height: 220px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; color: var(--text); font-family: var(--mono); font-size: 13px; padding: 12px; resize: vertical; margin-bottom: 6px; }
+  textarea:focus-visible, .drop:focus-visible, .lang-btn:focus-visible, button:focus-visible, select:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+
+  .copy-btn, .small-btn { background: var(--surface-2); border: 1px solid var(--border); color: var(--text); font-family: var(--mono); font-size: 12px; padding: 11px 16px; border-radius: 999px; cursor: pointer; }
+  .copy-btn:hover, .small-btn:hover { border-color: var(--amber); }
+  .small-btn.danger:hover { border-color: var(--red); color: var(--red); }
+
+  /* Recorder */
+  .rec-clock { font-size: 34px; text-align: center; letter-spacing: 0.06em; margin: 6px 0 2px; font-variant-numeric: tabular-nums; }
+  .rec-clock .ms { font-size: 18px; color: var(--text-dim); }
+  .rec-state { text-align: center; font-size: 11px; letter-spacing: 0.14em; color: var(--text-dim); margin-bottom: 6px; min-height: 14px; }
+  .rec-state.live { color: var(--red); animation: stateBlink 1s steps(1, end) infinite; }
+  @keyframes stateBlink { 0%, 50% { opacity: 1; } 50.01%, 100% { opacity: 0.15; } }
+  .rec-row { display: flex; gap: 4px; margin-bottom: 6px; }
+  .rec-row button { flex: 1; }
+  .claude-btn { font-size: 11px; }
+  .claude-usage { font-size: 10px; color: var(--text-dim); text-align: center; letter-spacing: 0.03em; margin: 2px 0 8px; font-family: var(--mono); }
+  .text-input { width: 100%; box-sizing: border-box; background: var(--surface-2); border: 1px solid var(--border); color: var(--text); font-family: var(--mono); font-size: 13px; padding: 10px 12px; border-radius: 10px; margin-bottom: 10px; }
+  .text-input:focus { outline: none; border-color: var(--amber); }
+  .rec-btn.stop { background: var(--red); color: var(--bg); }
+
+  /* record (round) + stop, kept as a rounded square (not a full circle) so it still reads as "stop" */
+  .rec-controls { display: flex; gap: 20px; justify-content: center; align-items: center; margin-bottom: 6px; }
+  .scope { width: 100%; height: 110px; display: block; margin: 4px 0 10px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 14px; }
+  .tab-btn.recording { border-color: var(--red); background: rgba(239, 68, 68, 0.14); }
+  .tab-btn.recording .hot-r { color: var(--red); font-variant-numeric: tabular-nums; animation: pillBlink 1s steps(1, end) infinite; }
+  @keyframes pillBlink { 0%, 50% { opacity: 1; } 50.01%, 100% { opacity: 0.25; } }
+  .rec-toggle { width: 96px; height: 96px; border-radius: 50%; border: 1px solid var(--red); background: var(--surface-2); color: var(--red); font-size: 30px; font-weight: 700; letter-spacing: 0.04em; line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center; font-family: var(--mono); transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease; }
+  .rec-toggle.idle { color: var(--red); border-color: var(--red); }
+  .rec-toggle.rec { color: var(--red); border-color: var(--red); background: rgba(239, 68, 68, 0.12); }
+  .rec-toggle:disabled { opacity: 0.3; cursor: not-allowed; }
+  .rec-toggle:hover { background: var(--surface); }
+  .rec-cancel-btn { width: 70px; height: 70px; border-radius: 18px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text-dim); font-size: 26px; line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center; font-family: var(--mono); }
+  .rec-cancel-btn:not(:disabled) { color: var(--text-dim); border-color: var(--border); }
+  .rec-cancel-btn:hover:not(:disabled) { border-color: var(--red); color: var(--red); background: var(--surface); }
+  .rec-cancel-btn:disabled { opacity: 0.3; cursor: not-allowed; animation: none; }
+
+  .rec-settings { margin-top: 4px; }
+  .rec-settings .row { margin-bottom: 4px; }
+  .rec-settings-label { font-size: 10px; color: var(--text-dim); letter-spacing: 0.12em; font-weight: 700; margin-bottom: 6px; text-align: center; text-transform: uppercase; }
+
+  /* shared language + service block, identical position on REC and TRANSCRIBE */
+  .shared-settings { margin-top: 0; border-top: 1px solid var(--border); padding-top: 8px; }
+  .shared-settings .row { margin-bottom: 4px; }
+  .shared-settings .row:last-child { margin-bottom: 0; }
+
+  /* circular, finger friendly copy button centered on top of the transcript box */
+  .transcript-wrap { position: relative; margin-top: 8px; }
+  .copy-cp { width: 86px; height: 86px; border-radius: 50%; border: 1px solid var(--amber); background: var(--amber); color: var(--bg); font-family: var(--mono); font-weight: 800; font-size: 26px; letter-spacing: 0.06em; cursor: pointer; display: flex; align-items: center; justify-content: center; flex: 0 0 auto; }
+  .copy-cp:hover { filter: brightness(1.08); }
+  .copy-cp:active { transform: scale(0.93); }
+
+
+  /* paste and clear above a text box */
+  .box-tools { display: flex; gap: 4px; justify-content: flex-end; margin-bottom: 4px; }
+  .box-tools.has-copy { justify-content: space-between; align-items: center; }
+
+
+  /* Archive */
+  .arh-item { border: 1px solid var(--border); border-radius: 12px; padding: 10px; margin-bottom: 6px; background: var(--surface-2); }
+  .arh-name { font-size: 12px; margin-bottom: 4px; word-break: break-all; }
+  .arh-meta { font-size: 11px; color: var(--text-dim); margin-bottom: 6px; }
+  .arh-actions { display: flex; gap: 4px; flex-wrap: wrap; }
+  .arh-actions .small-btn { font-size: 11px; padding: 8px 12px; }
+  .arh-empty { font-size: 12px; color: var(--text-dim); }
+
+  /* Help */
+  .help-body { font-size: 12px; line-height: 1.7; color: var(--text); }
+  .help-body h3 { color: var(--amber); font-size: 12px; letter-spacing: 0.1em; margin: 18px 0 6px; }
+  .help-body p { margin: 0 0 10px; }
+
+  /* Settings, now its own full tab */
+  label.field-label { font-size: 10px; color: var(--text-dim); letter-spacing: 0.09em; font-weight: 700; text-transform: uppercase; display: block; margin-bottom: 4px; }
+  .key-picker { display: block; border: 1px dashed var(--border); border-radius: 12px; padding: 12px; font-size: 12px; color: var(--text-dim); text-align: center; cursor: pointer; }
+  .key-picker:hover { border-color: var(--amber); color: var(--text); }
+  .key-picker.attention { border-color: var(--red); color: var(--red); }
+  .key-picker input { display: none; }
+  .key-list { font-size: 11px; color: var(--text-dim); line-height: 1.6; margin-top: 6px; }
+  .about { font-size: 11px; color: var(--text-dim); margin-top: 8px; line-height: 1.7; }
+  .about b { color: var(--cyan); }
+  .radio-group { margin-bottom: 6px; }
+  .radio-group .field-label { margin-bottom: 4px; }
+  .radio-row { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--text); padding: 10px 10px; border: 1px solid var(--border); border-radius: 12px; margin-bottom: 4px; cursor: pointer; background: var(--surface-2); }
+  .radio-row:hover { border-color: var(--amber); }
+  .radio-row input { accent-color: var(--amber); margin: 0; }
+  .radio-row span { word-break: break-all; }
+
+  /* API key ring, one panel per provider */
+  .kr-panel { border: 1px solid var(--border); border-radius: 12px; padding: 10px; margin-bottom: 10px; background: var(--surface-2); }
+  .kr-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+  .kr-title { font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--amber-hi, var(--amber)); }
+  .kr-count { font-size: 10px; color: var(--text-dim); }
+  .kr-empty { font-size: 11px; color: var(--text-dim); padding: 6px 0; }
+  .kr-row { display: flex; align-items: center; gap: 8px; padding: 8px 6px; border-bottom: 1px solid var(--border); }
+  .kr-row:last-of-type { border-bottom: none; }
+  .kr-row input[type=radio] { accent-color: var(--amber); margin: 0; flex: 0 0 auto; }
+  .kr-info { flex: 1; min-width: 0; }
+  .kr-mask { font-size: 12px; word-break: break-all; }
+  .kr-meta { font-size: 10px; color: var(--text-dim); margin-top: 2px; }
+  .kr-badge { font-size: 9px; font-weight: 700; letter-spacing: 0.05em; padding: 2px 6px; border-radius: 999px; text-transform: uppercase; display: inline-flex; align-items: center; gap: 3px; }
+  .kr-badge .kr-glyph { font-size: 10px; }
+  .kr-badge.live { color: var(--green); background: rgba(34, 197, 94, 0.14); }
+  .kr-badge.new { color: var(--text-dim); background: var(--surface); }
+  .kr-badge.dead { color: var(--red); background: rgba(239, 68, 68, 0.14); }
+  .kr-badge.nocredit { color: var(--amber); background: rgba(245, 158, 11, 0.14); }
+  .kr-badge.cool { color: var(--amber); background: rgba(245, 158, 11, 0.14); }
+  .kr-live { font-size: 10px; color: var(--text-dim); min-height: 14px; margin: 2px 0 4px; }
+  .kr-live .kr-glyph.testing { animation: krSpin 1.2s steps(8) infinite; display: inline-block; }
+  .kr-live .kr-glyph.live { color: var(--green); }
+  .kr-live .kr-glyph.dead { color: var(--red); }
+  .kr-live .kr-glyph.nocredit, .kr-live .kr-glyph.cool { color: var(--amber); }
+  .kr-live .kr-glyph.unclear { color: var(--text-dim); }
+  @keyframes krSpin { from { opacity: 1; } to { opacity: 0.3; } }
+  .kr-verbatim { color: var(--green); }
+  .kr-row-actions { display: flex; gap: 4px; flex: 0 0 auto; }
+  .kr-mini-btn { background: var(--surface); border: 1px solid var(--border); color: var(--text-dim); font-family: var(--mono); font-size: 10px; padding: 6px 8px; border-radius: 999px; cursor: pointer; }
+  .kr-mini-btn:hover { border-color: var(--amber); color: var(--amber); }
+  .kr-mini-btn.danger:hover { border-color: var(--red); color: var(--red); }
+  .kr-import { margin-top: 6px; }
+  .kr-import textarea { width: 100%; min-height: 60px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-family: var(--mono); font-size: 11px; padding: 8px; margin-bottom: 6px; }
+  .kr-import-row { display: flex; gap: 4px; }
+  .kr-import-row .small-btn { flex: 1; text-align: center; }
+</style>
+</head>
+<body>
+<div class="unit">
+  <header>
+    <div>
+      <div class="mode-row" role="group" aria-label="recording mode">
+        <button type="button" class="mode-btn" id="modeMulti" data-mode="multi" title="every recording is added under the last one, tap again to start fresh">MULTIPLE</button>
+        <button type="button" class="mode-btn" id="modeSingle" data-mode="single" title="every recording replaces the text, tap again to start fresh">SINGLE</button>
+      </div>
+    </div>
+    <button class="gear" id="gearBtn" title="settings" aria-label="settings">&#9881;</button>
+  </header>
+
+  <div class="tabs" role="tablist">
+    <button class="tab-btn active" id="recPill" data-tab="rec"><span class="hot-r" id="recPillLabel">REC</span></button>
+    <button class="tab-btn" data-tab="transcribe">transcribe</button>
+    <button class="tab-btn" data-tab="translate">translate</button>
+  </div>
+
+  <div class="meter idle" id="meter" aria-hidden="true"></div>
+
+  <!-- SHARED SETTINGS, same buttons and position on REC and TRANSCRIBE, always at the top of whichever of those two tabs is open -->
+  <div class="shared-settings" id="sharedSettings">
+    <div class="row" id="langRow" role="group" aria-label="language">
+      <button type="button" class="lang-btn" data-lang="hr">HR</button>
+      <button type="button" class="lang-btn" data-lang="en">EN</button>
+      <button type="button" class="lang-btn" data-lang="auto">AUTO</button>
+    </div>
+  </div>
+
+  <!-- REC -->
+  <div class="tab active" id="tab-rec">
+    <div class="rec-clock" id="recClock">00:00<span class="ms">.0</span></div>
+    <div class="rec-state" id="recState"></div>
+    <canvas class="scope" id="recScope" width="600" height="150"></canvas>
+    <div class="rec-controls">
+      <button type="button" class="rec-cancel-btn" id="recCancelBtn" aria-label="cancel" title="cancel and throw this away" disabled>&#10005;</button>
+    </div>
+    <div class="status" id="recStatus"></div>
+    <div class="session-line" id="sessionLine">session empty</div>
+    <div class="mode-hint" id="modeHint"></div>
+    <button type="button" class="transcribe-btn" id="recTranscribeBtn" disabled>TRANSCRIBE ALL PARTS</button>
+  </div>
+
+  <!-- TRANSCRIBE -->
+  <div class="tab" id="tab-transcribe">
+    <label class="drop" id="drop" for="audioInput">
+      <span id="dropLabel">CHOOSE FILE</span>
+      <input type="file" id="audioInput" accept="audio/*,video/*">
+    </label>
+
+    <button type="button" class="transcribe-btn" id="transcribeBtn" disabled>TRANSCRIBE</button>
+    <div class="status" id="status"></div>
+    <div class="box-tools has-copy">
+      <button type="button" class="small-btn" data-boxact="paste" data-target="transcript">paste</button>
+      <button type="button" class="copy-cp" id="copyBtn" aria-label="copy" title="copy">CP</button>
+      <button type="button" class="small-btn" data-boxact="clear" data-target="transcript">clear</button>
+    </div>
+    <div class="transcript-wrap">
+      <textarea id="transcript" placeholder="transcript will appear here" spellcheck="false"></textarea>
+    </div>
+
+    <div class="rec-row">
+      <button type="button" class="transcribe-btn" id="grammarBtn">GRAMMAR</button>
+      <button type="button" class="transcribe-btn" id="reshapeBtn">RE-SHAPE</button>
+    </div>
+    <div class="status" id="grammarStatus"></div>
+    <div class="box-tools has-copy">
+      <button type="button" class="small-btn" data-boxact="paste" data-target="transcriptCorr">paste</button>
+      <button type="button" class="copy-cp" id="copyCorrBtn" aria-label="copy" title="copy">CP</button>
+      <button type="button" class="small-btn" data-boxact="clear" data-target="transcriptCorr">clear</button>
+    </div>
+    <div class="transcript-wrap">
+      <textarea id="transcriptCorr" placeholder="corrected text will appear here" spellcheck="false"></textarea>
+    </div>
+
+    <div class="claude-usage" id="claudeLevelLabel">engagement level</div>
+    <div class="row claude-effort-row" id="claudeRow">
+      <button type="button" class="lang-btn claude-effort" data-effort="low" id="claude-low">Opus Low</button>
+      <button type="button" class="lang-btn claude-effort" data-effort="medium" id="claude-medium">Opus Medium</button>
+      <button type="button" class="lang-btn claude-effort" data-effort="high" id="claude-high">Opus High</button>
+    </div>
+    <div class="status" id="claudeStatus"></div>
+    <div class="claude-usage" id="claudeUsage">Claude API  ·  spent $0.0000  ·  left $5.0000</div>
+  </div>
+
+  <!-- ARH -->  <!-- ARH -->
+  <div class="tab" id="tab-arh">
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:8px;">
+      <div class="status" id="arhStatus" style="margin:0; min-height:0;">archive</div>
+      <button type="button" class="small-btn danger" id="arhDeleteAllBtn">delete all</button>
+    </div>
+    <div id="arhList"><div class="arh-empty">no recordings yet</div></div>
+  </div>
+
+  <!-- TRANSLATE -->
+  <div class="tab" id="tab-translate">
+    <div class="row" id="transFromRow" role="group" aria-label="from language">
+      <button type="button" class="lang-btn tl-from" data-lang="hr">HR</button>
+      <button type="button" class="lang-btn tl-from" data-lang="en">EN</button>
+      <button type="button" class="lang-btn tl-from" data-lang="auto">AUTO</button>
+    </div>
+    <div class="box-tools">
+      <button type="button" class="small-btn" data-boxact="paste" data-target="transSrc">paste</button>
+      <button type="button" class="small-btn" data-boxact="clear" data-target="transSrc">clear</button>
+    </div>
+    <textarea id="transSrc" style="min-height:150px;" placeholder="text to translate" spellcheck="false"></textarea>
+    <button type="button" class="transcribe-btn" id="translateBtn">TRANSLATE</button>
+    <div class="status" id="transStatus"></div>
+    <div class="row" id="transToRow" role="group" aria-label="to language">
+      <button type="button" class="lang-btn tl-to" data-lang="hr">HR</button>
+      <button type="button" class="lang-btn tl-to" data-lang="en">EN</button>
+      <button type="button" class="lang-btn tl-to" data-lang="auto">AUTO</button>
+    </div>
+    <div class="box-tools has-copy">
+      <button type="button" class="small-btn" data-boxact="paste" data-target="transOut">paste</button>
+      <button type="button" class="copy-cp" id="copyTransBtn" aria-label="copy" title="copy">CP</button>
+      <button type="button" class="small-btn" data-boxact="clear" data-target="transOut">clear</button>
+    </div>
+    <div class="transcript-wrap">
+      <textarea id="transOut" placeholder="translation will appear here" spellcheck="false"></textarea>
+    </div>
+    <label class="field-label">gemini model</label>
+    <div class="row" id="transModelList" style="flex-wrap:wrap;"></div>
+  </div>
+
+  <!-- QUICK, walkie talkie style, one button, Whisper -->
+  <!-- SETTINGS -->
+  <div class="tab" id="settingsPanel">
+    <div class="rec-settings-label">SETTINGS</div>
+    <button class="tab-btn" data-tab="arh">ARCHIVE</button>
+    <label class="field-label">reshape and grammar model</label>
+    <div class="row" id="corrProviderList" style="flex-wrap:wrap;"></div>
+    <label class="field-label">claude api model</label>
+    <div class="row" id="claudeModelList" style="flex-wrap:wrap;"></div>
+    <label class="field-label">claude session budget (usd)</label>
+    <input type="number" step="0.5" min="0.5" id="claudeBudget" class="text-input" />
+    <label class="field-label">gemini correction model</label>
+    <div class="row" id="corrModelList" style="flex-wrap:wrap;"></div>
+    <label class="field-label">assemblyai transcription model</label>
+    <div class="row" id="aaiModelList" style="flex-wrap:wrap;"></div>
+    <label class="field-label">api keys</label>
+    <div class="key-list">
+      no key is stored in this file. keys live only in this browser, imported by you below.
+    </div>
+    <div id="keyringPanels"></div>
+    <div class="about">
+      assembly models: <b>universal-3-pro, universal-2</b><br>
+      reshape/grammar: <b>claude or gemini</b><br>
+      file picker: <b>any format ffmpeg can read, optimized before upload</b><br>
+      version: <b id="appVersion">v28 (a)</b>
+    </div>
+  </div>
+</div>
+
+
+<script>
+(function () {
+  // =========================================================================
+  // KEYRING — ported from markoboskoauroville/MAHA_TRANSCRIBE_STREAMLIT
+  // ttt/keyring.py. No key is ever hardcoded in this file: every provider's
+  // ring lives only in this browser's localStorage, filled in by the person
+  // through Settings > api keys, either by pasting a note or picking a file.
+  // =========================================================================
+  const KR = (() => {
+    async function fingerprint(key) {
+      const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(key));
+      return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 12);
+    }
+    function mask(key) {
+      const k = (key || '').trim();
+      if (k.length <= 10) return k ? k.slice(0, 2) + '\u2026' : '';
+      return k.slice(0, 5) + '\u2026' + k.slice(-4);
+    }
+    function newRing() { return { keys: [], active: 0 }; }
+
+    // first usable key at or after start, wrapping; a rested "cool" key revives itself once its time is up.
+    // "nocredit" never self-revives, same as "dead" -- an empty account does not top itself up.
+    function pick(ring, start) {
+      const keys = ring.keys || []; const n = keys.length;
+      if (!n) return null;
+      const now = Date.now() / 1000;
+      for (let j = 0; j < n; j++) {
+        const i = (start + j) % n;
+        const k = keys[i];
+        if (k.state === 'dead' || k.state === 'nocredit') continue;
+        if (k.state === 'cool') {
+          if ((k.coolUntil || 0) > now) continue;
+          k.state = 'new'; k.lastError = '';
+        }
+        return i;
+      }
+      return null;
+    }
+    function usable(ring) { return (ring.keys || []).some(k => k.state !== 'dead' && k.state !== 'nocredit'); }
+    function counts(ring) {
+      const now = Date.now() / 1000; let live = 0, dead = 0, cool = 0, nocredit = 0;
+      for (const k of (ring.keys || [])) {
+        if (k.state === 'dead') dead++;
+        else if (k.state === 'nocredit') nocredit++;
+        else if (k.state === 'cool' && (k.coolUntil || 0) > now) cool++;
+        else live++;
+      }
+      return { total: (ring.keys || []).length, live, dead, cool, nocredit };
+    }
+
+    const URL_RE = /https?:\/\/\S+/g;
+    const TOKEN_RE = /[A-Za-z0-9][A-Za-z0-9_.\-]{11,}/g;
+
+    // find every key-shaped token in a piece of messy pasted text, line-aware,
+    // and add whichever ones are not already in the ring. Returns how many were new.
+    async function importKeys(ring, raw, prefixes, minLen, genericMin) {
+      minLen = minLen || 16; genericMin = genericMin || 24; prefixes = prefixes || [];
+      const lines = (raw || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+      function tokensOn(line) {
+        const cleaned = line.replace(URL_RE, m => prefixes.some(p => m.toLowerCase().includes(p)) ? m : ' ');
+        const out = []; let m;
+        TOKEN_RE.lastIndex = 0;
+        while ((m = TOKEN_RE.exec(cleaned))) {
+          const t = m[0].replace(/^[.\-_]+|[.\-_]+$/g, '');
+          if (t.length >= 12) out.push(t);
+        }
+        return out;
+      }
+      function isPrefixed(tok) {
+        const low = tok.toLowerCase();
+        return prefixes.length > 0 && prefixes.some(p => low.startsWith(p)) && tok.length >= minLen;
+      }
+      const perLine = lines.map(tokensOn);
+      let found = [];
+      perLine.forEach((toks, i) => toks.forEach(tok => { if (isPrefixed(tok)) found.push([tok, i]); }));
+      if (!found.length) {
+        perLine.forEach((toks, i) => toks.forEach(tok => {
+          if (tok.length >= genericMin && /[0-9]/.test(tok) && /[A-Za-z]/.test(tok)) found.push([tok, i]);
+        }));
+      }
+      ring.keys = ring.keys || [];
+      const have = new Set(ring.keys.map(k => k.key));
+      const seen = new Set(); let added = 0;
+      for (const [key, lineIdx] of found) {
+        if (seen.has(key) || have.has(key)) continue;
+        seen.add(key);
+        const label = lineIdx > 0 ? (lines[lineIdx - 1] || '').trim() : '';
+        ring.keys.push({
+          key, fp: await fingerprint(key), state: 'new', label,
+          lastError: '', calls: 0, coolUntil: 0, added: Math.floor(Date.now() / 1000)
+        });
+        added++;
+      }
+      return added;
+    }
+
+    function markDead(ring, idx, err) { const k = ring.keys[idx]; k.state = 'dead'; k.lastError = err || ''; }
+    function markNoCredit(ring, idx, err) { const k = ring.keys[idx]; k.state = 'nocredit'; k.lastError = err || ''; }
+    function markCool(ring, idx, err, seconds) {
+      const k = ring.keys[idx]; k.state = 'cool'; k.lastError = err || '';
+      k.coolUntil = Date.now() / 1000 + (seconds != null ? seconds : 120);
+    }
+    function markOk(ring, idx) { const k = ring.keys[idx]; k.state = 'new'; k.lastError = ''; k.calls = (k.calls || 0) + 1; }
+    function reviveAll(ring) {
+      let n = 0;
+      for (const k of (ring.keys || [])) {
+        if (k.state === 'dead' || k.state === 'nocredit' || k.state === 'cool') { k.state = 'new'; k.lastError = ''; k.coolUntil = 0; n++; }
+      }
+      return n;
+    }
+    function reviveOne(ring, idx) { const k = ring.keys[idx]; if (!k) return; k.state = 'new'; k.lastError = ''; k.coolUntil = 0; }
+    function deleteOne(ring, idx) {
+      ring.keys.splice(idx, 1);
+      if (ring.active >= ring.keys.length) ring.active = 0;
+    }
+
+    // walk the ring until a key works. attempt(keyStr) resolves to
+    // {result, err, kind, wait} where kind is 'ok' | 'dead' | 'nocredit' | 'cool' | 'soft' | 'canceled'.
+    // a 'soft' failure is nobody's fault, so it stops immediately instead of burning every key.
+    async function rotate(ring, attempt) {
+      const keys = ring.keys || []; const n = keys.length;
+      if (!n) return { result: null, err: 'no keys yet, add one in settings' };
+      let idx = (ring.active || 0) % n;
+      let last = '';
+      for (let tries = 0; tries < n; tries++) {
+        const i = pick(ring, idx);
+        if (i === null) break;
+        const key = keys[i].key;
+        const got = await attempt(key);
+        if (got.kind === 'canceled') return { result: null, err: null, canceled: true };
+        if (got.kind === 'ok') {
+          markOk(ring, i);
+          ring.active = i;
+          return { result: got.result, err: null, keyIndex: i };
+        }
+        last = got.err || 'unknown error';
+        if (got.kind === 'dead') markDead(ring, i, got.err);
+        else if (got.kind === 'nocredit') markNoCredit(ring, i, got.err);
+        else if (got.kind === 'cool') markCool(ring, i, got.err, got.wait);
+        else return { result: null, err: got.err };  // soft: not the key's fault, stop here
+        idx = (i + 1) % n;
+      }
+      return { result: null, err: 'all ' + n + ' key(s) unavailable. last: ' + last };
+    }
+
+    return { fingerprint, mask, newRing, pick, usable, counts, importKeys, markDead, markNoCredit, markCool, markOk, reviveAll, reviveOne, deleteOne, rotate };
+  })();
+
+  // ---- one shared classifier for every provider, the table from quota-and-fallback.md §3 ----
+  function krClassify(status, bodyText, headers) {
+    const lower = (bodyText || '').toLowerCase();
+    if (status === 403 && lower.includes('1010')) return { kind: 'soft', err: 'blocked by cloudflare (1010), not a key problem' };
+    let wait = null;
+    const ra = headers && headers.get ? headers.get('retry-after') : null;
+    if (ra) { const n = parseFloat(ra); if (isFinite(n)) wait = n; }
+    if (wait == null && headers && headers.get) {
+      for (const h of ['x-ratelimit-reset-requests', 'x-ratelimit-reset-tokens', 'x-ratelimit-reset']) {
+        const v = headers.get(h);
+        if (v) { const n = parseFloat(v); if (isFinite(n)) { wait = n; break; } }
+      }
+    }
+    const hasRetryHint = wait != null || /retrydelay|retry-after|try again in/.test(lower);
+    const creditWords = /zero_credits|e0300|credit balance|insufficient|quota exceeded|out of credits|payment required|billing|depleted|prepayment/;
+    // 401/403 is REJECTED: the key itself is bad, revoked, or invalid.
+    // credit words under 400/429 is NO CREDIT: the key is real and the account
+    // is alive, it simply cannot afford the work right now — a different fact
+    // with a different fix (top up), so it gets its own state rather than
+    // being buried alongside a genuinely dead key. See modules/keyring.md §2d.
+    if (status === 401 || status === 403) return { kind: 'dead', err: 'HTTP ' + status + (bodyText ? ': ' + bodyText.slice(0, 160) : '') };
+    if (status === 429) {
+      if (!hasRetryHint && creditWords.test(lower)) return { kind: 'nocredit', err: 'out of credit' };
+      return { kind: 'cool', err: 'rate limited', wait: wait != null ? Math.min(3600, Math.max(1, wait)) : 60 };
+    }
+    if (status === 400) {
+      if (creditWords.test(lower)) return { kind: 'nocredit', err: 'out of credit' };
+      return { kind: 'soft', err: 'bad request: ' + (bodyText || '').slice(0, 160) };
+    }
+    if (status === 404) return { kind: 'soft', err: 'wrong endpoint (404)' };
+    if (status >= 500) return { kind: 'soft', err: 'provider error ' + status };
+    return { kind: 'soft', err: 'HTTP ' + status };
+  }
+
+  // ---- per-provider rings, loaded from and saved to this browser only ----
+  const KR_PROVIDERS = {
+    claude:   { label: 'claude',                storageKey: 'maha_ring_claude',  prefixes: ['sk-ant-'] },
+    gemini:   { label: 'gemini',                 storageKey: 'maha_ring_gemini',  prefixes: ['aq.'] },
+    groq:     { label: 'groq (archive titles)',  storageKey: 'maha_ring_groq',    prefixes: ['gsk_'] },
+    assembly: { label: 'assemblyai',             storageKey: 'maha_ring_assembly', prefixes: [] }
+  };
+  function loadRing(provider) {
+    try {
+      const raw = localStorage.getItem(KR_PROVIDERS[provider].storageKey);
+      const parsed = raw ? JSON.parse(raw) : null;
+      return (parsed && Array.isArray(parsed.keys)) ? parsed : KR.newRing();
+    } catch (e) { return KR.newRing(); }
+  }
+  function saveRing(provider, ring) { localStorage.setItem(KR_PROVIDERS[provider].storageKey, JSON.stringify(ring)); }
+  function ringHasKeys(provider) { return loadRing(provider).keys.length > 0; }
+
+  const GROQ_CHAT_URL = 'https://api.groq.com/openai/v1/chat/completions';
+  const SUMMARY_MODEL = 'llama-3.3-70b-versatile';
+  const RESHAPE_PROMPT = 'Rewrite the text below so it flows well. Remove every repetition and merge everything into one clear, in a nutshell text that explains the whole message. You may rearrange sentences freely. Write exactly as a human would, with no sign that an AI wrote it. Do not use dashes, bullet points, headings, or any special formatting, only plain sentences with normal punctuation. Keep the length balanced, not too short and not too long, and the tone friendly but clear, never dry. Keep the original language of the text. Reply with the rewritten text only, nothing else.\n\nText:\n';
+  const GRAMMAR_PROMPT = 'Correct only the grammar, spelling and punctuation of the text below. Do not rephrase, do not rearrange or merge sentences, do not change the wording, structure or shape of the text in any way. Make only the smallest necessary fixes to punctuation, capitalization, spelling and clear grammar mistakes, and leave everything else exactly as written. Keep the original language. Reply with the corrected text only, nothing else.\n\nText:\n';
+
+  // ---- AssemblyAI, endpoints and models learned from the assembly ai v3 app ----
+  const AAI_BASE = 'https://api.assemblyai.com';
+  // bumped by the cancel button, any transcription started before the bump gives up
+  let txCancelGen = 0;
+  function txCanceled(gen) { return gen !== txCancelGen; }
+  function txAbortError() { const e = new Error('canceled'); e.__canceled = true; return e; }
+  const AAI_MODELS = ['universal-3-pro', 'universal-2'];
+
+  function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+  function getAaiModel() { const m = localStorage.getItem('whisper_aai_model'); return AAI_MODELS.includes(m) ? m : AAI_MODELS[0]; }
+  function getQModel() { return localStorage.getItem('whisper_qmodel') || 'gemini-2.5-flash'; }
+  function serviceReady() { return ringHasKeys('assembly'); }
+
+  // ---- local usage statistic, persisted ----
+  function getUsage() { try { return JSON.parse(localStorage.getItem('whisper_usage')) || { tx: 0, corr: 0 }; } catch (e) { return { tx: 0, corr: 0 }; } }
+  function bumpUsage(kind) { const u = getUsage(); if (kind === 'tx') u.tx++; if (kind === 'corr') u.corr++; localStorage.setItem('whisper_usage', JSON.stringify(u)); updateBottomBar(); }
+
+  // ---- persistent tiny cyan status line, model for transcription, model for correction, usage, credits ----
+  function updateBottomBar() {
+    const bar = document.getElementById('bottomBar');
+    if (!bar) return;
+    const txModel = 'assembly/' + getAaiModel();
+    const corrModel = 'gemini/' + getQModel();
+    const u = getUsage();
+    const credits = getRemainingCredits(); // null when not applicable
+    let s = 'tx ' + txModel + '   \u00B7   corr ' + corrModel + '   \u00B7   used ' + u.tx + ' tx / ' + u.corr + ' corr';
+    if (lastProcSec > 0) s += '   \u00B7   last ' + lastProcSec.toFixed(1) + 's';
+    if (credits !== null && credits !== undefined) s += '   \u00B7   credits ' + credits;
+    bar.textContent = s;
+  }
+  // No public balance endpoint is used, so remaining credits stay not applicable.
+  function getRemainingCredits() { return null; }
+
+  // ---- upload with live progress, so we can show speed and eta of arrival ----
+  let lastProcSec = 0; // processing score of the most recent transcription, in seconds
+  function xhrUpload(url, headers, body, onProgress) {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', url);
+      for (const h in headers) { try { xhr.setRequestHeader(h, headers[h]); } catch (e) {} }
+      const t0 = performance.now();
+      if (xhr.upload) {
+        xhr.upload.onprogress = (e) => {
+          if (!e.lengthComputable || !onProgress) return;
+          const secs = (performance.now() - t0) / 1000;
+          const speed = secs > 0 ? e.loaded / secs : 0; // bytes per second
+          const eta = speed > 0 ? (e.total - e.loaded) / speed : 0; // seconds
+          onProgress({ loaded: e.loaded, total: e.total, speed, eta, pct: e.total ? e.loaded / e.total : 0 });
+        };
+      }
+      xhr.onload = () => resolve({ ok: xhr.status >= 200 && xhr.status < 300, status: xhr.status, responseText: xhr.responseText });
+      xhr.onerror = () => reject(new Error('network error'));
+      xhr.ontimeout = () => reject(new Error('timeout'));
+      xhr.send(body);
+    });
+  }
+  function fmtSpeed(bytesPerSec) {
+    if (bytesPerSec >= 1048576) return (bytesPerSec / 1048576).toFixed(2) + ' MB/s';
+    return (bytesPerSec / 1024).toFixed(0) + ' KB/s';
+  }
+  function fmtEta(secs) {
+    secs = Math.max(0, Math.round(secs));
+    const m = Math.floor(secs / 60), s = String(secs % 60).padStart(2, '0');
+    return m + ':' + s;
+  }
+  function uploadMsg(prefix, p) {
+    const pct = Math.round(p.pct * 100);
+    return prefix + ' ' + pct + '%  \u00B7  ' + fmtSpeed(p.speed) + '  \u00B7  eta ' + fmtEta(p.eta);
+  }
+
+  function maskKey(k) { return k.length <= 12 ? k.slice(0, 4) + '...' : k.slice(0, 8) + '...' + k.slice(-4); }
+
+  const meter = document.getElementById('meter');
+  for (let i = 0; i < 24; i++) meter.appendChild(document.createElement('i'));
+  function setMeter(state) { meter.className = 'meter ' + state; }
+
+  // ---- tabs ----
+  const sharedSettings = document.getElementById('sharedSettings');
+  function updateSharedSettings(tab) {
+    const show = (tab === 'rec' || tab === 'transcribe');
+    sharedSettings.style.display = show ? '' : 'none';
+    // recording is always AssemblyAI, so the service choice only belongs on the transcribe tab
+  }
+  const tabBtns = Array.from(document.querySelectorAll('.tab-btn'));
+  const gearBtn = document.getElementById('gearBtn');
+  const settingsPanel = document.getElementById('settingsPanel');
+  let lastActiveTabBtn = tabBtns[0];
+
+  // switches the whole screen to one tab, exactly like clicking its button would
+  function activateTab(tabName) {
+    const btn = tabBtns.find(b => b.dataset.tab === tabName);
+    if (!btn) return;
+    tabBtns.forEach(b => b.classList.toggle('active', b === btn));
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.getElementById('tab-' + tabName).classList.add('active');
+    updateSharedSettings(tabName);
+    gearBtn.classList.remove('active');
+    lastActiveTabBtn = btn;
+    if (tabName === 'arh') renderArchive();
+  }
+  tabBtns.forEach(btn => btn.addEventListener('click', () => {
+    // the REC pill is the record button, from any tab, and never a refresh
+    if (btn.dataset.tab === 'rec') {
+      if (recPhase === 'recording') { stopAndTranscribe(); }
+      else { activateTab('rec'); startRecording(); }
+      return;
+    }
+    // hidden refresh: tapping the already-active tab reloads the whole page
+    if (btn.classList.contains('active')) { location.reload(); return; }
+    activateTab(btn.dataset.tab);
+  }));
+
+  // ---- settings, its own full tab, never inserted into whatever tab was open ----
+  function openSettings() {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    tabBtns.forEach(b => b.classList.remove('active'));
+    updateSharedSettings('settings');
+    settingsPanel.classList.add('active');
+    gearBtn.classList.add('active');
+  }
+  function closeSettings() { activateTab(lastActiveTabBtn.dataset.tab); }
+  gearBtn.addEventListener('click', () => {
+    if (settingsPanel.classList.contains('active')) closeSettings(); else openSettings();
+  });
+
+  activateTab('rec');
+
+  // ---- AssemblyAI transcription model selector (settings) ----
+  const aaiModelList = document.getElementById('aaiModelList');
+  function renderAaiModels() {
+    const cur = getAaiModel();
+    aaiModelList.innerHTML = AAI_MODELS.map(m =>
+      '<button type="button" class="lang-btn aai-model' + (m === cur ? ' active' : '') + '" data-model="' + m + '">' + m + '</button>'
+    ).join('');
+    Array.from(aaiModelList.querySelectorAll('.aai-model')).forEach(b => b.addEventListener('click', () => {
+      localStorage.setItem('whisper_aai_model', b.dataset.model);
+      renderAaiModels();
+      updateBottomBar();
+    }));
+  }
+  renderAaiModels();
+
+  // ---- API key ring panels: masked list, active radio, test/test-all,
+  // delete, revive, import. States and glyphs follow Key_Tester's model
+  // (github.com/markoboskoauroville/Key_Tester, HANDOFF.md "five states"):
+  // untested, live/works, no credit, rejected, resting/throttled, and a
+  // transient "unclear" for a soft result that never changes the ring.
+  const KR_GLYPH = { untested: '\u25CB', testing: '\u2026', live: '\u25CF', nocredit: '$', dead: '\u2715', cool: '\u25D0', unclear: '?' };
+  const KR_WORD = { untested: 'untested', testing: 'testing', live: 'live', nocredit: 'no credit', dead: 'rejected', cool: 'resting', unclear: 'unclear' };
+  function krStateLabel(k) {
+    if (k.state === 'dead') return 'dead';
+    if (k.state === 'nocredit') return 'nocredit';
+    if (k.state === 'cool' && (k.coolUntil || 0) > Date.now() / 1000) return 'cool';
+    return k.calls > 0 ? 'live' : 'new';
+  }
+  const KR_BADGE_WORD = { dead: KR_WORD.dead, nocredit: KR_WORD.nocredit, cool: KR_WORD.cool, live: KR_WORD.live, new: KR_WORD.untested };
+  const KR_BADGE_GLYPH = { dead: KR_GLYPH.dead, nocredit: KR_GLYPH.nocredit, cool: KR_GLYPH.cool, live: KR_GLYPH.live, new: KR_GLYPH.untested };
+  function krRowMeta(k, label) {
+    const bits = [];
+    if (label === 'cool') { const secs = Math.max(0, Math.round((k.coolUntil || 0) - Date.now() / 1000)); bits.push('resting ' + secs + 's'); }
+    if (k.lastError) bits.push('<span class="kr-verbatim">' + krEsc(k.lastError.slice(0, 90)) + '</span>');
+    if (k.calls) bits.push(k.calls + ' call' + (k.calls === 1 ? '' : 's'));
+    return bits.join('  \u00B7  ');
+  }
+  function krEsc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+  async function krProbe(provider, key) {
+    // the smallest real, billable thing each provider sells, per keyring.md §2h.
+    // never a plain list call: a spent account can still return 200 from a list
+    // (Key_Tester HANDOFF.md's "two questions" — valid, and separately, funded).
+    if (provider === 'claude') {
+      const r = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+        body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 1, messages: [{ role: 'user', content: 'hi' }] })
+      });
+      return r;
+    }
+    if (provider === 'gemini') {
+      return fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+        body: JSON.stringify({ contents: [{ parts: [{ text: 'hi' }] }], generationConfig: { maxOutputTokens: 1 } })
+      });
+    }
+    if (provider === 'groq') {
+      return fetch(GROQ_CHAT_URL, {
+        method: 'POST', headers: { 'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: SUMMARY_MODEL, messages: [{ role: 'user', content: 'hi' }], max_tokens: 1 })
+      });
+    }
+    if (provider === 'assembly') {
+      // a real one-second 440hz tone, per keyring.md §2i, generated on the spot rather than shipped as a file
+      const wav = makeProbeWav();
+      const up = await fetch(AAI_BASE + '/v2/upload', { method: 'POST', headers: { 'authorization': key }, body: wav });
+      if (!up.ok) return up;
+      const { upload_url } = await up.json();
+      return fetch(AAI_BASE + '/v2/transcript', {
+        method: 'POST', headers: { 'authorization': key, 'content-type': 'application/json' },
+        body: JSON.stringify({ audio_url: upload_url, speech_model: getAaiModel() })
+      });
+    }
+  }
+  function makeProbeWav() {
+    // 1s, 16kHz, mono, 16-bit PCM, 440Hz at quarter scale — the exact fixture keyring.md §2i specifies
+    const n = 16000, buf = new ArrayBuffer(44 + n * 2), dv = new DataView(buf);
+    const wStr = (o, s) => { for (let i = 0; i < s.length; i++) dv.setUint8(o + i, s.charCodeAt(i)); };
+    wStr(0, 'RIFF'); dv.setUint32(4, 36 + n * 2, true); wStr(8, 'WAVE'); wStr(12, 'fmt ');
+    dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 1, true);
+    dv.setUint32(24, 16000, true); dv.setUint32(28, 32000, true); dv.setUint16(32, 2, true); dv.setUint16(34, 16, true);
+    wStr(36, 'data'); dv.setUint32(40, n * 2, true);
+    for (let i = 0; i < n; i++) dv.setInt16(44 + i * 2, Math.trunc(8000 * Math.sin(2 * Math.PI * 440 * i / 16000)), true);
+    return new Blob([buf], { type: 'audio/wav' });
+  }
+  function krLiveLine(provider, html) {
+    const el = document.getElementById('kr-live-' + provider);
+    if (el) el.innerHTML = html || '';
+  }
+  // one key, one probe. Returns the badge state actually reached, so a bulk
+  // "test all" can report a running tally the way Key_Tester's live line does.
+  async function krTestOne(provider, idx) {
+    const ring = loadRing(provider);
+    const key = ring.keys[idx]; if (!key) return null;
+    const masked = KR.mask(key.key);
+    krLiveLine(provider, '<span class="kr-glyph testing">' + KR_GLYPH.testing + '</span> testing \u00b7 ' + krEsc(masked));
+    let reached = 'unclear';
+    try {
+      const res = await krProbe(provider, key.key);
+      if (res.ok) {
+        KR.markOk(ring, idx); reached = 'live';
+      } else {
+        const bodyText = await res.text().catch(() => '');
+        const v = krClassify(res.status, bodyText, res.headers);
+        if (v.kind === 'dead') { KR.markDead(ring, idx, v.err); reached = 'dead'; }
+        else if (v.kind === 'nocredit') { KR.markNoCredit(ring, idx, v.err); reached = 'nocredit'; }
+        else if (v.kind === 'cool') { KR.markCool(ring, idx, v.err, v.wait); reached = 'cool'; }
+        else { key.lastError = v.err; reached = 'unclear'; }   // soft: never changes the ring, per Key_Tester's own rule
+      }
+    } catch (e) { key.lastError = 'no connection: ' + e.message; reached = 'unclear'; }
+    saveRing(provider, ring);
+    const glyph = KR_GLYPH[reached] || KR_GLYPH.unclear;
+    const word = KR_WORD[reached] || KR_WORD.unclear;
+    krLiveLine(provider, '<span class="kr-glyph ' + reached + '">' + glyph + '</span> ' + krEsc(masked) + ' \u00b7 ' + word);
+    return reached;
+  }
+  async function krTestKey(provider, idx) {
+    renderKeyringPanels();
+    await krTestOne(provider, idx);
+    renderKeyringPanels();
+  }
+  async function krTestAll(provider) {
+    const ring = loadRing(provider);
+    const n = ring.keys.length;
+    if (!n) return;
+    const btn = document.querySelector('[data-act=test-all][data-provider=' + provider + ']');
+    if (btn) btn.disabled = true;
+    for (let i = 0; i < n; i++) {
+      await krTestOne(provider, i);
+      krLiveLine(provider, (document.getElementById('kr-live-' + provider) || {}).innerHTML + '  \u00b7  ' + (i + 1) + '/' + n);
+    }
+    krLiveLine(provider, '\u2713 done \u00b7 ' + n + '/' + n);
+    if (btn) btn.disabled = false;
+    renderKeyringPanels();
+  }
+  function krImport(provider, raw) {
+    const cfg = KR_PROVIDERS[provider];
+    const ring = loadRing(provider);
+    KR.importKeys(ring, raw, cfg.prefixes).then(added => {
+      saveRing(provider, ring);
+      renderKeyringPanels(added > 0 ? ('imported ' + added + ' new ' + cfg.label + ' key(s)') : ('no new ' + cfg.label + ' keys found in that text'));
+    });
+  }
+  function renderKeyringPanels(flash) {
+    const wrap = document.getElementById('keyringPanels'); if (!wrap) return;
+    wrap.innerHTML = Object.keys(KR_PROVIDERS).map(provider => {
+      const cfg = KR_PROVIDERS[provider];
+      const ring = loadRing(provider);
+      const c = KR.counts(ring);
+      const untested = ring.keys.filter(k => krStateLabel(k) === 'new').length;
+      // the exact Key_Tester summary shape: "<file> · N keys · X work · C no credit · Y rejected · Z untested"
+      const summary = c.total + ' key' + (c.total === 1 ? '' : 's') +
+        '  \u00B7  ' + c.live + ' live' +
+        '  \u00B7  ' + c.nocredit + ' no credit' +
+        '  \u00B7  ' + c.dead + ' rejected' +
+        '  \u00B7  ' + untested + ' untested';
+      const rows = ring.keys.length === 0
+        ? '<div class="kr-empty">no keys yet, import below</div>'
+        : ring.keys.map((k, i) => {
+            const label = krStateLabel(k);
+            const meta = krRowMeta(k, label);
+            const glyph = KR_BADGE_GLYPH[label], word = KR_BADGE_WORD[label];
+            return '<div class="kr-row">' +
+              '<input type="radio" name="kr-active-' + provider + '" ' + (i === (ring.active || 0) ? 'checked' : '') + ' data-provider="' + provider + '" data-idx="' + i + '" class="kr-active-radio">' +
+              '<div class="kr-info"><div class="kr-mask">' + KR.mask(k.key) + '<span class="kr-badge ' + label + '"><span class="kr-glyph">' + glyph + '</span> ' + word + '</span></div>' +
+              (meta ? '<div class="kr-meta">' + meta + '</div>' : '') + '</div>' +
+              '<div class="kr-row-actions">' +
+              '<button type="button" class="kr-mini-btn" data-act="test" data-provider="' + provider + '" data-idx="' + i + '">test</button>' +
+              (label === 'dead' || label === 'nocredit' || label === 'cool' ? '<button type="button" class="kr-mini-btn" data-act="revive" data-provider="' + provider + '" data-idx="' + i + '">revive</button>' : '') +
+              '<button type="button" class="kr-mini-btn danger" data-act="delete" data-provider="' + provider + '" data-idx="' + i + '">delete</button>' +
+              '</div></div>';
+          }).join('');
+      return '<div class="kr-panel">' +
+        '<div class="kr-head"><span class="kr-title">' + cfg.label + '</span>' +
+        (ring.keys.length > 1 ? '<button type="button" class="kr-mini-btn" data-act="test-all" data-provider="' + provider + '">test all</button>' : '') +
+        '</div>' +
+        '<div class="kr-count">' + summary + '</div>' +
+        '<div class="kr-live" id="kr-live-' + provider + '"></div>' +
+        rows +
+        '<div class="kr-import">' +
+        '<textarea id="kr-paste-' + provider + '" placeholder="paste keys here, or browse a file below"></textarea>' +
+        '<div class="kr-import-row">' +
+        '<button type="button" class="small-btn" data-act="import-paste" data-provider="' + provider + '">import pasted text</button>' +
+        '<label class="small-btn" style="text-align:center;cursor:pointer;">browse file<input type="file" accept=".txt,text/plain" data-provider="' + provider + '" class="kr-file-input" style="display:none;"></label>' +
+        '</div></div></div>';
+    }).join('') + (flash ? '<div class="status ok">' + flash + '</div>' : '');
+
+    Array.from(wrap.querySelectorAll('.kr-active-radio')).forEach(r => r.addEventListener('change', () => {
+      const ring = loadRing(r.dataset.provider); ring.active = parseInt(r.dataset.idx, 10); saveRing(r.dataset.provider, ring); renderKeyringPanels();
+    }));
+    Array.from(wrap.querySelectorAll('[data-act=test]')).forEach(b => b.addEventListener('click', () => krTestKey(b.dataset.provider, parseInt(b.dataset.idx, 10))));
+    Array.from(wrap.querySelectorAll('[data-act=test-all]')).forEach(b => b.addEventListener('click', () => krTestAll(b.dataset.provider)));
+    Array.from(wrap.querySelectorAll('[data-act=revive]')).forEach(b => b.addEventListener('click', () => {
+      const ring = loadRing(b.dataset.provider); KR.reviveOne(ring, parseInt(b.dataset.idx, 10)); saveRing(b.dataset.provider, ring); renderKeyringPanels();
+    }));
+    Array.from(wrap.querySelectorAll('[data-act=delete]')).forEach(b => b.addEventListener('click', () => {
+      const ring = loadRing(b.dataset.provider); KR.deleteOne(ring, parseInt(b.dataset.idx, 10)); saveRing(b.dataset.provider, ring); renderKeyringPanels();
+    }));
+    Array.from(wrap.querySelectorAll('[data-act=import-paste]')).forEach(b => b.addEventListener('click', () => {
+      const ta = document.getElementById('kr-paste-' + b.dataset.provider);
+      if (ta && ta.value.trim()) krImport(b.dataset.provider, ta.value);
+    }));
+    Array.from(wrap.querySelectorAll('.kr-file-input')).forEach(inp => inp.addEventListener('change', () => {
+      const f = inp.files[0]; if (!f) return;
+      const reader = new FileReader();
+      reader.onload = () => krImport(inp.dataset.provider, String(reader.result || ''));
+      reader.readAsText(f);
+    }));
+  }
+  renderKeyringPanels();
+
+  // ---- correction model selector (settings), the Q tab no longer carries it ----
+  const CORR_MODELS = [
+    { id: 'gemini-2.5-pro', label: 'PRO' },
+    { id: 'gemini-2.5-flash', label: 'FLASH' },
+    { id: 'gemini-2.5-flash-lite', label: 'LITE' }
+  ];
+  const corrModelList = document.getElementById('corrModelList');
+  function renderCorrModels() {
+    const cur = getQModel();
+    corrModelList.innerHTML = CORR_MODELS.map(m =>
+      '<button type="button" class="lang-btn corr-model' + (m.id === cur ? ' active' : '') + '" data-model="' + m.id + '">' + m.label + '</button>'
+    ).join('');
+    Array.from(corrModelList.querySelectorAll('.corr-model')).forEach(b => b.addEventListener('click', () => {
+      localStorage.setItem('whisper_qmodel', b.dataset.model);
+      renderCorrModels();
+      updateBottomBar();
+    }));
+  }
+  renderCorrModels();
+
+  updateBottomBar();
+
+  // ---- transcribe tab ----
+  const drop = document.getElementById('drop');
+  const dropLabel = document.getElementById('dropLabel');
+  const audioInput = document.getElementById('audioInput');
+  const langButtons = Array.from(document.querySelectorAll('.lang-btn')).filter(b => b.dataset.lang && !b.classList.contains('tl-from') && !b.classList.contains('tl-to'));
+  const transcribeBtn = document.getElementById('transcribeBtn');
+  const statusEl = document.getElementById('status');
+  const transcriptEl = document.getElementById('transcript');
+  const copyBtn = document.getElementById('copyBtn');
+
+  let selectedLang = localStorage.getItem('whisper_lang') || 'auto';
+  let forcedLang = null; // set by archive retranscribe to override the transcribe-tab language
+  function activeLang() { return forcedLang || selectedLang; }
+
+  function applyLangUI() {
+    langButtons.forEach(b => {
+      const active = b.dataset.lang === selectedLang;
+      b.classList.toggle('active', active);
+      b.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+  }
+  applyLangUI();
+  langButtons.forEach(btn => btn.addEventListener('click', () => {
+    selectedLang = btn.dataset.lang;
+    localStorage.setItem('whisper_lang', selectedLang);
+    applyLangUI();
+  }));
+
+  // ---- ffmpeg optimization: convert whatever was picked into small mono
+  // speech-ready Opus before it ever reaches the AssemblyAI ring. Runs the
+  // moment a file is chosen, not on the TRANSCRIBE press, so there is
+  // nothing to wait for once the button is actually pressed.
+  let ffmpegAvailable = null; // null = not checked yet
+  let pickedFile = null;      // the raw File the person chose
+  let optimizedBlob = null;   // the ffmpeg result, or the raw file if ffmpeg is unavailable/failed
+  let optimizing = false;
+
+  async function checkFfmpeg() {
+    if (ffmpegAvailable !== null) return ffmpegAvailable;
+    try {
+      const r = await fetch('/api/ffmpeg', { headers: { 'X-Maha-Local': '1' } });
+      const d = await r.json();
+      ffmpegAvailable = !!d.available;
+    } catch (e) { ffmpegAvailable = false; }
+    return ffmpegAvailable;
+  }
+  function fmtMBshort(n) { return (n / 1048576).toFixed(1) + ' MB'; }
+
+  async function optimizePickedFile() {
+    const file = pickedFile;
+    if (!file) return;
+    optimizing = true;
+    optimizedBlob = file; // safe default: the raw file, used if ffmpeg is absent or fails
+    updateTranscribeState();
+
+    const hasFfmpeg = await checkFfmpeg();
+    if (!hasFfmpeg) {
+      setStatus('ffmpeg not found on the server, sending the file as-is', 'err');
+      optimizing = false; updateTranscribeState();
+      return;
+    }
+
+    setStatus('optimizing audio with ffmpeg\u2026');
+    try {
+      const fd = new FormData();
+      fd.append('file', file, file.name);
+      const r = await fetch('/api/optimize-audio', {
+        method: 'POST', headers: { 'X-Maha-Local': '1' }, body: fd
+      });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        setStatus('ffmpeg: ' + (d.error || ('HTTP ' + r.status)) + '  \u00B7  sending the original file instead', 'err');
+        optimizing = false; updateTranscribeState();
+        return;
+      }
+      const blob = await r.blob();
+      const before = parseInt(r.headers.get('X-Original-Bytes') || file.size, 10);
+      const after = parseInt(r.headers.get('X-Optimized-Bytes') || blob.size, 10);
+      optimizedBlob = new File([blob], (file.name || 'audio').replace(/\.[^.]+$/, '') + '.ogg', { type: 'audio/ogg' });
+      const pct = before > 0 ? Math.round(100 * (1 - after / before)) : 0;
+      setStatus('optimized  \u00B7  ' + fmtMBshort(before) + ' \u2192 ' + fmtMBshort(after) + (pct > 0 ? '  (\u2212' + pct + '%)' : ''), 'ok');
+    } catch (e) {
+      setStatus('ffmpeg request failed: ' + e.message + '  \u00B7  sending the original file instead', 'err');
+    }
+    optimizing = false; updateTranscribeState();
+  }
+
+  audioInput.addEventListener('change', () => {
+    const f = audioInput.files[0];
+    pickedFile = f || null;
+    optimizedBlob = null;
+    if (f) { dropLabel.textContent = f.name; drop.classList.add('has-file'); optimizePickedFile(); }
+    else { dropLabel.textContent = 'CHOOSE FILE'; drop.classList.remove('has-file'); }
+    updateTranscribeState();
+  });
+
+  function updateTranscribeState() {
+    transcribeBtn.disabled = !(pickedFile && !optimizing && serviceReady());
+  }
+  updateTranscribeState();
+  if (!ringHasKeys('assembly')) {
+    openSettings();
+  }
+
+  function setStatus(text, kind) {
+    statusEl.textContent = text;
+    statusEl.className = 'status' + (kind ? ' ' + kind : '');
+  }
+  if (!serviceReady()) setStatus('no assemblyai keys, check settings', 'err');
+
+
+
+  // ---- AssemblyAI, mirrors the v3 app, upload then transcript then poll ----
+  function aaiSpeechModels() {
+    const sel = getAaiModel();
+    const arr = [sel];
+    AAI_MODELS.forEach(m => { if (!arr.includes(m)) arr.push(m); });
+    return arr; // chosen model first, the rest as fallback for AssemblyAI
+  }
+  function aaiLangConfig() {
+    const speech_models = aaiSpeechModels();
+    const lang = activeLang();
+    if (lang === 'hr') return { language_code: 'hr', speech_models };
+    if (lang === 'auto') return { language_detection: true, speech_models };
+    return { language_code: 'en', speech_models };
+  }
+  async function aaiError(res) {
+    try { const j = await res.json(); return j.error || j.message || ('HTTP ' + res.status); }
+    catch (e) { return 'HTTP ' + res.status; }
+  }
+  // one key does the WHOLE job — upload, submit, poll — never rotating mid-job,
+  // because an upload belongs to the account that made it (keyring.md §2b).
+  // returns {kind, result, err, wait} rather than throwing, so the ring can classify it.
+  async function aaiAttemptJob(key, blob, statusFn) {
+    const gen = txCancelGen;
+    const keyLabel = KR.mask(key);
+    try {
+      const up = await xhrUpload(AAI_BASE + '/v2/upload', { 'authorization': key, 'content-type': 'application/octet-stream' }, blob,
+        (p) => statusFn('assembly ' + keyLabel + '  \u00B7  ' + uploadMsg('upload', p)));
+      if (txCanceled(gen)) return { kind: 'canceled' };
+      if (!up.ok) {
+        let bodyText = up.responseText || '';
+        return krClassify(up.status, bodyText, { get: () => null });
+      }
+      const upload_url = JSON.parse(up.responseText).upload_url;
+
+      const tr = await fetch(AAI_BASE + '/v2/transcript', {
+        method: 'POST',
+        headers: { 'authorization': key, 'content-type': 'application/json' },
+        body: JSON.stringify({ audio_url: upload_url, ...aaiLangConfig() })
+      });
+      if (txCanceled(gen)) return { kind: 'canceled' };
+      if (!tr.ok) { const bodyText = await tr.text().catch(() => ''); return krClassify(tr.status, bodyText, tr.headers); }
+      const { id } = await tr.json();
+
+      const procStart = performance.now();
+      // short parts finish fast, so check quickly at first and back off to 3s for long audio
+      for (let i = 0; i < 260; i++) {
+        await sleep(i < 4 ? 600 : (i < 10 ? 1200 : 3000));
+        if (txCanceled(gen)) return { kind: 'canceled' };
+        const poll = await fetch(AAI_BASE + '/v2/transcript/' + id, { headers: { 'authorization': key } });
+        if (!poll.ok) { const bodyText = await poll.text().catch(() => ''); return krClassify(poll.status, bodyText, poll.headers); }
+        const data = await poll.json();
+        if (data.status === 'completed') return { kind: 'ok', result: (data.text || '').trim() };
+        // a failed job answers HTTP 200 (keyring.md trap #3), so read the status inside the body,
+        // and it is a soft failure: the job was bad, not the key
+        if (data.status === 'error') return { kind: 'soft', err: data.error || 'transcription failed' };
+        statusFn('assembly ' + keyLabel + '  \u00B7  processing ' + Math.round((performance.now() - procStart) / 1000) + 's');
+      }
+      return { kind: 'soft', err: 'timeout, audio may be too long' };
+    } catch (e) { return { kind: 'soft', err: 'network error: ' + e.message }; }
+  }
+  async function aaiTranscribe(blob, filename, statusFn) {
+    const ring = loadRing('assembly');
+    if (!ring.keys.length) { statusFn('no assemblyai keys, add one in settings', 'err'); return null; }
+    const { result, err, canceled } = await KR.rotate(ring, (key) => aaiAttemptJob(key, blob, statusFn));
+    saveRing('assembly', ring);
+    if (canceled) return null;
+    if (result === null && err) statusFn('assembly: ' + err, 'err');
+    return result;
+  }
+
+  // ---- assemblyai is the only transcription service ----
+  function transcribeDispatch(blob, filename, statusFn) {
+    return aaiTranscribe(blob, filename, statusFn);
+  }
+
+  // titles and summaries for the archive, on groq because it is free
+  async function groqSummarize(text) {
+    const ring = loadRing('groq');
+    if (!ring.keys.length) return null;
+    const prompt = 'You will receive a transcript. Reply with strict JSON only, no markdown, in this exact shape: {"title": "...", "summary": "..."}. title is 3 to 6 words in the language of the transcript, suitable as a file name, no punctuation except spaces. summary is 1 to 3 sentences in the same language.\n\nTranscript:\n' + text.slice(0, 12000);
+    const { result } = await KR.rotate(ring, async (key) => {
+      try {
+        const r = await fetch(GROQ_CHAT_URL, {
+          method: 'POST',
+          headers: { 'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model: SUMMARY_MODEL, messages: [{ role: 'user', content: prompt }], temperature: 0.3, max_tokens: 300 })
+        });
+        if (r.ok) {
+          const d = await r.json();
+          let raw = ((d.choices && d.choices[0] && d.choices[0].message && d.choices[0].message.content) || '').trim();
+          const a = raw.indexOf('{'), b = raw.lastIndexOf('}');
+          if (a !== -1 && b !== -1) raw = raw.slice(a, b + 1);
+          try { const j = JSON.parse(raw); return { kind: 'ok', result: { title: j.title || '', summary: j.summary || '' } }; }
+          catch (e) { return { kind: 'soft', err: 'unparsable reply' }; }
+        }
+        const bodyText = await r.text().catch(() => '');
+        return krClassify(r.status, bodyText, r.headers);
+      } catch (e) { return { kind: 'soft', err: 'network error: ' + e.message }; }
+    });
+    saveRing('groq', ring);
+    return result;
+  }
+
+
+
+  // ---- generic Gemini text call with key fallback, used by grammar and translate ----
+  async function geminiGenerate(prompt, model, statusFn) {
+    const ring = loadRing('gemini');
+    if (!ring.keys.length) { if (statusFn) statusFn('no gemini keys, add one in settings', 'err'); return null; }
+    const payload = { contents: [{ parts: [{ text: prompt }] }] };
+    const { result, err } = await KR.rotate(ring, async (key) => {
+      try {
+        const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+          body: JSON.stringify(payload)
+        });
+        if (r.ok) {
+          const data = await r.json();
+          const parts = (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts) || [];
+          return { kind: 'ok', result: { text: parts.map(p => p.text || '').join('').trim(), key } };
+        }
+        const bodyText = await r.text().catch(() => '');
+        return krClassify(r.status, bodyText, r.headers);
+      } catch (e) { return { kind: 'soft', err: 'network error: ' + e.message }; }
+    });
+    saveRing('gemini', ring);
+    if (!result && statusFn) statusFn('gemini: ' + (err || 'failed'), 'err');
+    return result;
+  }
+
+  // transcribe a queue of segments one by one, then stitch the transcripts
+  async function transcribeSegmentsSeq(segments, statusFn) {
+    const parts = [];
+    for (let i = 0; i < segments.length; i++) {
+      const label = segments.length > 1 ? ('segment ' + (i + 1) + '/' + segments.length + '  \u00B7  ') : '';
+      const t = await transcribeDispatch(segments[i], 'segment_' + (i + 1) + '.webm', (m) => statusFn(label + m));
+      if (t === null) return null; // one segment failed, fail the whole session
+      parts.push((t || '').trim());
+    }
+    return parts.filter(Boolean).join('\n\n');
+  }
+
+  function runTranscriptionSession(segments, statusFn, onDone) {
+    if (!segments || segments.length === 0) { statusFn('nothing to transcribe', 'err'); onDone(null); return; }
+    const gen = txCancelGen;
+    setMeter('busy');
+    const t0 = performance.now();
+    transcribeSegmentsSeq(segments, statusFn).then(text => {
+      if (text !== null) {
+        lastProcSec = (performance.now() - t0) / 1000;
+        setMeter('ok');
+        const segTxt = segments.length > 1 ? segments.length + ' segments  \u00B7  ' : '';
+        statusFn('done  \u00B7  ' + segTxt + 'score ' + lastProcSec.toFixed(1) + 's', 'ok');
+        bumpUsage('tx');
+        updateBottomBar();
+      } else if (txCanceled(gen)) {
+        setMeter('idle');            // the user canceled, that is not an error
+      } else {
+        setMeter('err');
+      }
+      setTimeout(() => setMeter('idle'), 1600);
+      onDone(text);
+    });
+  }
+
+  transcribeBtn.addEventListener('click', () => {
+    const file = optimizedBlob || pickedFile;
+    if (!file) return;
+    transcribeBtn.disabled = true;
+    runTranscriptionSession([file], setStatus, (text) => {
+      if (text !== null) transcriptEl.value = text;
+      updateTranscribeState();
+    });
+  });
+
+  copyBtn.addEventListener('click', () => {
+    const text = transcriptEl.value;
+    if (!text) return;
+    const done = () => {
+      const old = copyBtn.textContent;
+      copyBtn.textContent = 'copied';
+      setTimeout(() => { copyBtn.textContent = old; }, 1400);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text, done));
+    } else fallbackCopy(text, done);
+  });
+  function fallbackCopy(text, done) {
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); done(); } catch (e) {}
+    document.body.removeChild(ta);
+  }
+
+  // ---- IndexedDB archive ----
+  let db = null;
+  function openDB() {
+    return new Promise((resolve, reject) => {
+      if (db) return resolve(db);
+      const req = indexedDB.open('whisper_arh', 3);
+      req.onupgradeneeded = (ev) => {
+        const d = req.result;
+        if (!d.objectStoreNames.contains('recordings')) d.createObjectStore('recordings', { keyPath: 'id', autoIncrement: true });
+        // 'live' holds timeslice chunks of the segment being recorded, for mid-segment crash recovery
+        if (!d.objectStoreNames.contains('live')) d.createObjectStore('live', { keyPath: 'id', autoIncrement: true });
+        // 'segments' holds each finalized segment file, written and closed on every pause
+        if (!d.objectStoreNames.contains('segments')) d.createObjectStore('segments', { keyPath: 'id', autoIncrement: true });
+      };
+      req.onsuccess = () => { db = req.result; resolve(db); };
+      req.onerror = () => reject(req.error);
+    });
+  }
+  function dbAdd(rec) { return openDB().then(d => new Promise((res, rej) => { const r = d.transaction('recordings', 'readwrite').objectStore('recordings').add(rec); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); })); }
+  function dbAll() { return openDB().then(d => new Promise((res, rej) => { const r = d.transaction('recordings').objectStore('recordings').getAll(); r.onsuccess = () => res(r.result || []); r.onerror = () => rej(r.error); })); }
+  function dbDelete(id) { return openDB().then(d => new Promise((res, rej) => { const r = d.transaction('recordings', 'readwrite').objectStore('recordings').delete(id); r.onsuccess = () => res(); r.onerror = () => rej(r.error); })); }
+  function dbGet(id) { return openDB().then(d => new Promise((res, rej) => { const r = d.transaction('recordings').objectStore('recordings').get(id); r.onsuccess = () => res(r.result || null); r.onerror = () => rej(r.error); })); }
+  function dbUpdate(rec) { return openDB().then(d => new Promise((res, rej) => { const r = d.transaction('recordings', 'readwrite').objectStore('recordings').put(rec); r.onsuccess = () => res(); r.onerror = () => rej(r.error); })); }
+
+  // ---- live chunk store, written to on every timeslice so nothing is lost on a kill ----
+  function liveAdd(rec) { return openDB().then(d => new Promise((res, rej) => { const r = d.transaction('live', 'readwrite').objectStore('live').add(rec); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); })); }
+  function liveAll() { return openDB().then(d => new Promise((res, rej) => { const r = d.transaction('live').objectStore('live').getAll(); r.onsuccess = () => res(r.result || []); r.onerror = () => rej(r.error); })); }
+  function liveClear() { return openDB().then(d => new Promise((res, rej) => { const r = d.transaction('live', 'readwrite').objectStore('live').clear(); r.onsuccess = () => res(); r.onerror = () => rej(r.error); })); }
+
+  // ---- finalized segment store, one closed file per pause ----
+  function segAdd(rec) { return openDB().then(d => new Promise((res, rej) => { const r = d.transaction('segments', 'readwrite').objectStore('segments').add(rec); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); })); }
+  function segAll() { return openDB().then(d => new Promise((res, rej) => { const r = d.transaction('segments').objectStore('segments').getAll(); r.onsuccess = () => res(r.result || []); r.onerror = () => rej(r.error); })); }
+  function segClear() { return openDB().then(d => new Promise((res, rej) => { const r = d.transaction('segments', 'readwrite').objectStore('segments').clear(); r.onsuccess = () => res(); r.onerror = () => rej(r.error); })); }
+
+  // ---- recorder ----
+  const RECORD_GLYPH = 'REC';   // three letter label
+  const TRANSCRIBE_GLYPH = 'TRA'; // shown while recording, pressing it stops and transcribes
+
+  // ---- live waveform, drawn straight from the mic while a part is recording ----
+  let scopeCtx = null, scopeAnalyser = null, scopeRAF = null, scopeSource = null, scopeData = null;
+  function drawScopeIdle() {
+    if (!recScope || !recScope.getContext) return;
+    const c = recScope.getContext('2d'); if (!c) return;
+    const w = recScope.width, h = recScope.height;
+    c.clearRect(0, 0, w, h);
+    c.strokeStyle = 'rgba(139, 148, 158, 0.35)'; c.lineWidth = 2;
+    c.beginPath(); c.moveTo(0, h / 2); c.lineTo(w, h / 2); c.stroke();
+  }
+  function startScope(stream) {
+    stopScope();
+    if (!recScope || !recScope.getContext) return;
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
+      scopeCtx = new AC();
+      scopeAnalyser = scopeCtx.createAnalyser();
+      scopeAnalyser.fftSize = 2048;
+      scopeData = new Uint8Array(scopeAnalyser.fftSize);
+      scopeSource = scopeCtx.createMediaStreamSource(stream);
+      scopeSource.connect(scopeAnalyser);   // analyser only, nothing goes to the speakers
+    } catch (e) { scopeAnalyser = null; return; }
+    const c = recScope.getContext('2d'); if (!c) return;
+    const draw = () => {
+      if (!scopeAnalyser) return;
+      scopeRAF = requestAnimationFrame(draw);
+      scopeAnalyser.getByteTimeDomainData(scopeData);
+      const w = recScope.width, h = recScope.height;
+      c.clearRect(0, 0, w, h);
+      c.lineWidth = 2; c.strokeStyle = '#e85d5d';
+      c.beginPath();
+      const step = w / scopeData.length;
+      for (let i = 0; i < scopeData.length; i++) {
+        const y = (scopeData[i] / 128.0) * (h / 2);
+        const x = i * step;
+        if (i === 0) c.moveTo(x, y); else c.lineTo(x, y);
+      }
+      c.stroke();
+    };
+    draw();
+  }
+  function stopScope() {
+    if (scopeRAF) { cancelAnimationFrame(scopeRAF); scopeRAF = null; }
+    if (scopeSource) { try { scopeSource.disconnect(); } catch (e) {} scopeSource = null; }
+    scopeAnalyser = null; scopeData = null;
+    if (scopeCtx) { try { scopeCtx.close(); } catch (e) {} scopeCtx = null; }
+    drawScopeIdle();
+  }
+  const recClock = document.getElementById('recClock');
+  const recState = document.getElementById('recState');
+  const recCancelBtn = document.getElementById('recCancelBtn');
+  const recPill = document.getElementById('recPill');
+  const recPillLabel = document.getElementById('recPillLabel');
+  const recScope = document.getElementById('recScope');
+  const recStatus = document.getElementById('recStatus');
+  const recTranscribeBtn = document.getElementById('recTranscribeBtn');
+
+  let mediaRecorder = null, currentChunks = [], recTimer = null, elapsedMs = 0, lastTick = 0;
+  let recPhase = 'idle'; // idle | recording
+  let finalDurationMs = 0;
+  let recStream = null, takeId = 0, segIndex = 0, seqInSeg = 0, recMime = 'audio/webm';
+  let wakeLock = null, keepAudioCtx = null;
+  let pendingFinalize = null; // 'stop', what to do once the current segment closes
+  let takeSegments = [];      // finalized files for the take that is running right now
+  let stitching = false;
+
+  // ---- SESSION ----
+  // a session is one archive entry that grows: every stop adds its audio and appends its transcript
+  let sessionRecId = null;      // archive record id, null until the first stop of the session
+  let sessionSegs = [];         // every audio part recorded in this session
+  let sessionTranscript = '';   // the appended transcript of the whole session
+  let sessionDurationMs = 0;    // total recorded time in this session
+  let sessionName = '';
+  let sessionParts = [];        // one slot per recorded part, filled in when its transcript lands
+  let sessionPending = 0;       // how many parts are transcribing right now
+  let sessionBusy = false;      // true while any transcription is running
+  let sessionGen = 0;           // bumped on every reset, so a late transcript cannot land in a new session
+
+  // ---- MODE ----
+  // multi  : every recording is added under the last one, all parts in one archive entry
+  // single : every recording replaces the text and starts its own archive entry
+  function getRecMode() { return localStorage.getItem('maha_rec_mode') === 'single' ? 'single' : 'multi'; }
+
+  const TIMESLICE_MS = 3000; // flush a chunk to disk every few seconds so a kill loses at most this much
+  const TAKE_META_KEY = 'maha_take_meta';
+
+  function setRecStatus(text, kind) { recStatus.textContent = text; recStatus.className = 'status' + (kind ? ' ' + kind : ''); }
+
+  // clock shows one tenth of a second
+  function fmtClock(ms) {
+    const m = Math.floor(ms / 60000), s2 = Math.floor((ms % 60000) / 1000), tenth = Math.floor((ms % 1000) / 100);
+    return String(m).padStart(2, '0') + ':' + String(s2).padStart(2, '0') + '<span class="ms">.' + tenth + '</span>';
+  }
+  function fmtDuration(ms) {
+    const total = Math.round(ms / 1000);
+    const m = Math.floor(total / 60), s = String(total % 60).padStart(2, '0');
+    return m + ':' + s;
+  }
+  function fmtMB(bytes) { return (bytes / 1048576).toFixed(2) + ' MB'; }
+
+  function tick() { const now = performance.now(); elapsedMs += now - lastTick; lastTick = now; recClock.innerHTML = fmtClock(elapsedMs); updatePillClock(); }
+  function startClock() { lastTick = performance.now(); recTimer = setInterval(tick, 50); }
+  function stopClock() { clearInterval(recTimer); recTimer = null; }
+
+  // ---- keep the tab alive in the background ----
+  async function requestWakeLock() {
+    try { if ('wakeLock' in navigator) { wakeLock = await navigator.wakeLock.request('screen'); } } catch (e) {}
+  }
+  function releaseWakeLock() {
+    try { if (wakeLock) { wakeLock.release(); wakeLock = null; } } catch (e) {}
+  }
+  // a truly silent audio node, active audio makes some Android browsers keep the page running
+  function startKeepAlive() {
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return;
+      keepAudioCtx = new Ctx();
+      const osc = keepAudioCtx.createOscillator();
+      const gain = keepAudioCtx.createGain();
+      gain.gain.value = 0; // silent
+      osc.connect(gain); gain.connect(keepAudioCtx.destination);
+      osc.start();
+      keepAudioCtx._osc = osc;
+    } catch (e) {}
+  }
+  function stopKeepAlive() {
+    try { if (keepAudioCtx) { if (keepAudioCtx._osc) keepAudioCtx._osc.stop(); keepAudioCtx.close(); keepAudioCtx = null; } } catch (e) {}
+  }
+
+  function writeTakeMeta() {
+    try { localStorage.setItem(TAKE_META_KEY, JSON.stringify({ take: takeId, mime: recMime, startedAt: Date.now(), elapsedMs: Math.round(elapsedMs), segIndex })); } catch (e) {}
+  }
+  function clearTakeMeta() { try { localStorage.removeItem(TAKE_META_KEY); } catch (e) {} }
+
+  // the REC pill is the record button, it shows the running time while recording
+  function setToggleUI() {
+    if (!recPill) { updateCancelState(); return; }
+    if (recPhase === 'recording') {
+      recPill.classList.add('recording');
+      recPill.title = 'stop and transcribe';
+      recPill.setAttribute('aria-label', 'stop and transcribe');
+      updatePillClock();
+    } else {
+      recPill.classList.remove('recording');
+      recPill.title = 'record';
+      recPill.setAttribute('aria-label', 'record');
+      if (recPillLabel) recPillLabel.textContent = RECORD_GLYPH;
+    }
+    updateCancelState();
+  }
+  // mm:ss inside the pill, no tenths, the pill is small
+  function updatePillClock() {
+    if (!recPillLabel || recPhase !== 'recording') return;
+    const total = Math.floor(elapsedMs / 1000);
+    const mm = String(Math.floor(total / 60)).padStart(2, '0');
+    const ss = String(total % 60).padStart(2, '0');
+    recPillLabel.textContent = mm + ':' + ss;
+  }
+  function updateCancelState() {
+    if (recCancelBtn) recCancelBtn.disabled = !(recPhase === 'recording' || sessionPending > 0);
+  }
+  function updateRecTranscribeState() { recTranscribeBtn.disabled = !(sessionSegs.length && ringHasKeys('assembly')) || sessionBusy || recPhase === 'recording'; }
+  function renderModeUI() {
+    const mode = getRecMode();
+    const m = document.getElementById('modeMulti'), sg = document.getElementById('modeSingle');
+    if (m) m.classList.toggle('active', mode === 'multi');
+    if (sg) sg.classList.toggle('active', mode === 'single');
+    const hint = document.getElementById('modeHint');
+    if (hint) hint.textContent = mode === 'multi'
+      ? 'each recording is added below the last, tap MULTIPLE again to start fresh'
+      : 'each recording replaces the text, tap SINGLE again to start fresh';
+  }
+  function updateSessionLine() {
+    const el = document.getElementById('sessionLine'); if (!el) return;
+    if (!sessionSegs.length) { el.textContent = 'session empty'; return; }
+    const words = sessionTranscript ? sessionTranscript.trim().split(/\s+/).filter(Boolean).length : 0;
+    el.textContent = 'session  \u00B7  ' + sessionSegs.length + ' part' + (sessionSegs.length > 1 ? 's' : '') +
+      '  \u00B7  ' + fmtDuration(sessionDurationMs) + '  \u00B7  ' + words + ' words';
+  }
+
+  // start a fresh segment recorder on the existing mic stream
+  function startSegment() {
+    currentChunks = [];
+    seqInSeg = 0;
+    mediaRecorder = new MediaRecorder(recStream, { mimeType: recMime });
+    mediaRecorder.ondataavailable = e => {
+      if (!e.data || !e.data.size) return;
+      currentChunks.push(e.data);
+      if (recPhase === 'recording') tick(); // keep duration fresh even if the bg timer throttled
+      liveAdd({ take: takeId, seg: segIndex, seq: seqInSeg++, ts: Date.now(), blob: e.data }).catch(() => {});
+      writeTakeMeta();
+    };
+    mediaRecorder.onstop = () => finalizeSegment();
+    mediaRecorder.start(TIMESLICE_MS);
+  }
+
+  // close the current segment into a complete file on disk, then act on what was pending
+  function finalizeSegment() {
+    const action = pendingFinalize; pendingFinalize = null;
+    const blob = new Blob(currentChunks, { type: 'audio/webm' });
+    currentChunks = [];
+    if (action === 'cancel') { discardTake(); return; }
+    const next = () => { if (action === 'stop') saveTakeToSession(); };
+    if (blob.size > 0) {
+      takeSegments.push(blob);
+      const thisSeg = segIndex; segIndex++;
+      writeTakeMeta();
+      segAdd({ take: takeId, seq: thisSeg, blob, created: Date.now() })
+        .then(() => liveClear()).catch(() => {})
+        .then(next, next);
+    } else {
+      next();
+    }
+  }
+
+  // ---- add the take that just finished to the running session, then transcribe it and append ----
+  function saveTakeToSession() {
+    if (stitching) return;
+    stitching = true;
+    if (recStream) { try { recStream.getTracks().forEach(t => t.stop()); } catch (e) {} recStream = null; }
+
+    const finish = (segs) => {
+      const fresh = (segs || []).filter(b => b && b.size);
+      const done = () => {
+        liveClear().catch(() => {}); segClear().catch(() => {}); clearTakeMeta();
+        elapsedMs = 0; recClock.innerHTML = fmtClock(0);
+        takeSegments = [];
+        stitching = false;
+      };
+      if (fresh.length === 0) { setRecStatus('nothing was recorded', 'err'); done(); return; }
+
+      sessionSegs = sessionSegs.concat(fresh);
+      sessionDurationMs += finalDurationMs;
+
+      const stamp = new Date();
+      if (!sessionName) sessionName = 'session_' + stamp.toISOString().replace(/[:.]/g, '-').slice(0, 19) + '.webm';
+
+      const afterSave = () => {
+        const totalSize = sessionSegs.reduce((sum, b) => sum + b.size, 0);
+        setRecStatus('part ' + sessionSegs.length + ' saved  \u00B7  session ' + fmtDuration(sessionDurationMs) + '  \u00B7  ' + fmtMB(totalSize), 'ok');
+        updateSessionLine(); updateRecTranscribeState();
+        renderArchive();
+        done();
+        autoTranscribeParts(fresh);           // transcription starts on its own, no button needed
+      };
+
+      if (sessionRecId === null) {
+        dbAdd({ name: sessionName, created: stamp.getTime(), durationMs: Math.round(sessionDurationMs), segments: sessionSegs.slice(), transcript: '' })
+          .then(id => { sessionRecId = id; afterSave(); })
+          .catch(e => { setRecStatus('saving to archive failed: ' + e, 'err'); done(); });
+      } else {
+        dbGet(sessionRecId).then(rec => {
+          if (!rec) { sessionRecId = null; return; }
+          rec.segments = sessionSegs.slice();
+          rec.durationMs = Math.round(sessionDurationMs);
+          return dbUpdate(rec);
+        }).then(afterSave).catch(e => { setRecStatus('updating the archive failed: ' + e, 'err'); done(); });
+      }
+    };
+
+    if (takeSegments.length > 0) finish(takeSegments.slice());
+    else segAll().then(rows => finish(rows.sort((a, b) => a.seq - b.seq).map(r => r.blob))).catch(() => finish([]));
+  }
+
+  // write whatever the session transcript currently is back into its archive entry
+  function persistSessionTranscript() {
+    if (sessionRecId === null) return Promise.resolve();
+    return dbGet(sessionRecId).then(rec => {
+      if (!rec) return;
+      rec.transcript = sessionTranscript;
+      rec.procSec = lastProcSec || rec.procSec || 0;
+      return dbUpdate(rec);
+    }).then(renderArchive).catch(() => {});
+  }
+
+  // rebuild from the slots, so parts always appear in the order they were recorded,
+  // even if a later part comes back from the server before an earlier one
+  function rebuildSessionTranscript() {
+    sessionTranscript = sessionParts.map(p => (p.text || '').trim()).filter(Boolean).join('\n\n');
+    transcriptEl.value = sessionTranscript;
+    updateSessionLine();
+    persistSessionTranscript();
+  }
+
+  // in single mode a new recording starts its own session, so the old text goes away
+  function beginSingleIfNeeded() {
+    if (getRecMode() !== 'single') return;
+    if (sessionRecId === null && !sessionSegs.length && !sessionTranscript) return; // already clean
+    resetSession('single message mode, starting a fresh message');
+  }
+
+  // close the current session and clear the workspace, the finished one stays in the archive
+  function resetSession(message) {
+    const closingId = sessionRecId;
+    const hadText = !!sessionTranscript.trim();
+    if (closingId !== null && hadText) summarizeSessionById(closingId, sessionTranscript, setRecStatus);
+    sessionRecId = null; sessionSegs = []; sessionTranscript = ''; sessionDurationMs = 0; sessionName = '';
+    sessionParts = []; sessionPending = 0; sessionBusy = false;
+    // a transcription already running is left to finish, its text goes to the entry it
+    // belongs to instead of being lost, the generation guard keeps it out of the new session
+    sessionGen++;
+    takeSegments = []; finalDurationMs = 0;
+    transcriptEl.value = '';
+    if (typeof transcriptCorr !== 'undefined' && transcriptCorr) transcriptCorr.value = '';
+    elapsedMs = 0; recClock.innerHTML = fmtClock(0);
+    updateSessionLine(); updateRecTranscribeState();
+    if (message) setRecStatus(message, 'ok');
+  }
+
+  // transcribe only the parts that were just recorded, then append them to the session text
+  function autoTranscribeParts(parts) {
+    if (!parts.length) return;
+    if (!ringHasKeys('assembly')) { setRecStatus('no assemblyai keys, cannot transcribe', 'err'); return; }
+    const slot = { text: '' };
+    sessionParts.push(slot);
+    const partNo = sessionParts.length;
+    const myGen = sessionGen, myRecId = sessionRecId;
+    sessionPending++; sessionBusy = true; setToggleUI(); updateRecTranscribeState();
+    runTranscriptionSession(parts, setRecStatus, (text) => {
+      // the session was reset while this was in flight, so keep the text out of the new one
+      if (myGen !== sessionGen) {
+        if (text !== null && myRecId !== null) {
+          dbGet(myRecId).then(rec => { if (rec && !rec.transcript) { rec.transcript = text; dbUpdate(rec).then(renderArchive); } }).catch(() => {});
+        }
+        return;
+      }
+      sessionPending = Math.max(0, sessionPending - 1); sessionBusy = sessionPending > 0;
+      setToggleUI(); updateRecTranscribeState();
+      if (text !== null) {
+        slot.text = text;
+        rebuildSessionTranscript();
+        const word = getRecMode() === 'single' ? 'transcribed' : 'transcribed and appended';
+        setRecStatus('part ' + partNo + ' ' + word + '  \u00B7  record again to add more', 'ok');
+      }
+    });
+  }
+
+  // start a brand new session, the finished one stays complete in the archive
+  function startNewSession() {
+    if (recPhase === 'recording') { setRecStatus('stop the recording first', 'err'); return; }
+    const had = sessionRecId !== null;
+    resetSession(had ? 'started fresh, the last one is in the archive' : 'started fresh');
+  }
+
+  function startRecording() {
+    beginSingleIfNeeded();
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { setRecStatus('mic needs https or localhost', 'err'); return; }
+    if (stitching) return;
+    navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+      recStream = stream;
+      takeId = Date.now();
+      segIndex = 0;
+      takeSegments = [];
+      recMime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm';
+      elapsedMs = 0; recClock.innerHTML = fmtClock(0);
+      Promise.all([liveClear(), segClear()]).catch(() => {}).then(() => {
+        pendingFinalize = null;
+        writeTakeMeta();
+        startSegment(); startClock(); startScope(stream);
+        requestWakeLock(); startKeepAlive();
+        recPhase = 'recording'; setToggleUI();
+        recState.textContent = 'RECORDING'; recState.className = 'rec-state live';
+        updateCancelState();
+        setRecStatus('recording, safe in the background');
+      });
+    }).catch(err => setRecStatus('microphone access denied or unavailable: ' + err.message, 'err'));
+  }
+
+  // press to record, press again to stop and transcribe
+  function stopAndTranscribe() {
+    if (recPhase !== 'recording') return;
+    stopClock(); stopScope();
+    finalDurationMs = elapsedMs; // captured before the counter is zeroed
+    releaseWakeLock(); stopKeepAlive();
+    recPhase = 'idle'; setToggleUI();
+    recState.textContent = ''; recState.className = 'rec-state';
+    setRecStatus('finishing this part...');
+    activateTab('transcribe');   // jump to the text, the transcript appears here when it lands
+    if (mediaRecorder) {
+      pendingFinalize = 'stop';
+      try { mediaRecorder.requestData(); } catch (e) {}
+      try { mediaRecorder.stop(); } catch (e) {} // onstop -> finalizeSegment -> saveTakeToSession
+      mediaRecorder = null;
+    } else {
+      saveTakeToSession();
+    }
+  }
+
+  // throw the running take away, the session and everything already transcribed stays untouched
+  function discardTake() {
+    stopScope();
+    if (recStream) { try { recStream.getTracks().forEach(t => t.stop()); } catch (e) {} recStream = null; }
+    takeSegments = []; currentChunks = []; finalDurationMs = 0;
+    liveClear().catch(() => {}); segClear().catch(() => {}); clearTakeMeta();
+    elapsedMs = 0; recClock.innerHTML = fmtClock(0);
+    stitching = false;
+    setToggleUI(); updateSessionLine(); updateRecTranscribeState();
+  }
+
+  function cancelRecording() {
+    stopClock(); stopScope();
+    releaseWakeLock(); stopKeepAlive();
+    recPhase = 'idle';
+    recState.textContent = ''; recState.className = 'rec-state';
+    if (mediaRecorder) {
+      pendingFinalize = 'cancel';
+      try { mediaRecorder.stop(); } catch (e) {} // onstop -> finalizeSegment -> discardTake
+      mediaRecorder = null;
+    } else {
+      discardTake();
+    }
+    setRecStatus('recording canceled, nothing was saved', 'ok');
+  }
+
+  // cancel: while recording it throws the take away, while transcribing it stops the transcription
+  recCancelBtn.addEventListener('click', () => {
+    if (recPhase === 'recording') { cancelRecording(); return; }
+    if (sessionPending > 0) {
+      txCancelGen++;                 // every transcription in flight gives up at its next step
+      sessionPending = 0; sessionBusy = false;
+      setMeter('idle'); setToggleUI(); updateRecTranscribeState();
+      setRecStatus('transcription canceled, the audio is still in the session', 'ok');
+    }
+  });
+
+  // the mode row: pressing the other mode switches and keeps the text, pressing the
+  // active mode again starts fresh, which is what the old NEW SESSION button did
+  ['modeMulti', 'modeSingle'].forEach(id => {
+    const btn = document.getElementById(id);
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+      const want = btn.dataset.mode;
+      if (recPhase === 'recording') { setRecStatus('stop the recording first', 'err'); return; }
+      if (want === getRecMode()) { startNewSession(); renderModeUI(); return; }
+      localStorage.setItem('maha_rec_mode', want);
+      renderModeUI();
+      // switching mid session keeps whatever is already there, only what happens next changes
+      setRecStatus(want === 'multi'
+        ? 'multiple message mode, the next recording is added below'
+        : 'single message mode, the next recording replaces the text', 'ok');
+    });
+  });
+
+  // ---- background survival ----
+  // when the page is hidden, force a flush so the live store is current, and re-grab the wake lock on return
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      if (mediaRecorder && mediaRecorder.state === 'recording') { try { mediaRecorder.requestData(); } catch (e) {} }
+    } else {
+      if (recPhase === 'recording') { requestWakeLock(); if (keepAudioCtx && keepAudioCtx.state === 'suspended') keepAudioCtx.resume().catch(() => {}); }
+    }
+  });
+  window.addEventListener('pagehide', () => {
+    if (mediaRecorder && mediaRecorder.state === 'recording') { try { mediaRecorder.requestData(); } catch (e) {} }
+  });
+  // warn before leaving mid-recording
+  window.addEventListener('beforeunload', (e) => {
+    if (recPhase === 'recording' || sessionBusy) { e.preventDefault(); e.returnValue = ''; return ''; }
+  });
+
+  // ---- recover a whole session interrupted by an OS/browser kill ----
+  function recoverInterrupted() {
+    let meta = null;
+    try { meta = JSON.parse(localStorage.getItem(TAKE_META_KEY) || 'null'); } catch (e) { meta = null; }
+    Promise.all([segAll(), liveAll()]).then(([segRows, liveRows]) => {
+      const segs = (segRows || []).sort((a, b) => a.seq - b.seq).map(r => r.blob).filter(b => b && b.size);
+      // rebuild the segment that was still open when the kill happened, from its live chunks
+      if (liveRows && liveRows.length) {
+        liveRows.sort((a, b) => (a.seg - b.seg) || (a.seq - b.seq));
+        const tail = new Blob(liveRows.map(c => c.blob), { type: 'audio/webm' });
+        if (tail.size) segs.push(tail);
+      }
+      if (segs.length === 0) { if (meta) clearTakeMeta(); return; }
+      const stamp = new Date();
+      const name = 'recovered_' + stamp.toISOString().replace(/[:.]/g, '-').slice(0, 19) + '.webm';
+      const durationMs = (meta && meta.elapsedMs) ? meta.elapsedMs : 0;
+      dbAdd({ name, created: stamp.getTime(), durationMs: Math.round(durationMs), segments: segs, transcript: '' })
+        .then((id) => {
+          // adopt it as the current session, so recording can carry straight on from where it died
+          sessionRecId = id; sessionSegs = segs.slice(); sessionName = name;
+          sessionDurationMs = Math.round(durationMs); sessionTranscript = ''; sessionParts = [];
+          updateSessionLine(); updateRecTranscribeState();
+          liveClear().catch(() => {}); segClear().catch(() => {}); clearTakeMeta();
+          renderArchive();
+          const totalSize = segs.reduce((s, b) => s + b.size, 0);
+          setRecStatus('recovered an interrupted session  \u00B7  ' + segs.length + ' segment(s)  \u00B7  ' + fmtMB(totalSize), 'ok');
+        })
+        .catch(() => {});
+    }).catch(() => {});
+  }
+  recoverInterrupted();
+
+  function slugify(title) {
+    return (title || 'recording').trim().replace(/[^\w\u00C0-\u024F ]+/g, '').replace(/\s+/g, '_').slice(0, 60);
+  }
+
+  function summarizeAndStore(recName, text, statusFn) {
+    dbAll().then(list => {
+      const rec = list.find(r => r.name === recName);
+      if (!rec) return;
+      rec.transcript = text;
+      rec.procSec = lastProcSec || rec.procSec || 0;
+      dbUpdate(rec).then(renderArchive);
+      groqSummarize(text).then(sum => {
+        if (!sum) { statusFn('archived, summary failed', 'ok'); return; }
+        rec.title = sum.title || '';
+        rec.summary = sum.summary || '';
+        if (rec.title) rec.name = slugify(rec.title) + '.webm';
+        dbUpdate(rec).then(renderArchive);
+        statusFn('archived as "' + (rec.title || rec.name) + '"', 'ok');
+      });
+    });
+  }
+
+  // title and summary for a session, looked up by id because the name changes when it gets titled
+  function summarizeSessionById(id, text, statusFn) {
+    dbGet(id).then(rec => {
+      if (!rec) return;
+      rec.transcript = text;
+      rec.procSec = lastProcSec || rec.procSec || 0;
+      dbUpdate(rec).then(renderArchive);
+      groqSummarize(text).then(sum => {
+        if (!sum) { statusFn('archived, summary failed', 'ok'); return; }
+        rec.title = sum.title || '';
+        rec.summary = sum.summary || '';
+        if (rec.title) rec.name = slugify(rec.title) + '.webm';
+        dbUpdate(rec).then(renderArchive);
+        statusFn('archived as "' + (rec.title || rec.name) + '"', 'ok');
+      });
+    });
+  }
+
+  // redo the whole session from its audio, every part, replacing the appended text
+  recTranscribeBtn.addEventListener('click', () => {
+    if (!sessionSegs.length || sessionBusy || recPhase === 'recording') return;
+    sessionPending++; sessionBusy = true; setToggleUI(); updateRecTranscribeState();
+    runTranscriptionSession(sessionSegs, setRecStatus, (text) => {
+      sessionPending = Math.max(0, sessionPending - 1); sessionBusy = sessionPending > 0; setToggleUI(); updateRecTranscribeState();
+      if (text !== null) {
+        sessionParts = [{ text: (text || '').trim() }];
+        rebuildSessionTranscript();
+        setRecStatus('whole session transcribed  \u00B7  ' + sessionSegs.length + ' part(s)', 'ok');
+      }
+    });
+  });
+
+  // ---- archive ----
+  const arhList = document.getElementById('arhList');
+  const arhStatus = document.getElementById('arhStatus');
+  function setArhStatus(text, kind) { arhStatus.textContent = text; arhStatus.className = 'status' + (kind ? ' ' + kind : ''); }
+
+  // a record may hold several segment files, or a single legacy blob
+  function recSegments(rec) { return (rec.segments && rec.segments.length) ? rec.segments : (rec.blob ? [rec.blob] : []); }
+  function recSize(rec) { return recSegments(rec).reduce((s, b) => s + (b ? b.size : 0), 0); }
+  function playSegments(container, segs) {
+    const existing = container.querySelector('audio');
+    if (existing) { existing.remove(); return; }
+    if (!segs.length) return;
+    const audio = document.createElement('audio');
+    audio.controls = true; audio.style.width = '100%'; audio.style.marginTop = '8px';
+    let idx = 0;
+    const load = () => { audio.src = URL.createObjectURL(segs[idx]); audio.play().catch(() => {}); };
+    audio.addEventListener('ended', () => { idx++; if (idx < segs.length) load(); });
+    container.appendChild(audio); load();
+  }
+
+  function getArhLang() { return localStorage.getItem('maha_arh_lang') === 'en' ? 'en' : 'hr'; }
+  function renderArchive() {
+    dbAll().then(list => {
+      list.sort((a, b) => b.created - a.created);
+      arhList.innerHTML = '';
+      if (list.length === 0) { arhList.innerHTML = '<div class="arh-empty">no recordings yet, use the REC tab</div>'; return; }
+      const langBar = document.createElement('div');
+      langBar.className = 'row arh-lang-row';
+      const al = getArhLang();
+      langBar.innerHTML =
+        '<button type="button" class="lang-btn arh-lang' + (al === 'hr' ? ' active' : '') + '" data-lang="hr">HR</button>' +
+        '<button type="button" class="lang-btn arh-lang' + (al === 'en' ? ' active' : '') + '" data-lang="en">EN</button>';
+      Array.from(langBar.querySelectorAll('.arh-lang')).forEach(b => b.addEventListener('click', () => {
+        localStorage.setItem('maha_arh_lang', b.dataset.lang); renderArchive();
+      }));
+      arhList.appendChild(langBar);
+      list.forEach(rec => {
+        const div = document.createElement('div');
+        div.className = 'arh-item';
+        const dur = rec.durationMs ? fmtDuration(rec.durationMs) + ', ' : '';
+        const segs = recSegments(rec);
+        const size = segs.length ? fmtMB(recSize(rec)) : '';
+        const segCount = segs.length > 1 ? ', ' + segs.length + ' segments' : '';
+        const score = rec.procSec ? ', score ' + Number(rec.procSec).toFixed(1) + 's' : '';
+        const hasT = rec.transcript ? ', transcribed' : '';
+        const shown = rec.title ? rec.title : rec.name;
+        const tBtn = rec.transcript ? '<button class="small-btn" data-act="copy">copy</button><button class="small-btn" data-act="text">transcript</button><button class="small-btn" data-act="exptxt">export txt</button>' : '';
+        div.innerHTML =
+          '<div class="arh-name">' + shown + '</div>' +
+          '<div class="arh-meta">' + rec.name + '<br>' + new Date(rec.created).toLocaleString() + ', ' + dur + size + segCount + score + hasT + '</div>' +
+          (rec.summary ? '<div class="arh-meta">' + rec.summary + '</div>' : '') +
+          '<div class="arh-actions">' +
+          '<button class="small-btn" data-act="play">play</button>' + tBtn +
+          '<button class="small-btn" data-act="retr">retranscribe</button>' +
+          '<button class="small-btn" data-act="export">export audio</button>' +
+          '<button class="small-btn danger" data-act="del">delete</button>' +
+          '</div>';
+        div.querySelector('[data-act=play]').addEventListener('click', () => {
+          playSegments(div, recSegments(rec));
+        });
+        const copyRecBtn = div.querySelector('[data-act=copy]');
+        if (copyRecBtn) copyRecBtn.addEventListener('click', () => {
+          const t = rec.transcript || '';
+          const done = () => { copyRecBtn.textContent = 'copied'; setTimeout(() => { copyRecBtn.textContent = 'copy'; }, 1400); };
+          if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(t).then(done).catch(() => fallbackCopy(t, done));
+          else fallbackCopy(t, done);
+        });
+        const textBtn = div.querySelector('[data-act=text]');
+        if (textBtn) textBtn.addEventListener('click', () => {
+          transcriptEl.value = rec.transcript || '';
+          tabBtns.find(b => b.dataset.tab === 'transcribe').click();
+          setStatus('loaded', 'ok');
+        });
+        const expTxtBtn = div.querySelector('[data-act=exptxt]');
+        if (expTxtBtn) expTxtBtn.addEventListener('click', () => {
+          const blob = new Blob([rec.transcript || ''], { type: 'text/plain' });
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          a.download = rec.name.replace(/\.webm$/i, '') + '.txt';
+          document.body.appendChild(a); a.click(); a.remove();
+          setArhStatus('exported txt', 'ok');
+        });
+        div.querySelector('[data-act=retr]').addEventListener('click', () => {
+          const segs = recSegments(rec);
+          const al = getArhLang();
+          forcedLang = al; // archive retranscribe always uses this language
+          setArhStatus('retranscribing ' + rec.name + ' in ' + al.toUpperCase() + ' via assemblyai' + (segs.length > 1 ? ' (' + segs.length + ' segments)' : ''));
+          runTranscriptionSession(segs, setArhStatus, (text) => {
+            forcedLang = null;
+            if (text !== null) {
+              transcriptEl.value = text;
+              summarizeAndStore(rec.name, text, setArhStatus);
+              tabBtns.find(b => b.dataset.tab === 'transcribe').click();
+            }
+          });
+        });
+        div.querySelector('[data-act=export]').addEventListener('click', () => {
+          const segs = recSegments(rec);
+          const base = rec.name.replace(/\.webm$/i, '');
+          segs.forEach((b, i) => {
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(b);
+            a.download = segs.length > 1 ? base + '_' + (i + 1) + '.webm' : rec.name;
+            document.body.appendChild(a); a.click(); a.remove();
+          });
+          setArhStatus(segs.length > 1 ? 'exported ' + segs.length + ' segment files' : 'exported', 'ok');
+        });
+        div.querySelector('[data-act=del]').addEventListener('click', () => {
+          if (!confirm('delete ' + rec.name + '?')) return;
+          dbDelete(rec.id).then(() => { renderArchive(); setArhStatus('deleted ' + rec.name, 'ok'); });
+        });
+        arhList.appendChild(div);
+      });
+    }).catch(e => setArhStatus('could not open the archive: ' + e, 'err'));
+  }
+
+  document.getElementById('arhDeleteAllBtn').addEventListener('click', () => {
+    if (!confirm('delete the WHOLE archive, every recording and transcript?')) return;
+    dbAll().then(list => Promise.all(list.map(r => dbDelete(r.id)))).then(() => {
+      renderArchive(); setArhStatus('archive emptied', 'ok');
+    });
+  });
+
+  // ---- shared round copy button wiring ----
+  function wireCopy(btn, getText) {
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+      const t = getText(); if (!t) return;
+      const done = () => { const old = btn.textContent; btn.textContent = 'copied'; setTimeout(() => { btn.textContent = old; }, 1400); };
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(t).then(done).catch(() => fallbackCopy(t, done));
+      else fallbackCopy(t, done);
+    });
+  }
+
+  // ---- GRAMMAR on the transcribe tab, corrects the transcript into the second box ----
+  const grammarBtn = document.getElementById('grammarBtn');
+  const grammarStatus = document.getElementById('grammarStatus');
+  const transcriptCorr = document.getElementById('transcriptCorr');
+  function setGrammarStatus(t, k) { grammarStatus.textContent = t; grammarStatus.className = 'status' + (k ? ' ' + k : ''); }
+  const reshapeBtn = document.getElementById('reshapeBtn');
+  function getCorrProvider() { return localStorage.getItem('maha_corr_provider') === 'gemini' ? 'gemini' : 'claude'; }
+  function getClaudeEffort() { const e = localStorage.getItem('maha_claude_effort'); return ['low', 'medium', 'high'].includes(e) ? e : 'low'; }
+  async function runCorrection(kind) {
+    const text = (transcriptEl.value || '').trim();
+    if (!text) { setGrammarStatus('the transcript box is empty', 'err'); return; }
+    const provider = getCorrProvider();
+    const prompt = kind === 'grammar' ? GRAMMAR_PROMPT : RESHAPE_PROMPT;
+    const verb = kind === 'grammar' ? 'correcting' : 're-shaping';
+    grammarBtn.disabled = true; reshapeBtn.disabled = true; setMeter('busy');
+    if (provider === 'claude') {
+      const name = CLAUDE_MODELS[getClaudeModel()].name;
+      const effort = getClaudeEffort();
+      setGrammarStatus(verb + ' with Claude ' + name + ' ' + effort);
+      const res = await claudeGenerate(prompt + text.slice(0, 200000), effort, setGrammarStatus);
+      if (res) { transcriptCorr.value = res.text; setMeter('ok'); setGrammarStatus('done  \u00b7  Claude ' + name + ' ' + effort + '  \u00b7  this call $' + res.cost.toFixed(4), 'ok'); bumpUsage('corr'); }
+      else { setMeter('err'); }
+    } else {
+      if (!ringHasKeys('gemini')) { setGrammarStatus('no gemini keys', 'err'); setMeter('err'); grammarBtn.disabled = false; reshapeBtn.disabled = false; return; }
+      const model = getQModel();
+      setGrammarStatus(verb + ' with Gemini ' + model);
+      const res = await geminiGenerate(prompt + text.slice(0, 60000), model, setGrammarStatus);
+      if (res) { transcriptCorr.value = res.text; setMeter('ok'); setGrammarStatus('done  \u00b7  Gemini ' + model + ', key ' + maskKey(res.key), 'ok'); bumpUsage('corr'); }
+      else { setMeter('err'); }
+    }
+    grammarBtn.disabled = false; reshapeBtn.disabled = false; setTimeout(() => setMeter('idle'), 1600);
+  }
+  grammarBtn.addEventListener('click', () => runCorrection('grammar'));
+  reshapeBtn.addEventListener('click', () => runCorrection('reshape'));
+
+  // ===== Claude API integration =====
+  const CLAUDE_MODELS = {
+    'claude-opus-4-8':           { name: 'Opus',   inP: 5, outP: 25 },
+    'claude-sonnet-5':           { name: 'Sonnet', inP: 2, outP: 10 }, // intro rate thru 2026-08-31, then 3/15
+    'claude-haiku-4-5-20251001': { name: 'Haiku',  inP: 1, outP: 5 }
+  };
+  const CLAUDE_EFFORTS = [
+    { id: 'low',    label: 'Low',    budget: 0 },
+    { id: 'medium', label: 'Medium', budget: 2048 },
+    { id: 'high',   label: 'High',   budget: 6144 }
+  ];
+  let claudeSpent = 0;
+  function getClaudeModel() { const m = localStorage.getItem('maha_claude_model'); return CLAUDE_MODELS[m] ? m : 'claude-opus-4-8'; }
+  function getClaudeBudget() { const b = parseFloat(localStorage.getItem('maha_claude_budget')); return (isFinite(b) && b > 0) ? b : 5; }
+  function setClaudeStatus(t, k) { const el = document.getElementById('claudeStatus'); if (el) { el.textContent = t; el.className = 'status' + (k ? ' ' + k : ''); } }
+  function updateClaudeUsage() {
+    const el = document.getElementById('claudeUsage'); if (!el) return;
+    const left = getClaudeBudget() - claudeSpent;
+    el.textContent = 'Claude API  \u00b7  spent $' + claudeSpent.toFixed(4) + '  \u00b7  left $' + left.toFixed(4);
+  }
+  function updateClaudeButtons() {
+    const name = CLAUDE_MODELS[getClaudeModel()].name;
+    CLAUDE_EFFORTS.forEach(e => { const b = document.getElementById('claude-' + e.id); if (b) b.textContent = name + ' ' + e.label; });
+  }
+  async function claudeGenerate(prompt, effortId, statusFn) {
+    const ring = loadRing('claude');
+    if (!ring.keys.length) { if (statusFn) statusFn('no claude api key, add one in settings', 'err'); return null; }
+    const model = getClaudeModel();
+    const eff = CLAUDE_EFFORTS.find(e => e.id === effortId) || CLAUDE_EFFORTS[0];
+    const body = { model: model, max_tokens: eff.budget ? eff.budget + 4096 : 4096, messages: [{ role: 'user', content: prompt }] };
+    if (eff.budget) body.thinking = { type: 'enabled', budget_tokens: eff.budget };
+    const { result, err } = await KR.rotate(ring, async (key) => {
+      try {
+        const res = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-api-key': key,
+            'anthropic-version': '2023-06-01',
+            'anthropic-dangerous-direct-browser-access': 'true'
+          },
+          body: JSON.stringify(body)
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const text = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('').trim();
+          const u = data.usage || {};
+          const m = CLAUDE_MODELS[model];
+          const cost = ((u.input_tokens || 0) / 1e6) * m.inP + ((u.output_tokens || 0) / 1e6) * m.outP;
+          return { kind: 'ok', result: { text: text, cost: cost, usage: u } };
+        }
+        const bodyText = await res.text().catch(() => '');
+        return krClassify(res.status, bodyText, res.headers);
+      } catch (e) { return { kind: 'soft', err: 'network error: ' + e.message }; }
+    });
+    saveRing('claude', ring);
+    if (result) { claudeSpent += result.cost; updateClaudeUsage(); }
+    else if (statusFn) statusFn('claude: ' + (err || 'failed'), 'err');
+    return result;
+  }
+  function renderClaudeEffort() {
+    const cur = getClaudeEffort();
+    CLAUDE_EFFORTS.forEach(e => { const b = document.getElementById('claude-' + e.id); if (b) b.classList.toggle('active', e.id === cur); });
+    // the engagement level only affects Claude, fade the row when Gemini is the provider
+    const row = document.getElementById('claudeRow');
+    const lbl = document.getElementById('claudeLevelLabel');
+    const dim = getCorrProvider() !== 'claude';
+    if (row) row.style.opacity = dim ? '0.4' : '1';
+    if (lbl) lbl.style.opacity = dim ? '0.4' : '1';
+  }
+  CLAUDE_EFFORTS.forEach(e => {
+    const b = document.getElementById('claude-' + e.id);
+    if (b) b.addEventListener('click', () => { localStorage.setItem('maha_claude_effort', e.id); renderClaudeEffort(); });
+  });
+  function renderClaudeModels() {
+    const wrap = document.getElementById('claudeModelList'); if (!wrap) return;
+    const cur = getClaudeModel();
+    wrap.innerHTML = Object.keys(CLAUDE_MODELS).map(id =>
+      '<button type="button" class="lang-btn claude-model' + (id === cur ? ' active' : '') + '" data-model="' + id + '">' + CLAUDE_MODELS[id].name + '</button>'
+    ).join('');
+    Array.from(wrap.querySelectorAll('.claude-model')).forEach(b => b.addEventListener('click', () => {
+      localStorage.setItem('maha_claude_model', b.dataset.model);
+      renderClaudeModels(); updateClaudeButtons(); updateClaudeUsage();
+    }));
+  }
+  function renderCorrProvider() {
+    const wrap = document.getElementById('corrProviderList'); if (!wrap) return;
+    const cur = getCorrProvider();
+    const opts = [{ id: 'claude', label: 'CLAUDE' }, { id: 'gemini', label: 'GEMINI' }];
+    wrap.innerHTML = opts.map(o =>
+      '<button type="button" class="big-choice' + (o.id === cur ? ' active' : '') + '" data-prov="' + o.id + '">' + o.label + '</button>'
+    ).join('');
+    Array.from(wrap.querySelectorAll('.big-choice')).forEach(b => b.addEventListener('click', () => {
+      localStorage.setItem('maha_corr_provider', b.dataset.prov);
+      renderCorrProvider(); renderClaudeEffort();
+    }));
+  }
+  (function initClaude() {
+    renderClaudeModels(); updateClaudeButtons(); updateClaudeUsage(); renderClaudeEffort(); renderCorrProvider();
+    const budget = document.getElementById('claudeBudget');
+    if (budget) { budget.value = getClaudeBudget(); budget.addEventListener('change', () => { const v = parseFloat(budget.value); if (isFinite(v) && v > 0) localStorage.setItem('maha_claude_budget', String(v)); updateClaudeUsage(); }); }
+  })();
+  wireCopy(document.getElementById('copyCorrBtn'), () => transcriptCorr.value);
+
+  // ---- QUICK tab, walkie talkie, one button, records then auto sends to Whisper ----
+
+  // ---- TRANSLATE tab, Gemini ----
+  const transSrc = document.getElementById('transSrc');
+  const transOut = document.getElementById('transOut');
+  const transStatus = document.getElementById('transStatus');
+  const translateBtn = document.getElementById('translateBtn');
+  function setTransStatus(t, k) { transStatus.textContent = t; transStatus.className = 'status' + (k ? ' ' + k : ''); }
+
+  function makeLangGroup(cls, storeKey, def) {
+    const btns = Array.from(document.querySelectorAll('.' + cls));
+    const get = () => localStorage.getItem(storeKey) || def;
+    const apply = () => btns.forEach(b => b.classList.toggle('active', b.dataset.lang === get()));
+    btns.forEach(b => b.addEventListener('click', () => { localStorage.setItem(storeKey, b.dataset.lang); apply(); }));
+    apply();
+    return get;
+  }
+  const getTransFrom = makeLangGroup('tl-from', 'maha_trans_from', 'auto');
+  const getTransTo = makeLangGroup('tl-to', 'maha_trans_to', 'en');
+
+  const transModelList = document.getElementById('transModelList');
+  function getTransModel() { const m = localStorage.getItem('maha_trans_model'); return CORR_MODELS.some(x => x.id === m) ? m : 'gemini-2.5-flash'; }
+  function renderTransModels() {
+    const cur = getTransModel();
+    transModelList.innerHTML = CORR_MODELS.map(m => '<button type="button" class="lang-btn tl-model' + (m.id === cur ? ' active' : '') + '" data-model="' + m.id + '">' + m.label + '</button>').join('');
+    Array.from(transModelList.querySelectorAll('.tl-model')).forEach(b => b.addEventListener('click', () => { localStorage.setItem('maha_trans_model', b.dataset.model); renderTransModels(); }));
+  }
+  renderTransModels();
+
+  function langName(c) { return c === 'hr' ? 'Croatian' : c === 'en' ? 'English' : 'auto'; }
+  translateBtn.addEventListener('click', async () => {
+    const text = transSrc.value.trim();
+    if (!text) { setTransStatus('nothing to translate', 'err'); return; }
+    if (!ringHasKeys('gemini')) { setTransStatus('no gemini keys', 'err'); return; }
+    const from = getTransFrom(), to = getTransTo();
+    const src = from === 'auto' ? 'the detected source language' : langName(from);
+    let tgt;
+    if (to === 'auto') tgt = (from === 'en') ? 'Croatian' : 'English';
+    else tgt = langName(to);
+    translateBtn.disabled = true; setMeter('busy');
+    const model = getTransModel();
+    setTransStatus('translating to ' + tgt + ' with ' + model);
+    const prompt = 'Translate the following text from ' + src + ' to ' + tgt + '. Return only the translation, with no notes and no quotes, and keep it natural.\n\n' + text.slice(0, 60000);
+    const res = await geminiGenerate(prompt, model, setTransStatus);
+    if (res) { transOut.value = res.text; setMeter('ok'); setTransStatus('translated to ' + tgt + ', key ' + maskKey(res.key), 'ok'); }
+    else setMeter('err');
+    translateBtn.disabled = false; setTimeout(() => setMeter('idle'), 1600);
+  });
+  wireCopy(document.getElementById('copyTransBtn'), () => transOut.value);
+
+  // ---- paste and clear toolbars above every text box ----
+  Array.from(document.querySelectorAll('[data-boxact]')).forEach(btn => {
+    const box = document.getElementById(btn.dataset.target);
+    const act = btn.dataset.boxact;
+    btn.addEventListener('click', async () => {
+      if (!box) return;
+      if (act === 'clear') { box.value = ''; box.focus(); return; }
+      try {
+        const t = await navigator.clipboard.readText();
+        box.value = t; box.focus();
+      } catch (e) {
+        box.focus(); // clipboard read blocked, focus so the user can long press paste
+      }
+    });
+  });
+
+  // initial UI state, so the buttons and session line are correct before anything is pressed
+  renderModeUI();
+  setToggleUI();
+  drawScopeIdle();
+  updateSessionLine();
+  updateRecTranscribeState();
+  renderArchive();
+})();
+</script>
+</body>
+</html>

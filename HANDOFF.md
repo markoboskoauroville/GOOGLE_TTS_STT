@@ -20,6 +20,32 @@ own word:
 
 The v6 numbers still work and are no longer drawn.
 
+## Maha Transcribe, whole
+
+`/transcribe` serves `MAHA_TRANSCRIBE_TERMUX_TERMINAL/maha_transcribe.html`
+**byte for byte**, vendored at `src/30_transcribe.html`. Recording, the queue,
+the archive, copy, correction, translation, the settings, the language picker,
+all of it is the app already in use. Nothing was reimplemented and nothing was
+redesigned.
+
+**Only the engine changed**, and the swap is three anchors in
+`tools/engine_patches.py`, applied at build time so the vendored file stays
+identical to upstream and every change is visible in one readable place:
+
+| anchor | upstream | here |
+|---|---|---|
+| `transcribeDispatch` | `aaiTranscribe`, AssemblyAI, keys in the browser's localStorage | POSTs the blob to `/api/listen`, so the server ring answers and the rotation, ledger and daily budget cover it |
+| `serviceReady` | "does localStorage hold an assembly key" | asks `/api/health` whether the server ring holds any |
+| the startup message | "no assemblyai keys" | comes from that health check |
+
+A missing anchor is **fatal at build time**. Shipping the page untouched would
+leave it calling AssemblyAI with keys it does not have, and it would look like a
+working app right up to the first recording.
+
+The AssemblyAI code is all still in the file, unreached. That is deliberate:
+deleting it would be editing somebody else's app rather than changing its
+engine, and the dispatch point is the seam its author already built.
+
 ## What was ported, and from where
 
 Nothing here was written fresh where a file already solved it.
