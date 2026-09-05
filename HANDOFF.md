@@ -174,6 +174,44 @@ Nothing here was written fresh where a file already solved it.
 | `Key_Tester` HANDOFF | the status glyphs and the five words |
 | `MAHA_TRANSCRIBE_STREAMLIT/ttt/keyring.py` | the ring rules: never drop a key for its shape, a key file is a working note |
 
+## Audio, end to end
+
+**Record at the best the phone will give.** The microphone is asked for mono
+48 kHz with **echo cancellation, noise suppression and automatic gain off**.
+That processing is tuned for a human on the other end of a call and it removes
+exactly the quiet detail a transcriber needs. The recorder runs at 128 kbps. It
+costs nothing that matters: the file lives on the phone for seconds before
+ffmpeg reduces it, and reducing from a clean source is not the same as reducing
+from one already thinned once.
+
+**Chrome, Brave and Firefox.** Chrome and Brave record webm/opus. **Firefox does
+not** — it produces ogg/opus and answers false for every webm type, so a
+webm-only list leaves it with no recorder at all. The list is tried in order:
+webm/opus, ogg/opus, webm, ogg, mp4.
+
+**Everything passes through ffmpeg.** Picked files always did; a recording used
+to go up as whatever the browser produced, which is a second pipeline for the
+same job and the one nobody was testing. Both go through `/api/optimize-audio`
+now.
+
+**The target moved, because the engine changed.**
+
+| | upstream, for AssemblyAI | here, for Gemini |
+|---|---|---|
+| rate | 16 kHz | **24 kHz** |
+| bitrate | 32 kbps | **48 kbps** |
+| tuning | voip | **audio** |
+
+AssemblyAI resamples to 16 kHz internally, so bytes above that were pure waste.
+Gemini is billed the same way — **measured: audio input is exactly 25 tokens a
+second, whatever the bitrate** — so a bigger file costs nothing but the seconds
+it takes to cross loopback. What 16/32 voip *was* costing is intelligibility:
+voip tuning keeps a call understandable to a human ear and thins the
+high-frequency detail that separates an s from an f. That is free to keep here,
+so it is kept. 24 kHz holds everything up to 12 kHz; 48 kbps is transparent for
+speech; "audio" rather than "voip" because the listener is a model trained on
+clean speech, not somebody on a bad line.
+
 ## The vendored page needs its server
 
 Maha Transcribe was written against **its own** server. It calls endpoints by

@@ -333,6 +333,37 @@ check("the header it sends is the one the guard checks for",
 check("and the patched-in calls are counted too, not just the vendored ones",
       "/api/listen" in _wants and "/api/rewrite" in _wants, True)
 
+# --------------------------------------------- the gates the ring must pass
+# THE BUG THAT KILLED RECORDING. serviceReady() was patched and these four
+# were not, so the record-to-transcribe button was disabled forever: it asks
+# whether THIS BROWSER holds AssemblyAI keys, and there are none, because the
+# ring is a file on the server now. SINGLE and MULTIPLE looked broken for the
+# same reason - the mode only shows in what a session does with a transcript
+# it was never allowed to fetch.
+check("no gate asks localStorage for a provider ring any more",
+      "loadRing(provider).keys.length > 0" in _tp, False)
+check("ringHasKeys asks the server instead", "__serverKeys" in _tp, True)
+check("and the record-to-transcribe gate goes through it",
+      "recTranscribeBtn.disabled = !(sessionSegs.length && ringHasKeys" in _tp, True)
+
+# every recording goes through ffmpeg, like every picked file already did
+check("recordings are optimized before upload, not only picked files",
+      "prepForUpload" in _tp, True)
+check("and the segment is the optimized one", "transcribeDispatch(ready," in _tp, True)
+
+# Firefox does not record webm. A webm-only list leaves it with no recorder.
+check("the recorder tries ogg as well as webm, for Firefox",
+      "audio/ogg;codecs=opus" in _tp, True)
+check("the microphone is asked for the raw signal, not the phone-call one",
+      "autoGainControl: false" in _tp, True)
+check("and the recorder is given a real bitrate", "audioBitsPerSecond: 128000" in _tp, True)
+
+# the target moved because the engine changed
+check("audio is prepared at 24 kHz for Gemini, not 16 kHz for AssemblyAI",
+      app.PREP_RATE, 24000)
+check("and at 48 kbps, because Gemini is billed by the second and not the byte",
+      app.PREP_BITRATE, "48k")
+
 # ------------------------------------------------------------- THE PAGE
 # v13 shipped a page whose script died at parse. On the phone that looked like
 # "counting the cache" forever and a SPEAK button that did nothing, because
@@ -378,8 +409,8 @@ _ep = _iu.module_from_spec(_spec)
 _spec.loader.exec_module(_ep)
 _html = open(os.path.join(ROOT, "src", "30_transcribe.html")).read()
 check("the vendored page is the whole app", len(_html) > 100000, True)
-check("nine patches, and every one of them takes something out or swaps an engine",
-      len(_ep.PATCHES), 9)
+check("thirteen patches, each one either swapping the engine or taking a "
+      "second engine out", len(_ep.PATCHES), 13)
 for _old, _ in _ep.PATCHES:
     check("the engine anchor is still there: %s" % _old.strip().splitlines()[0][:44],
           _old in _html, True)

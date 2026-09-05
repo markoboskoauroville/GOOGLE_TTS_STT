@@ -5,7 +5,7 @@
 #   src/00_head.sh   9b27f46ee8bc
 #   src/30_transcribe.html   67e73826805d   vendored, engine swapped at build
 #   src/seed/                 47 cached previews
-#   src/10_app.py    1e3a92c9f953
+#   src/10_app.py    95a206afb6ac
 #   src/15_page.html 52eed5023aea
 #   src/20_tail.sh   36640551ba37
 #
@@ -21,10 +21,10 @@
 # ledgers, and two ledgers that each think they own the daily budget are both
 # wrong by dinner time.
 #
-#   bash 16-google-tts-stt-v16.sh                 install
-#   bash 16-google-tts-stt-v16.sh --keys FILE     install, and take the keys out of FILE
-#   bash 16-google-tts-stt-v16.sh --test          install, then run the four tests
-#   bash 16-google-tts-stt-v16.sh --verify        check this file is whole, change nothing
+#   bash 17-google-tts-stt-v17.sh                 install
+#   bash 17-google-tts-stt-v17.sh --keys FILE     install, and take the keys out of FILE
+#   bash 17-google-tts-stt-v17.sh --test          install, then run the four tests
+#   bash 17-google-tts-stt-v17.sh --verify        check this file is whole, change nothing
 #
 # INSTALLING SPENDS NOTHING. The four tests make real calls against a real
 # ring, and a TTS account has ten requests a day, so they run when you ask for
@@ -47,8 +47,8 @@
 
 set -u
 
-GTT_VERSION="v16"
-GTT_FILE="16-google-tts-stt-v16.sh"
+GTT_VERSION="v17"
+GTT_FILE="17-google-tts-stt-v17.sh"
 GTT_REPO="markoboskoauroville/GOOGLE_TTS_STT"
 
 # --- the platform layer, and nothing below this block knows the platform ---
@@ -248,7 +248,7 @@ try:
 except Exception:
     PACIFIC = timezone(timedelta(hours=-8))
 
-VERSION = 16
+VERSION = 17
 PORT = int(os.environ.get("GTTS_PORT", "7311"))
 KEYFILE = os.environ.get("GEMINI_KEYS", os.path.expanduser("~/.gemini_keys"))
 HOME = os.path.expanduser("~/.google_tts_stt")
@@ -1071,17 +1071,27 @@ MIME = {".mp3": "audio/mp3", ".wav": "audio/wav", ".flac": "audio/flac",
 #
 # From MAHA_TRANSCRIBE_TERMUX_TERMINAL/audioprep.py, target and reasoning kept:
 #
-#     16 kHz, mono, Opus, ~32 kbps VBR, "voip" tuning
+#     24 kHz, mono, Opus, 48 kbps, "audio" tuning
 #
-# 16 kHz because ASR resamples to it anyway, so anything higher pays for bytes
-# thrown away downstream. Mono for the same reason about channels. Opus at 32k
-# tuned for voip is what carries a phone call; lower starts costing
-# intelligibility on noisy recordings, higher pays for fidelity no
-# transcription model uses. A two-hour phone video becomes a same-length mono
-# Opus file typically under 20 MB, which is the whole point of doing it here
-# rather than uploading gigabytes.
-PREP_RATE = 16000
-PREP_BITRATE = "32k"
+# THE TARGET MOVED, and the reason is the engine. Upstream aimed at 16 kHz and
+# 32 kbps voip because AssemblyAI resamples to 16 kHz internally and is billed
+# per second, so bytes above that were pure waste.
+#
+# Gemini is billed the same way — MEASURED: audio input is exactly 25 tokens a
+# second, whatever the bitrate — so a bigger file costs nothing but the seconds
+# it takes to upload over loopback. The thing that WAS being paid for at 16/32
+# was intelligibility: voip tuning is built to keep a phone call understandable
+# to a human ear, and it thins exactly the high-frequency detail that separates
+# an s from an f, a t from a k. That is free to keep here, so it is kept.
+#
+# 24 kHz because it holds everything up to 12 kHz, which covers the fricatives
+# 16 kHz starts to lose. 48 kbps because Opus is transparent for speech there.
+# "audio" rather than "voip" because voip's job is a human listener on a bad
+# line, and the listener here is a model that was trained on clean speech.
+#
+# A two-hour phone video still becomes a same-length mono file well under 40 MB.
+PREP_RATE = 24000
+PREP_BITRATE = "48k"
 PREP_TIMEOUT = 900        # a backstop against a corrupt file that hangs ffmpeg
 MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024
 
@@ -1136,7 +1146,7 @@ def optimize_audio(input_bytes, original_name=""):
         t0 = time.time()
         proc = subprocess.run(
             [ff, "-y", "-i", in_path, "-vn", "-ac", "1", "-ar", str(PREP_RATE),
-             "-c:a", "libopus", "-b:a", PREP_BITRATE, "-application", "voip",
+             "-c:a", "libopus", "-b:a", PREP_BITRATE, "-application", "audio",
              "-f", "ogg", out_path],
             capture_output=True, text=True, timeout=PREP_TIMEOUT)
         took = time.time() - t0
@@ -2732,7 +2742,28 @@ cat > "$APPHOME/transcribe.html.new" <<'GTT_TRANSCRIBE_EOF'
     } catch (e) { return KR.newRing(); }
   }
   function saveRing(provider, ring) { localStorage.setItem(KR_PROVIDERS[provider].storageKey, JSON.stringify(ring)); }
-  function ringHasKeys(provider) { return loadRing(provider).keys.length > 0; }
+  // THE RING IS THE SERVER'S. Upstream every gate asked localStorage whether
+  // this browser held keys for a provider, and there are none here: the keys
+  // live in one file on the server now. serviceReady() was patched and these
+  // four were not, so the RECORD to transcribe button stayed disabled forever
+  // and a recording could never be transcribed - which also made SINGLE and
+  // MULTIPLE look broken, because the mode only shows in what the session does
+  // with a transcript it was never allowed to fetch.
+  //
+  // Optimistic until told otherwise: a page that greys itself out while one
+  // fetch is in flight is a page that jumps.
+  let __serverKeys = 1;
+  function refreshServerKeys() {
+    fetch('/api/health', { headers: { 'X-Gtt-Local': '1' } })
+      .then(r => r.json())
+      .then(h => {
+        __serverKeys = h.keys || 0;
+        if (typeof updateRecTranscribeState === 'function') updateRecTranscribeState();
+        if (typeof updateTranscribeState === 'function') updateTranscribeState();
+      })
+      .catch(() => {});
+  }
+  function ringHasKeys(provider) { return __serverKeys > 0; }
 
   const GROQ_CHAT_URL = 'https://api.groq.com/openai/v1/chat/completions';
   const SUMMARY_MODEL = 'llama-3.3-70b-versatile';
@@ -3381,11 +3412,34 @@ cat > "$APPHOME/transcribe.html.new" <<'GTT_TRANSCRIBE_EOF'
   }
 
   // transcribe a queue of segments one by one, then stitch the transcripts
+  // EVERY transcription passes through ffmpeg, recordings included. The file
+  // picker already did; a recording used to go straight up as whatever the
+  // browser happened to produce, which is a different pipeline for the same
+  // job and the one nobody was testing.
+  async function prepForUpload(blob, statusFn) {
+    try {
+      const fd = new FormData();
+      fd.append('file', blob, 'take.webm');
+      const r = await fetch('/api/optimize-audio', {
+        method: 'POST', headers: { 'X-Gtt-Local': '1' }, body: fd
+      });
+      if (!r.ok) return blob;                       // reduce if we can, send if we cannot
+      const out = await r.blob();
+      if (!out || !out.size) return blob;
+      if (statusFn) statusFn('optimized  \u00B7  ' + Math.round(blob.size / 1024) +
+                             ' KB \u2192 ' + Math.round(out.size / 1024) + ' KB');
+      return out;
+    } catch (e) {
+      return blob;
+    }
+  }
+
   async function transcribeSegmentsSeq(segments, statusFn) {
     const parts = [];
     for (let i = 0; i < segments.length; i++) {
       const label = segments.length > 1 ? ('segment ' + (i + 1) + '/' + segments.length + '  \u00B7  ') : '';
-      const t = await transcribeDispatch(segments[i], 'segment_' + (i + 1) + '.webm', (m) => statusFn(label + m));
+      const ready = await prepForUpload(segments[i], (m) => statusFn(label + m));
+      const t = await transcribeDispatch(ready, 'segment_' + (i + 1) + '.ogg', (m) => statusFn(label + m));
       if (t === null) return null; // one segment failed, fail the whole session
       parts.push((t || '').trim());
     }
@@ -3667,7 +3721,13 @@ cat > "$APPHOME/transcribe.html.new" <<'GTT_TRANSCRIBE_EOF'
   function startSegment() {
     currentChunks = [];
     seqInSeg = 0;
-    mediaRecorder = new MediaRecorder(recStream, { mimeType: recMime });
+    // 128 kbps into the recorder. It costs nothing that matters - the file
+    // lives on this phone for seconds before ffmpeg reduces it - and it is the
+    // difference between reducing FROM a clean source and reducing from one
+    // that has already been thinned once.
+    mediaRecorder = recMime
+      ? new MediaRecorder(recStream, { mimeType: recMime, audioBitsPerSecond: 128000 })
+      : new MediaRecorder(recStream, { audioBitsPerSecond: 128000 });
     mediaRecorder.ondataavailable = e => {
       if (!e.data || !e.data.size) return;
       currentChunks.push(e.data);
@@ -3831,12 +3891,37 @@ cat > "$APPHOME/transcribe.html.new" <<'GTT_TRANSCRIBE_EOF'
     beginSingleIfNeeded();
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { setRecStatus('mic needs https or localhost', 'err'); return; }
     if (stitching) return;
-    navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+    // RECORD AT THE BEST THE PHONE WILL GIVE. The processing that makes a
+    // phone call intelligible - AGC, noise suppression, echo cancellation -
+    // is tuned for a human on the other end, and it removes exactly the quiet
+    // detail a transcriber needs. Off, and let ffmpeg do the reduction later
+    // from a clean source.
+    navigator.mediaDevices.getUserMedia({
+      audio: {
+        channelCount: 1,
+        sampleRate: 48000,
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false
+      }
+    }).catch(() => navigator.mediaDevices.getUserMedia({ audio: true }))
+      .then(stream => {
       recStream = stream;
       takeId = Date.now();
       segIndex = 0;
       takeSegments = [];
-      recMime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm';
+      // Chrome and Brave record webm/opus. FIREFOX DOES NOT: it produces
+      // ogg/opus and returns false for every webm type, so a webm-only list
+      // leaves it with the empty string and a recorder that never starts.
+      recMime = '';
+      ['audio/webm;codecs=opus', 'audio/ogg;codecs=opus', 'audio/webm',
+       'audio/ogg', 'audio/mp4'].some(function (m) {
+        if (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(m)) {
+          recMime = m;
+          return true;
+        }
+        return false;
+      });
       elapsedMs = 0; recClock.innerHTML = fmtClock(0);
       Promise.all([liveClear(), segClear()]).catch(() => {}).then(() => {
         pendingFinalize = null;

@@ -780,3 +780,68 @@ markup, it is its markup and everything it expects to be able to call.
 TRANSCRIBE, not LISTEN. Baba: *that's the right title.* SPEAK and TRANSCRIBE are
 both verbs for what happens there; LISTEN was a verb for what the app does,
 which is not the thing the person is doing.
+
+---
+
+## 5.9.2026 — v17, the gate that killed recording
+
+Baba: *when I record a sound, my own sound, transcription not happening. Also
+single and multiple mode are not working. On my original app everything works
+perfect.*
+
+His original works perfectly because the bug is entirely mine. Four lines:
+
+    if (!ringHasKeys('assembly')) ...                    the picker gate
+    recTranscribeBtn.disabled = !(sessionSegs.length && ringHasKeys('assembly'))
+    if (!ringHasKeys('assembly')) { 'no assemblyai keys, cannot transcribe' }
+    if (!ringHasKeys('gemini')) ...                      the translate gate
+
+At v9 I patched `serviceReady()` and thought I had found the seam. `serviceReady`
+is the FILE PICKER's gate. The recording path has its own, and it asks whether
+**this browser** holds AssemblyAI keys — which it never will, because the ring is
+a file on the server now. So the record-to-transcribe button was disabled from
+the moment the page loaded and nothing about it said why.
+
+SINGLE and MULTIPLE looked broken for the same reason. The mode only shows in
+what a session does with a transcript, and the session was never allowed to
+fetch one. Two symptoms, one line.
+
+`ringHasKeys` now asks the server, once, and re-enables the buttons when the
+answer arrives. Optimistic until told otherwise.
+
+### How it was found, and what that changes
+
+By loading the page in jsdom and driving it: pick a file, click, read the status
+line, do it again. That found the second-file case immediately and then showed
+the record button disabled with the reason visible in one grep.
+
+I said two versions ago that nothing here could click a button. That was true
+and it was the gap every one of these bugs came through. It is not true any
+more.
+
+### Audio, on his terms
+
+*Sound is recorded in the maximum resolution as the phone allows. Then with
+ffmpeg the sound is optimized to be tiny, just enough for transcription, but not
+too tiny.*
+
+Mic: mono 48 kHz, and echo cancellation, noise suppression and auto gain all
+OFF. That processing exists to make a phone call intelligible to a human and it
+removes the quiet detail a transcriber lives on. Recorder at 128 kbps, because
+the file exists for seconds before ffmpeg reduces it and reducing from a clean
+source is not the same job as reducing from a thinned one.
+
+Firefox does not record webm. It answers false for every webm type and produces
+ogg/opus, so the webm-only list left it with an empty mime string. Five types
+now, tried in order.
+
+And the ffmpeg target moved from 16 kHz/32 kbps voip to **24 kHz/48 kbps audio**.
+The old numbers were right for AssemblyAI, which resamples to 16 kHz and bills
+by the second, so anything above was waste. Gemini bills by the second too —
+measured, 25 tokens a second regardless of bitrate — so the extra bytes cost
+nothing but loopback time, while voip tuning was quietly costing the
+high-frequency detail that tells an s from an f. Measured after the change: a
+102 KB webm becomes 143 KB of 24 kHz mono Opus, and it transcribes.
+
+It got bigger. That is the right direction when the only thing bytes buy is
+accuracy and the only thing they cost is a second on localhost.

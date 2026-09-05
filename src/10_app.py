@@ -41,7 +41,7 @@ try:
 except Exception:
     PACIFIC = timezone(timedelta(hours=-8))
 
-VERSION = 16
+VERSION = 17
 PORT = int(os.environ.get("GTTS_PORT", "7311"))
 KEYFILE = os.environ.get("GEMINI_KEYS", os.path.expanduser("~/.gemini_keys"))
 HOME = os.path.expanduser("~/.google_tts_stt")
@@ -864,17 +864,27 @@ MIME = {".mp3": "audio/mp3", ".wav": "audio/wav", ".flac": "audio/flac",
 #
 # From MAHA_TRANSCRIBE_TERMUX_TERMINAL/audioprep.py, target and reasoning kept:
 #
-#     16 kHz, mono, Opus, ~32 kbps VBR, "voip" tuning
+#     24 kHz, mono, Opus, 48 kbps, "audio" tuning
 #
-# 16 kHz because ASR resamples to it anyway, so anything higher pays for bytes
-# thrown away downstream. Mono for the same reason about channels. Opus at 32k
-# tuned for voip is what carries a phone call; lower starts costing
-# intelligibility on noisy recordings, higher pays for fidelity no
-# transcription model uses. A two-hour phone video becomes a same-length mono
-# Opus file typically under 20 MB, which is the whole point of doing it here
-# rather than uploading gigabytes.
-PREP_RATE = 16000
-PREP_BITRATE = "32k"
+# THE TARGET MOVED, and the reason is the engine. Upstream aimed at 16 kHz and
+# 32 kbps voip because AssemblyAI resamples to 16 kHz internally and is billed
+# per second, so bytes above that were pure waste.
+#
+# Gemini is billed the same way — MEASURED: audio input is exactly 25 tokens a
+# second, whatever the bitrate — so a bigger file costs nothing but the seconds
+# it takes to upload over loopback. The thing that WAS being paid for at 16/32
+# was intelligibility: voip tuning is built to keep a phone call understandable
+# to a human ear, and it thins exactly the high-frequency detail that separates
+# an s from an f, a t from a k. That is free to keep here, so it is kept.
+#
+# 24 kHz because it holds everything up to 12 kHz, which covers the fricatives
+# 16 kHz starts to lose. 48 kbps because Opus is transparent for speech there.
+# "audio" rather than "voip" because voip's job is a human listener on a bad
+# line, and the listener here is a model that was trained on clean speech.
+#
+# A two-hour phone video still becomes a same-length mono file well under 40 MB.
+PREP_RATE = 24000
+PREP_BITRATE = "48k"
 PREP_TIMEOUT = 900        # a backstop against a corrupt file that hangs ffmpeg
 MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024
 
@@ -929,7 +939,7 @@ def optimize_audio(input_bytes, original_name=""):
         t0 = time.time()
         proc = subprocess.run(
             [ff, "-y", "-i", in_path, "-vn", "-ac", "1", "-ar", str(PREP_RATE),
-             "-c:a", "libopus", "-b:a", PREP_BITRATE, "-application", "voip",
+             "-c:a", "libopus", "-b:a", PREP_BITRATE, "-application", "audio",
              "-f", "ogg", out_path],
             capture_output=True, text=True, timeout=PREP_TIMEOUT)
         took = time.time() - t0
