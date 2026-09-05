@@ -1,16 +1,22 @@
 # DELIVERY RECORD
 
-**v7, 5.9.2026.** What was measured, and what was not tested.
+**v8, 5.9.2026.** What was measured, and what was not tested.
 
 ## The gate
 
-    build is fresh          7-google-tts-stt-v7.sh matches src/
+    build is fresh          8-google-tts-stt-v8.sh matches src/
     installer is whole      --verify passes
-    TEST 1   mechanism       49 checks   0 failed
+    TEST 1   mechanism       56 checks   0 failed
     TEST 1b  the parser      73 checks   0 failed
     TEST 3   ugly cases      59 checks   0 failed
     TEST 4   upgrade         34 checks   0 failed
-                            215 checks   0 failed
+                            222 checks   0 failed
+
+TEST 2 was run against a fabricated ring at v8: everything structural passed —
+the guard refuses an api call with no header, refuses another page's Origin,
+refuses a foreign Host, and lets the page itself load; the page carries the
+house tokens and the account cards. The provider half could not run, because
+there is no working key.
 
 **TEST 2 was NOT run for v3.** It is the one test that spends real provider
 requests, and the keys used through v1 and v2 have been retired. It last ran

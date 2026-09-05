@@ -12,7 +12,7 @@ break on either side fails the same test.
     GEMINI_KEYS=~/.gemini_keys python3 tests/test2_real.py
 """
 
-import json, os, subprocess, sys, tempfile, time, urllib.request, urllib.error
+import json, os, subprocess, sys, tempfile, time, urllib.error, urllib.parse, urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 APP = os.path.join(ROOT, "src", "10_app.py")
@@ -33,14 +33,28 @@ def check(name, got, want=True):
         fails.append(name)
 
 
-def get(path, timeout=120):
-    with urllib.request.urlopen(BASE + path, timeout=timeout) as r:
+GUARD = {"X-Gtt-Local": "1"}
+
+
+def get(path, timeout=120, headers=None):
+    req = urllib.request.Request(BASE + path, headers=dict(GUARD, **(headers or {})))
+    with urllib.request.urlopen(req, timeout=timeout) as r:
         return r.status, r.read()
+
+
+def raw_get(path, headers=None, timeout=30):
+    """No guard header, on purpose."""
+    req = urllib.request.Request(BASE + path, headers=headers or {})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status, r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, e.read()
 
 
 def post_json(path, obj, timeout=400):
     req = urllib.request.Request(BASE + path, data=json.dumps(obj).encode(),
-                                 headers={"Content-Type": "application/json"})
+                                 headers=dict(GUARD, **{"Content-Type": "application/json"}))
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.loads(r.read().decode())
 
@@ -56,8 +70,16 @@ def post_file(path, filepath, fields=None, timeout=400, field="audio"):
              % (boundary, field, os.path.basename(filepath))).encode()
     body += open(filepath, "rb").read() + ("\r\n--%s--\r\n" % boundary).encode()
     req = urllib.request.Request(BASE + path, data=body,
-                                 headers={"Content-Type": "multipart/form-data; boundary=" + boundary})
+                                 headers=dict(GUARD, **{"Content-Type":
+                                              "multipart/form-data; boundary=" + boundary}))
     with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read().decode())
+
+
+def post_one(label):
+    req = urllib.request.Request(BASE + "/api/key/" + urllib.parse.quote(label) + "/test",
+                                 data=b"", headers=GUARD, method="POST")
+    with urllib.request.urlopen(req, timeout=120) as r:
         return json.loads(r.read().decode())
 
 
@@ -85,10 +107,13 @@ try:
 
     code, page = get("/")
     check("the page is served", code, 200)
-    check("all three tabs are in the first frame", 
-          all(w in page for w in (b"Speak", b"Listen", b"Keys")))
+    check("all three tabs are in the first frame",
+          all(w in page for w in (b"SPEAK", b"LISTEN", b"KEYS")))
     check("the player is drawn before there is anything to play, dimmed",
           b'<audio id="player" class="idle"' in page)
+    check("the page uses the house tokens, not a set of its own",
+          b"--amber:#f59e0b" in page and b"--prose:#f2ddb4" in page)
+    check("each account gets a card with its own actions", b"kacts" in page)
 
     b = json.loads(get("/api/budget")[1].decode())
     check("the budget endpoint answers", "models" in b)
@@ -155,11 +180,35 @@ try:
     check("the ring did not grow twice", i2["ring"], i1["ring"])
     os.remove(imp)
 
+    # THE GUARD. A page you have open in another tab can make your browser
+    # send requests here, and this app deletes keys and spends quota.
+    code, _ = raw_get("/api/budget")
+    check("an api call with no guard header is refused", code, 403)
+    code, _ = raw_get("/", headers={})
+    check("but the page itself still loads without one", code, 200)
+    code, _ = raw_get("/api/budget", headers={"X-Gtt-Local": "1",
+                                              "Origin": "https://somewhere.else"})
+    check("a call carrying another page's Origin is refused", code, 403)
+    code, _ = raw_get("/", headers={"Host": "evil.example"})
+    check("a request arriving under another Host is refused", code, 403)
+
+    ring = json.loads(get("/api/ring")[1].decode())
+    check("the ring can be drawn before anything is tested", "keys" in ring)
+    if ring["keys"]:
+        lab = ring["keys"][0]["label"]
+        one = post_one(lab)
+        check("one account can be tested on its own", one.get("ok"), True)
+        check("and it comes back with a verdict",
+              one.get("verdict") in ("working", "busy", "no credit", "refused", "unknown"))
+
     rows = json.loads(get("/api/keys", timeout=180)[1].decode())
     check("every account in the ring is reported", len(rows) > 0)
     check("at least one is live", any(x["state"] == "live" for x in rows))
     check("no whole key is ever sent to the page",
           all("\u2026" in x["masked"] and len(x["masked"]) < 16 for x in rows))
+    check("every row carries one of the five verdicts",
+          all(x["verdict"] in ("working", "busy", "no credit", "refused", "unknown")
+              for x in rows))
 finally:
     proc.terminate()
     try:

@@ -3,7 +3,7 @@
 # Edit src/00_head.sh, src/10_app.py, src/20_tail.sh and build again.
 #
 #   src/00_head.sh   1980117fc821
-#   src/10_app.py    081f53fcf04a
+#   src/10_app.py    58794054a817
 #   src/20_tail.sh   00c74033eabe
 #
 # GOOGLE TTS AND STT, one roof over the two halves of the same job.
@@ -18,10 +18,10 @@
 # ledgers, and two ledgers that each think they own the daily budget are both
 # wrong by dinner time.
 #
-#   bash 7-google-tts-stt-v7.sh                 install, then run the tests
-#   bash 7-google-tts-stt-v7.sh --keys FILE     install, and take the keys out of FILE
-#   bash 7-google-tts-stt-v7.sh --quiet         install, no tests
-#   bash 7-google-tts-stt-v7.sh --verify        check this file is whole, change nothing
+#   bash 8-google-tts-stt-v8.sh                 install, then run the tests
+#   bash 8-google-tts-stt-v8.sh --keys FILE     install, and take the keys out of FILE
+#   bash 8-google-tts-stt-v8.sh --quiet         install, no tests
+#   bash 8-google-tts-stt-v8.sh --verify        check this file is whole, change nothing
 #
 # --keys takes ANY file: a note, a .env, a JSON export, a CSV, a markdown
 # table. It finds the keys, keeps the account names where they are there, and
@@ -40,8 +40,8 @@
 
 set -u
 
-GTT_VERSION="v7"
-GTT_FILE="7-google-tts-stt-v7.sh"
+GTT_VERSION="v8"
+GTT_FILE="8-google-tts-stt-v8.sh"
 GTT_REPO="markoboskoauroville/GOOGLE_TTS_STT"
 
 # --- the platform layer, and nothing below this block knows the platform ---
@@ -229,7 +229,7 @@ THE THING THAT MATTERS
     counts down to it.
 """
 
-import base64, json, os, re, subprocess, sys, tempfile, threading, time
+import base64, json, os, re, select, socket, subprocess, sys, tempfile, threading, time
 import urllib.error, urllib.request, wave
 from datetime import datetime, timedelta, timezone
 
@@ -239,7 +239,7 @@ try:
 except Exception:
     PACIFIC = timezone(timedelta(hours=-8))
 
-VERSION = 7
+VERSION = 8
 PORT = int(os.environ.get("GTTS_PORT", "7311"))
 KEYFILE = os.environ.get("GEMINI_KEYS", os.path.expanduser("~/.gemini_keys"))
 HOME = os.path.expanduser("~/.google_tts_stt")
@@ -885,6 +885,13 @@ MONEY_STRONG = re.compile(r"credit|balance|depleted|insufficient|billing|"
                           r"payment|prepayment|e0300|zero_credits", re.I)
 
 
+WHY = {"working": "valid, and it did real work",
+       "busy": "throttled right now, which says nothing about the key",
+       "no credit": "the account is alive and has no money in it",
+       "refused": "revoked, mistyped, or not a Gemini key",
+       "unknown": "no answer about the key itself, try again"}
+
+
 def verdict_for(code, body):
     """The provider's answer, in one word. A pure function, so it can be tested
     without a key and without a network."""
@@ -1016,11 +1023,7 @@ def test_all_keys():
                               {"contents": [{"parts": [{"text": "hi"}]}]}, key, timeout=60)
         ms = int((time.time() - t0) * 1000)
         v = verdict_for(code, body if isinstance(body, str) else "")
-        why = {"working": "",
-               "busy": "throttled right now, this says nothing about the key",
-               "no credit": "the account is alive and has no money in it",
-               "refused": "revoked, mistyped, or not a Gemini key",
-               "unknown": "no answer about the key, try again"}[v]
+        why = WHY[v]
         if v == "working":
             spend(label, "gemini-3.1-flash-lite")
         elif v == "no credit":
@@ -1043,6 +1046,50 @@ def test_all_keys():
     order = {"working": 0, "busy": 1, "no credit": 2, "unknown": 3, "refused": 4}
     rows.sort(key=lambda r: (order.get(r["verdict"], 9), r["label"]))
     return rows
+
+
+def test_one_key(label):
+    """Test a single account. The Key Tester puts test on every row, because
+    the question is usually about one account and retesting twenty to answer it
+    spends nineteen requests for nothing."""
+    for l, key in load_ring():
+        if l != label:
+            continue
+        t0 = time.time()
+        code, body = post("gemini-3.1-flash-lite", "generateContent",
+                          {"contents": [{"parts": [{"text": "hi"}]}]}, key, timeout=60)
+        v = verdict_for(code, body if isinstance(body, str) else "")
+        if v == "working":
+            spend(label, "gemini-3.1-flash-lite")
+        return {"ok": True, "label": label, "masked": mask(key), "verdict": v,
+                "why": WHY[v], "ms": int((time.time() - t0) * 1000), "code": code}
+    return {"ok": False, "error": "no account called %r" % label}
+
+
+def models_for(label):
+    """What this account can reach. GET /models answers 200 for an account with
+    zero credit, so this says nothing about money — it is the catalogue, and it
+    is worth seeing when a model name stops working."""
+    for l, key in load_ring():
+        if l != label:
+            continue
+        req = urllib.request.Request(
+            "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000",
+            headers={"x-goog-api-key": key})
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r:
+                d = json.loads(r.read().decode())
+        except urllib.error.HTTPError as e:
+            return {"ok": False, "error": "the account answered %d" % e.code}
+        except Exception as ex:
+            return {"ok": False, "error": str(ex)[:120]}
+        names = [m["name"].replace("models/", "") for m in d.get("models", [])]
+        return {"ok": True, "label": label, "count": len(names),
+                "tts": [n for n in names if "tts" in n],
+                "image": [n for n in names if "image" in n or "banana" in n],
+                "text": [n for n in names if "flash" in n or "pro" in n or "gemma" in n][:14],
+                "all": names}
+    return {"ok": False, "error": "no account called %r" % label}
 
 
 def budget():
@@ -1134,99 +1181,139 @@ def run_tests():
 
 # --------------------------------------------------------------------- web
 
+# The page. Built on the AGY tokens at the top of maha_transcribe.html, which
+# are the same ones ma-reader-web uses, so moving between the apps is moving
+# between tabs of one thing rather than between two products. Monospace
+# throughout, one centred unit on a dark ground, pill tabs, amber for the one
+# lit thing. The key rows are Key_Tester's item_key.xml: a card per account,
+# the status as a glyph and a word, and the actions on the row they act on.
 PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Google TTS and STT</title><style>
-:root{--bg:#0B0D10;--panel:#141A21;--line:#23303D;--ink:#F2DDB4;--mute:#8A9099;--key:#F59E0B;--bad:#EF4444;--ok:#22C55E}
+:root{
+ --bg:#0b0d10; --surface:#0d1117; --surface-2:#141a21; --line:#23303d;
+ --amber:#f59e0b; --amber-hi:#fbbf24; --amber-lo:#b45309;
+ --prose:#f2ddb4; --dim:#8a7a5c;
+ --red:#ef4444; --green:#22c55e; --coral:#d97757; --grey:#6b655c;
+ --mono:ui-monospace,"JetBrains Mono","Cascadia Mono","SF Mono",Menlo,Consolas,monospace;
+}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 -apple-system,"Helvetica Neue",Inter,sans-serif;font-variant-numeric:tabular-nums}
-.wrap{max-width:720px;margin:0 auto;padding:20px 16px 80px}
-h1{font-size:15px;font-weight:500;color:var(--mute);margin:0 0 16px}
-h1 b{color:var(--key);font-weight:500}
-nav{display:flex;gap:2px;border-bottom:1px solid var(--line);margin-bottom:22px}
-nav button{flex:1;background:none;border:0;border-bottom:2px solid transparent;color:var(--mute);font:inherit;padding:11px 4px;cursor:pointer}
-nav button.on{color:var(--ink);border-bottom-color:var(--key)}
-section{display:none}section.on{display:block}
-textarea,input,select{width:100%;background:var(--panel);border:1px solid var(--line);color:var(--ink);font:inherit;padding:11px;border-radius:6px}
-textarea{min-height:150px;resize:vertical}
-label{display:block;color:var(--mute);font-size:13px;margin:14px 0 5px}
-.row{display:flex;gap:10px}.row>*{flex:1}
-button.go{width:100%;margin-top:16px;background:var(--key);color:#12181c;border:0;padding:13px;border-radius:6px;font:inherit;font-weight:600;cursor:pointer}
-button.go:disabled{opacity:.5}
-.out{margin-top:18px;padding:14px;background:var(--panel);border-radius:6px;white-space:pre-wrap;min-height:52px}
+*:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+html,body{margin:0;background:var(--bg);color:var(--prose);font-family:var(--mono);min-height:100vh}
+body{display:flex;justify-content:center;align-items:flex-start;
+ padding:calc(14px + env(safe-area-inset-top)) 8px calc(14px + env(safe-area-inset-bottom))}
+.unit{width:100%;max-width:640px;background:var(--surface);border:1px solid var(--line);
+ border-radius:10px;padding:14px}
+header{margin-bottom:8px;display:flex;justify-content:space-between;align-items:flex-start}
+h1{font-size:18px;letter-spacing:.12em;margin:0;font-weight:700}
+h1 span{color:var(--amber)}
+.tagline{font-size:11px;color:var(--dim);letter-spacing:.06em;margin-top:2px}
+.ver{font-size:11px;color:var(--dim);letter-spacing:.06em}
+.tabs{display:flex;gap:3px;margin-bottom:10px}
+.tab-btn{flex:1 0 auto;background:var(--surface-2);border:1px solid var(--line);color:var(--dim);
+ font-family:var(--mono);font-size:11px;letter-spacing:.03em;padding:15px 6px;border-radius:999px;
+ cursor:pointer;white-space:nowrap}
+.tab-btn.active{color:var(--bg);background:var(--amber);border-color:var(--amber);font-weight:700}
+.tab{display:none}.tab.active{display:block}
+label{display:block;color:var(--dim);font-size:11px;letter-spacing:.06em;margin:14px 0 5px}
+textarea,input,select{width:100%;background:var(--surface-2);border:1px solid var(--line);
+ color:var(--prose);font-family:var(--mono);font-size:13px;padding:11px;border-radius:8px}
+textarea{min-height:150px;resize:vertical;line-height:1.5}
+.row{display:flex;gap:8px}.row>*{flex:1}
+button.go{width:100%;margin-top:14px;background:var(--amber);color:var(--bg);border:0;padding:14px;
+ border-radius:999px;font-family:var(--mono);font-size:12px;font-weight:700;letter-spacing:.08em;cursor:pointer}
+button.go:active{transform:scale(.985)}
+button.go.ghost{background:var(--surface-2);color:var(--prose);border:1px solid var(--line);font-weight:400}
+button.go.danger{background:var(--surface-2);color:var(--red);border:1px solid var(--line);font-weight:400}
+button.go:disabled{opacity:.4}
+.out{margin-top:14px;padding:12px;background:var(--surface-2);border:1px solid var(--line);
+ border-radius:8px;white-space:pre-wrap;font-size:12px;line-height:1.55;min-height:46px}
 .idle{opacity:.38;pointer-events:none}
 audio{width:100%;margin-top:12px}
-table{width:100%;border-collapse:collapse;font-size:14px}
-td,th{text-align:left;padding:8px 6px;border-bottom:1px solid var(--line)}
-th{color:var(--mute);font-weight:500}
-.working{color:var(--ok)}
-.busy{color:var(--key)}
-.nocredit{color:var(--key)}
-.unknown{color:var(--mute)}
-.refused{color:var(--bad)}
-button.go.dim{background:var(--panel);color:var(--mute);border:1px solid var(--line)}
-button.go.dim:disabled{opacity:.45}
-button.go.arm{background:var(--bad);color:#fff;border:0}
-.row button.go{margin-top:10px}
-.big{font-size:30px;font-weight:300;margin:2px 0}
-.note{color:var(--mute);font-size:13px;margin:4px 0 18px}
-.bar{height:5px;background:var(--line);border-radius:3px;overflow:hidden;margin-top:5px}
-.bar i{display:block;height:100%;background:var(--key)}
-</style></head><body><div class="wrap">
-<h1>Google TTS and STT &nbsp;<b>v1</b></h1>
-<nav>
-<button class="on" onclick="tab(0)">Speak</button>
-<button onclick="tab(1)">Listen</button>
-<button onclick="tab(2)">Keys</button>
-</nav>
+.note{font-size:11px;color:var(--dim);line-height:1.6;margin:6px 0 0}
+.big{font-size:30px;font-weight:300;letter-spacing:-.01em;margin:2px 0;color:var(--prose)}
+.bar{height:4px;background:var(--line);border-radius:3px;overflow:hidden;margin-top:5px}
+.bar i{display:block;height:100%;background:var(--amber)}
+table{width:100%;border-collapse:collapse;font-size:12px}
+td,th{text-align:left;padding:7px 5px;border-bottom:1px solid var(--line)}
+th{color:var(--dim);font-weight:400;letter-spacing:.06em}
+/* a card per account, from Key_Tester item_key.xml */
+.kcard{background:var(--surface-2);border:1px solid var(--line);border-radius:10px;
+ padding:12px;margin-bottom:9px}
+.khead{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.klabel{color:var(--coral);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kstatus{font-size:12px;font-weight:700;white-space:nowrap}
+.kkey{color:var(--prose);font-size:12px;margin-top:8px}
+.kwhy{color:var(--dim);font-size:11px;margin-top:3px;line-height:1.5}
+.kdetail{margin-top:9px;padding:9px;background:var(--surface);border:1px solid var(--line);
+ border-radius:6px;color:var(--green);font-size:11px;white-space:pre-wrap;line-height:1.5}
+.kacts{display:flex;gap:6px;margin-top:11px}
+.kacts button{flex:1;background:var(--surface);border:1px solid var(--line);color:var(--prose);
+ font-family:var(--mono);font-size:11px;padding:10px 4px;border-radius:7px;cursor:pointer}
+.kacts button.gold{color:var(--amber)}
+.kacts button.red{color:var(--red)}
+.kacts button:disabled{opacity:.4}
+.working{color:var(--green)}
+.busy{color:var(--amber)}
+.nocredit{color:var(--amber-hi)}
+.refused{color:var(--red)}
+.unknown{color:var(--grey)}
+.untested{color:var(--grey)}
+</style></head><body><div class="unit">
+<header>
+<div><h1>GOOGLE <span>TTS</span> AND <span>STT</span></h1>
+<div class="tagline">speak &middot; listen &middot; one ring</div></div>
+<div class="ver">v%%VERSION%%</div>
+</header>
+<div class="tabs">
+<button class="tab-btn active" onclick="tab(0)">SPEAK</button>
+<button class="tab-btn" onclick="tab(1)">LISTEN</button>
+<button class="tab-btn" onclick="tab(2)">KEYS</button>
+</div>
 
-<section class="on">
+<section class="tab active">
 <textarea id="text" placeholder="Say warmly and slowly: the arm is always yours. The permission is mine.
 
-Direction goes in the text itself, in plain English. For two speakers, tick the box and write NAME: line."></textarea>
+The direction goes in the text itself, in plain English. For two speakers, pick a second voice and write NAME: line."></textarea>
 <div class="row">
-<div><label>Voice</label><select id="v1"></select></div>
-<div><label>Second voice</label><select id="v2"><option value="">none, one speaker</option></select></div>
+<div><label>VOICE</label><select id="v1"></select></div>
+<div><label>SECOND VOICE</label><select id="v2"><option value="">none, one speaker</option></select></div>
 </div>
 <div class="row">
-<div><label>First speaker name</label><input id="na" value="VIVEKA"></div>
-<div><label>Second speaker name</label><input id="nb" value="MANAN"></div>
+<div><label>FIRST SPEAKER</label><input id="na" value="VIVEKA"></div>
+<div><label>SECOND SPEAKER</label><input id="nb" value="MANAN"></div>
 </div>
-<button class="go" id="sgo" onclick="doSpeak()">Speak</button>
+<button class="go" id="sgo" onclick="doSpeak()">SPEAK</button>
 <div class="out idle" id="sout">nothing spoken yet</div>
 <audio id="player" class="idle" controls></audio>
 </section>
 
-<section>
-<label>Audio file</label>
+<section class="tab">
+<label>AUDIO FILE</label>
 <input type="file" id="file" accept="audio/*">
-<div class="row">
-<div><label>Language hint</label><input id="lang" placeholder="Croatian, English, leave blank to let it decide"></div>
-</div>
-<button class="go" id="lgo" onclick="doListen()">Transcribe</button>
+<label>LANGUAGE HINT</label>
+<input id="lang" placeholder="Croatian, English, or leave it to decide">
+<button class="go" id="lgo" onclick="doListen()">TRANSCRIBE</button>
 <div class="out idle" id="lout">nothing transcribed yet</div>
 </section>
 
-<section>
+<section class="tab">
 <div id="bud" class="idle">reading the ledger…</div>
-
-<label>Add accounts from a file</label>
+<label>ADD ACCOUNTS FROM A FILE</label>
 <input type="file" id="kf" onchange="doImport()">
-<div class="note" id="knote">Any file. A note, a .env, a JSON export, a CSV, a
-markdown table. It finds the keys, takes the account names where they are
-there, and adds only the ones the ring does not already have.</div>
+<div class="note">Any file. A note, a .env, a JSON export, a CSV, a markdown
+table. It finds the keys, takes the account names where they are there, and
+adds only the ones the ring does not already hold.</div>
 <div class="out idle" id="kimp">nothing imported this session</div>
-
-<button class="go" onclick="testKeys()">Test every account</button>
-<div id="keys" class="out idle">no account tested this session</div>
 <div class="row">
-<button class="go dim" id="del" onclick="deleteRefused()" disabled>Delete the refused ones</button>
-<button class="go dim" id="undel" onclick="putBack()" disabled>Put back</button>
+<button class="go ghost" onclick="testKeys()">TEST ALL</button>
+<button class="go danger" id="del" onclick="deleteRefused()" disabled>DELETE REFUSED</button>
 </div>
-<div class="note">Refused means revoked, mistyped, or not a Gemini key. A busy
-account is never deleted: throttled says nothing about the key. Nothing is
-destroyed either way — deleted accounts move to a file and Put back returns
-them.</div>
+<button class="go ghost" id="undel" onclick="putBack()" disabled>PUT BACK</button>
+<div id="keys" class="note">no account tested this session. Every row has its
+own test and delete, so one account can be answered without spending the other
+twenty.</div>
 <div id="dep" class="note idle">checking what is installed…</div>
 </section>
 </div>
@@ -1234,90 +1321,308 @@ them.</div>
 const V=%%VOICES%%;
 V.forEach(v=>{v1.add(new Option(v,v));v2.add(new Option(v,v))});
 v1.value="Charon";
+// The header a cross-site request cannot set. Its value does not matter, its
+// presence does.
+const H={'X-Gtt-Local':'1'};
+const api=(u,o={})=>fetch(u,Object.assign({},o,{headers:Object.assign({},H,o.headers||{})}));
+const GLYPH={working:'\\u25cf',busy:'\\u25d0','no credit':'\\uff04',refused:'\\u2717',
+             unknown:'?',untested:'\\u25cb',testing:'\\u2026'};
+function cls(v){return v.replace(' ','')}
+function tab(i){document.querySelectorAll('.tab-btn').forEach((b,j)=>b.classList.toggle('active',i==j));
+ document.querySelectorAll('.tab').forEach((s,j)=>s.classList.toggle('active',i==j));
+ if(i==2){loadBudget();loadHealth();checkGrave();}}
 window.addEventListener('load',loadBudget);
-function tab(i){document.querySelectorAll('nav button').forEach((b,j)=>b.classList.toggle('on',i==j));
- document.querySelectorAll('section').forEach((s,j)=>s.classList.toggle('on',i==j));if(i==2){loadBudget();loadHealth();checkGrave();}}
+
 async function doSpeak(){
- sgo.disabled=true;sout.textContent='generating, about half the length of the audio…';
- const r=await(await fetch('/api/speak',{method:'POST',headers:{'Content-Type':'application/json'},
+ sgo.disabled=true;sout.classList.remove('idle');
+ sout.textContent='generating, about half the length of the audio…';
+ const r=await(await api('/api/speak',{method:'POST',headers:{'Content-Type':'application/json'},
   body:JSON.stringify({text:text.value,voice:v1.value,voice2:v2.value,na:na.value,nb:nb.value})})).json();
  sgo.disabled=false;
- sout.classList.remove('idle');
- if(r.ok){sout.textContent=r.seconds+'s of audio, '+r.model+' on key ['+r.key+']'+(r.log.length?'\\n'+r.log.join('\\n'):'');
+ if(r.ok){sout.textContent=r.seconds+'s of audio, '+r.model+' on ['+r.key+']'+(r.log&&r.log.length?'\\n'+r.log.join('\\n'):'');
   player.src='/out/'+r.file;player.classList.remove('idle');}
- else sout.textContent='no: '+r.error+'\\n'+(r.log||[]).join('\\n');}
+ else sout.textContent='no: '+r.error+'\\n'+((r.log||[]).join('\\n'));}
+
 async function doListen(){
- if(!file.files[0]){lout.textContent='pick a file first';return;}
- lgo.disabled=true;lout.textContent='listening…';
+ if(!file.files[0]){lout.classList.remove('idle');lout.textContent='pick a file first';return;}
+ lgo.disabled=true;lout.classList.remove('idle');lout.textContent='listening…';
  const fd=new FormData();fd.append('audio',file.files[0]);fd.append('lang',lang.value);
- const r=await(await fetch('/api/listen',{method:'POST',body:fd})).json();
- lgo.disabled=false;lout.classList.remove('idle');
- lout.textContent=r.ok?r.text+'\\n\\n— '+r.seconds+'s heard, '+r.model+' on ['+r.key+']':'no: '+r.error;}
-async function loadBudget(){
- const b=await(await fetch('/api/budget')).json();
- const h=Math.floor(b.reset_in/3600),m=Math.floor(b.reset_in%3600/60);
- let s='<div class="big">'+b.speak_hours_real+' h</div><div class="note">of speech left today at a normal take length, '
-  +b.speak_hours_max+' h if every call is run to its eight minute ceiling. '
-  +b.keys_live+' live keys. Resets in '+h+'h'+m+'m at midnight Pacific.</div>';
- s+='<div class="note">Used so far today: '+b.audio_out+'s made, '+b.audio_in+'s transcribed.</div><table>'
-  +'<tr><th>model</th><th>for</th><th>left today</th></tr>';
- b.models.forEach(m=>{const pct=m.total?100*m.left/m.total:0;
-  s+='<tr><td>'+m.model+(m.measured?'':' *')+'</td><td>'+m.use+'</td><td>'+m.left+' / '+m.total
-   +'<div class="bar"><i style="width:'+pct+'%"></i></div></td></tr>';});
- s+='</table><div class="note">* daily limit never actually reached, so this row is a guess of '+%%ASSUMED%%+' a key.</div>';
- bud.innerHTML=s;bud.classList.remove('idle');}
+ const r=await(await api('/api/listen',{method:'POST',body:fd})).json();
+ lgo.disabled=false;
+ lout.textContent=r.ok?r.text+'\\n\\n\\u2014 '+r.seconds+'s heard, '+r.model+' on ['+r.key+']':'no: '+r.error;}
+
 async function doImport(){
  if(!kf.files[0])return;
- kimp.classList.remove('idle');kimp.textContent='reading '+kf.files[0].name+'…';
+ kimp.classList.remove('idle');kimp.textContent='reading '+kf.files[0].name+'\\u2026';
  const fd=new FormData();fd.append('keyfile',kf.files[0]);
- const r=await(await fetch('/api/import',{method:'POST',body:fd})).json();
+ const r=await(await api('/api/import',{method:'POST',body:fd})).json();
  if(!r.ok){kimp.textContent='no: '+r.error;return;}
  let s=r.found+' key'+(r.found==1?'':'s')+' found in '+r.source+'\\n';
  s+=r.added.length+' added, '+r.duplicates.length+' already in the ring\\n';
  r.added.forEach(a=>{s+='\\n  + '+a.label+'   '+a.masked});
  r.duplicates.forEach(a=>{s+='\\n  = '+(a.label||'already here')+'   '+a.masked});
- if(r.maybes.length)s+='\\n\\nnot a format I know, left alone: '+r.maybes.join(', ');
+ if(r.maybes.length)s+='\\n\\nnot a shape I know, left alone: '+r.maybes.join(', ');
  s+='\\n\\nthe ring now holds '+r.ring;
- kimp.textContent=s;kf.value='';loadBudget();}
-async function loadHealth(){
- const h=await(await fetch('/api/health')).json();
- const y=b=>b?'yes':'no';
- dep.textContent='python '+h.python+' · flask '+y(h.flask)+' · waitress '+y(h.waitress)
-  +' · ffmpeg '+y(h.ffmpeg)+' · ring '+h.keys+' accounts at '+h.keyfile;
- dep.classList.remove('idle');}
-let REFUSED=[];
+ kimp.textContent=s;kf.value='';loadBudget();testKeys();}
+
+let ROWS=[];
+function card(r){
+ const v=r.verdict||'untested';
+ return '<div class="kcard" id="k_'+encodeURIComponent(r.label)+'">'
+  +'<div class="khead"><div class="klabel">'+esc(r.label)+'</div>'
+  +'<div class="kstatus '+cls(v)+'">'+GLYPH[v]+' '+v+'</div></div>'
+  +'<div class="kkey">'+r.masked+(r.ms?'   <span class="kwhy">'+r.ms+' ms</span>':'')+'</div>'
+  +(r.why?'<div class="kwhy">'+esc(r.why)+'</div>':'')
+  +'<div class="kdetail" style="display:none"></div>'
+  +'<div class="kacts">'
+  +'<button onclick="one(\\''+esc(r.label)+'\\')">test</button>'
+  +'<button class="gold" onclick="models(\\''+esc(r.label)+'\\')">models</button>'
+  +'<button class="red" onclick="drop(\\''+esc(r.label)+'\\')">delete</button>'
+  +'</div></div>';}
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function draw(){
+ keys.innerHTML=ROWS.length?ROWS.map(card).join(''):'<div class="note">the ring is empty. Pick a key file above.</div>';
+ const n=ROWS.filter(r=>r.verdict=='refused').length;
+ del.disabled=n==0;del.textContent=n?('DELETE '+n+' REFUSED'):'DELETE REFUSED';}
 async function testKeys(){
- keys.classList.remove('idle');keys.textContent='asking every account to do one small piece of work…';
- const rows=await(await fetch('/api/keys')).json();
- let s='<table><tr><th>account</th><th>key</th><th>answer</th><th>ms</th></tr>';
- REFUSED=[];
- rows.forEach(r=>{
-  if(r.verdict=='refused')REFUSED.push(r.label);
-  s+='<tr><td>'+r.label+'</td><td>'+r.masked+'</td><td class="'+r.verdict.replace(' ','')+'">'
-   +r.verdict+(r.why?'<div class="note" style="margin:0">'+r.why+'</div>':'')+'</td><td>'+r.ms+'</td></tr>';});
- keys.innerHTML=s+'</table>';
- del.disabled=REFUSED.length==0;
- del.textContent=REFUSED.length?('Delete '+REFUSED.length+' refused account'+(REFUSED.length==1?'':'s')):'Delete the refused ones';
- del.className='go '+(REFUSED.length?'arm':'dim');
- loadBudget();checkGrave();}
-async function checkGrave(){
- const g=await(await fetch('/api/removed')).json();
- undel.disabled=g.count==0;
- undel.textContent=g.count?('Put back '+g.count):'Put back';}
+ const r0=await(await api('/api/ring')).json();
+ ROWS=r0.keys.map(k=>({label:k.label,masked:k.masked,verdict:'testing',why:''}));draw();
+ ROWS=await(await api('/api/keys')).json();draw();loadBudget();checkGrave();}
+async function one(label){
+ const i=ROWS.findIndex(r=>r.label==label);
+ if(i>=0){ROWS[i].verdict='testing';ROWS[i].why='';draw();}
+ const r=await(await api('/api/key/'+encodeURIComponent(label)+'/test',{method:'POST'})).json();
+ if(r.ok&&i>=0){ROWS[i]=Object.assign(ROWS[i],r);draw();}
+ loadBudget();}
+async function models(label){
+ const r=await(await api('/api/key/'+encodeURIComponent(label)+'/models')).json();
+ const box=document.querySelector('#k_'+CSS.escape(encodeURIComponent(label))+' .kdetail');
+ if(!box)return;
+ box.style.display='block';
+ box.textContent=r.ok?(r.count+' models reachable\\ntts:   '+(r.tts.join(', ')||'none')
+   +'\\nimage: '+(r.image.join(', ')||'none')+'\\ntext:  '+r.text.join(', ')):('no: '+r.error);}
+async function drop(label){
+ const r=await(await api('/api/delete',{method:'POST',headers:{'Content-Type':'application/json'},
+  body:JSON.stringify({labels:[label]})})).json();
+ ROWS=ROWS.filter(x=>x.label!=label);draw();loadBudget();checkGrave();}
 async function deleteRefused(){
- if(!REFUSED.length)return;
- const r=await(await fetch('/api/delete',{method:'POST',headers:{'Content-Type':'application/json'},
-  body:JSON.stringify({labels:REFUSED})})).json();
- let s='removed '+r.removed.length+', the ring now holds '+r.ring;
- r.removed.forEach(a=>{s+='\\n  - '+a.label+'   '+a.masked});
- s+='\\n\\nnothing was destroyed. Put back returns them.';
- keys.textContent=s;REFUSED=[];del.disabled=true;del.className='go dim';
- del.textContent='Delete the refused ones';loadBudget();checkGrave();}
+ const labels=ROWS.filter(r=>r.verdict=='refused').map(r=>r.label);
+ if(!labels.length)return;
+ await api('/api/delete',{method:'POST',headers:{'Content-Type':'application/json'},
+  body:JSON.stringify({labels:labels})});
+ ROWS=ROWS.filter(r=>r.verdict!='refused');draw();loadBudget();checkGrave();}
 async function putBack(){
- const r=await(await fetch('/api/restore',{method:'POST'})).json();
- keys.textContent='put back '+r.restored.length+', the ring now holds '+r.ring;
- loadBudget();checkGrave();}
+ const r=await(await api('/api/restore',{method:'POST'})).json();
+ testKeys();}
+async function checkGrave(){
+ const g=await(await api('/api/removed')).json();
+ undel.disabled=g.count==0;
+ undel.textContent=g.count?('PUT BACK '+g.count):'PUT BACK';}
+async function loadHealth(){
+ const h=await(await api('/api/health')).json();
+ const y=b=>b?'yes':'no';
+ dep.textContent='python '+h.python+' \\u00b7 flask '+y(h.flask)+' \\u00b7 waitress '+y(h.waitress)
+  +' \\u00b7 ffmpeg '+y(h.ffmpeg)+' \\u00b7 ring '+h.keys+' at '+h.keyfile;
+ dep.classList.remove('idle');}
+async function loadBudget(){
+ const b=await(await api('/api/budget')).json();
+ const h=Math.floor(b.reset_in/3600),m=Math.floor(b.reset_in%3600/60);
+ let s='<div class="big">'+b.speak_hours_real+' h</div><div class="note">of speech left today at a '
+  +'normal take length, '+b.speak_hours_max+' h if every call is run to its eight minute ceiling. '
+  +b.keys_live+' accounts. Resets in '+h+'h'+m+'m, at midnight Pacific.</div>'
+  +'<div class="note">Today: '+b.audio_out+'s made, '+b.audio_in+'s transcribed.</div><table>'
+  +'<tr><th>model</th><th>for</th><th>left today</th></tr>';
+ b.models.forEach(m=>{const pct=m.total?100*m.left/m.total:0;
+  s+='<tr><td>'+m.model+(m.measured?'':' *')+'</td><td>'+m.use+'</td><td>'+m.left+' / '+m.total
+   +'<div class="bar"><i style="width:'+pct+'%"></i></div></td></tr>';});
+ s+='</table><div class="note">* the daily limit for that one has never been reached, so the row is a guess of '+%%ASSUMED%%+' an account.</div>';
+ bud.innerHTML=s;bud.classList.remove('idle');}
 </script></body></html>"""
+
+
+# =========================================================================
+# THE SERVER, ported from MAHA_TRANSCRIBE_TERMUX_TERMINAL
+#
+# Not written fresh. modules/keyring.md's own house rule: read the file that
+# already solves a problem before writing a new one, and port it with its
+# comments intact. Three files came across - portpick.py, localguard.py and
+# console.py - condensed here because this app ships as one file, with the
+# reasons kept, because the reasons are what was paid for.
+# =========================================================================
+
+MAX_PORT_TRIES = 16          # 7311 through 7326, then the OS decides
+GUARD_HEADER = "X-Gtt-Local"
+LOCAL_HOSTS = {"127.0.0.1", "localhost", "[::1]", "::1"}
+SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+OPEN_ENDPOINTS = {"index", "out", "favicon_ico"}
+_SELF_MARKER = b"GOOGLE TTS AND STT"
+
+
+def port_is_free(host, port, timeout=0.4):
+    """Can we actually BIND it? Not "is something listening".
+
+    Asking whether something is listening answers a different question: a
+    socket in TIME_WAIT, or bound to another interface, or owned by another
+    user, all answer "nothing is listening" and then refuse the bind. The only
+    honest test is to try.
+
+    NOT SO_REUSEADDR. With it this test succeeds on a port another process is
+    already serving from, and then the server fails behind us.
+    """
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.settimeout(timeout)
+        s.bind((host, port))
+        return True
+    except OSError:
+        return False
+    finally:
+        s.close()
+
+
+def whats_there(port, timeout=1.0):
+    """A guess at what holds the port, for the message only. Never raises: a
+    diagnosis is not worth failing a startup over."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(timeout)
+        try:
+            s.connect(("127.0.0.1", int(port)))
+            s.sendall(b"GET / HTTP/1.0\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
+            body = b""
+            while len(body) < 4000:
+                chunk = s.recv(2048)
+                if not chunk:
+                    break
+                body += chunk
+        finally:
+            s.close()
+        if not body:
+            return None
+        return "self" if _SELF_MARKER in body else "something"
+    except Exception:
+        return None
+
+
+def pick_port(host, preferred, tries=MAX_PORT_TRIES):
+    """Find a port. ALWAYS returns one.
+
+    An app that refuses to open because something else is on its port is an app
+    that is not there when it is wanted - and the thing on the port is very
+    often this app, still running from before, so the launcher would be
+    blocking on its own success case.
+
+    What it must NOT do is pick a port and let the rest of the app carry on
+    believing the old one. Two things depend on the real number: the browser,
+    which opens nothing if it is wrong, and the guard, which checks the Host
+    header against it and would refuse every request from the page it just
+    opened.
+    """
+    preferred = int(preferred or 7311)
+    if port_is_free(host, preferred):
+        return preferred, None
+    holder = whats_there(preferred)
+    if holder == "self":
+        why = "port %d is already used by another copy of this app" % preferred
+    elif holder == "something":
+        why = "port %d is used by another program" % preferred
+    else:
+        why = "port %d could not be opened" % preferred
+    for p in range(preferred + 1, preferred + tries):
+        if port_is_free(host, p):
+            return p, "%s, so this one is on %d" % (why, p)
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.bind((host, 0))
+    p = s.getsockname()[1]
+    s.close()
+    return p, "%s, and so were the fifteen after it, so the system chose %d" % (why, p)
+
+
+def guard(port):
+    """No passwords, and still not open to the internet.
+
+    Any site you have open in another tab can make your browser send requests
+    to 127.0.0.1 in the background. This app deletes keys and spends quota, so
+    that matters, and binding to loopback does not stop it: Host reflects where
+    the browser actually connected, which is correctly 127.0.0.1 even for a
+    cross-site fetch from a page you merely have open.
+
+        1  HOST        must be a loopback name. Catches DNS REBINDING, where a
+                       site points a hostname at 127.0.0.1 after the fact, so
+                       the connection really is local and the browser still
+                       sends that site's own Host header.
+        2  ORIGIN      if present it must be this app. A browser attaches
+                       Origin to every cross-site POST.
+        3  OUR HEADER  a header this page always sends and a cross-site
+                       request cannot. A form POST cannot set custom headers at
+                       all, and a fetch that tries triggers a preflight that
+                       never gets an allow.
+
+    A plain page load passes on 1 and 2 alone, because typing the address in
+    yourself sends no Origin and no custom header.
+    """
+    from flask import jsonify, request
+    host = request.headers.get("Host", "")
+    h = host.rsplit(":", 1)[0] if host.count(":") == 1 else host
+    if h.startswith("[") and "]" in h:
+        h = h[:h.index("]") + 1]
+    if h not in LOCAL_HOSTS:
+        return (jsonify({"error": "This app only answers to 127.0.0.1. The address "
+                                  "used to reach it was different, which is what a "
+                                  "DNS-rebinding attack looks like. Open "
+                                  "http://127.0.0.1:%d instead." % port}), 403)
+    origin = request.headers.get("Origin") or ""
+    if not origin:
+        ref = request.headers.get("Referer") or ""
+        if ref:
+            parts = ref.split("/")
+            origin = "/".join(parts[:3]) if len(parts) >= 3 else ""
+    if origin:
+        allowed = {"http://%s:%d" % (x, port) for x in ("127.0.0.1", "localhost", "[::1]")}
+        if origin.rstrip("/") not in allowed:
+            return (jsonify({"error": "That request came from another web page, so it "
+                                      "was refused. Nothing was changed."}), 403)
+    changes = request.method not in SAFE_METHODS
+    is_api = (request.path or "").startswith("/api/")
+    if (changes or is_api) and request.endpoint not in OPEN_ENDPOINTS:
+        if not request.headers.get(GUARD_HEADER):
+            return (jsonify({"error": "That request did not come from this app's own "
+                                      "page. Nothing was changed."}), 403)
+    return None
+
+
+def quiet_flask():
+    """Werkzeug shouts a red block about development servers. Read as broken it
+    makes every visit feel like an incident, and this binds to loopback only, so
+    the warning's actual concern does not apply."""
+    import logging
+    logging.getLogger("werkzeug").setLevel(logging.ERROR)
+    try:
+        import flask.cli
+        flask.cli.show_server_banner = lambda *a, **k: None
+    except Exception:
+        pass
+    try:
+        import werkzeug.serving as ws
+        ws._log = lambda *a, **k: None
+    except Exception:
+        pass
+
+
+# One line at a time, never a box. A panel built to a fixed inner width
+# truncates whatever does not fit, and on a forty column phone terminal that
+# means most of the key row disappears while still being bound. Plain lines let
+# the terminal wrap the way terminals already know how to.
+LOGO = [
+    " ██████╗ ████████╗████████╗",
+    "██╔════╝ ╚══██╔══╝╚══██╔══╝",
+    "██║  ███╗   ██║      ██║   ",
+    "██║   ██║   ██║      ██║   ",
+    "╚██████╔╝   ██║      ██║   ",
+    " ╚═════╝    ╚═╝      ╚═╝   ",
+]
+AMBER, SAND, SLATE, RED, OFF = ("\033[38;5;214m", "\033[38;5;223m",
+                                "\033[38;5;245m", "\033[38;5;203m", "\033[0m")
 
 
 def open_page(url):
@@ -1325,10 +1630,9 @@ def open_page(url):
     it looks for desktop browsers and desktop environment variables, finds
     none, returns False and says nothing. So the chain below, in this order.
 
-    `am start` prints its failure and STILL EXITS ZERO — asking for a package
+    `am start` prints its failure and STILL EXITS ZERO - asking for a package
     that is not installed writes "Activity not started, unable to resolve
-    Intent" and returns success — so its OUTPUT is read, not its exit code."""
-    import subprocess
+    Intent" and returns success - so its OUTPUT is read, not its exit code."""
     def run(cmd):
         try:
             p = subprocess.run(cmd, capture_output=True, timeout=15)
@@ -1357,12 +1661,23 @@ def open_page(url):
 
 def serve():
     from flask import Flask, request, jsonify, send_from_directory
+
     app = Flask(__name__)
+    live = {"port": PORT}
+
+    @app.before_request
+    def gate():
+        return guard(live["port"])
 
     @app.get("/")
     def index():
         return (PAGE.replace("%%VOICES%%", json.dumps(VOICES))
-                .replace("%%ASSUMED%%", str(RPD_UNKNOWN_ASSUMED)))
+                .replace("%%ASSUMED%%", str(RPD_UNKNOWN_ASSUMED))
+                .replace("%%VERSION%%", str(VERSION)))
+
+    @app.get("/favicon.ico")
+    def favicon_ico():
+        return ("", 204)
 
     @app.get("/out/<path:f>")
     def out(f):
@@ -1414,6 +1729,21 @@ def serve():
     def api_keys():
         return jsonify(test_all_keys())
 
+    @app.get("/api/ring")
+    def api_ring():
+        """The accounts, with no verdicts. Drawn first so the rows exist before
+        the testing starts: nothing appears, nothing disappears, things become
+        active. Twenty rows arriving one at a time is a page that jumps."""
+        return jsonify({"keys": [{"label": l, "masked": mask(k)} for l, k in load_ring()]})
+
+    @app.post("/api/key/<path:label>/test")
+    def api_key_test(label):
+        return jsonify(test_one_key(label))
+
+    @app.get("/api/key/<path:label>/models")
+    def api_key_models(label):
+        return jsonify(models_for(label))
+
     @app.post("/api/delete")
     def api_delete():
         j = request.get_json(force=True) or {}
@@ -1437,27 +1767,45 @@ def serve():
         return jsonify(budget())
 
     os.makedirs(OUTDIR, exist_ok=True)
-    url = "http://127.0.0.1:%d" % PORT
+    quiet_flask()
+
+    # The port ACTUALLY bound, which is not always the one asked for. Set once
+    # and read from here everywhere downstream, so no part of the app can be
+    # left believing the wrong number.
+    port, note = pick_port("127.0.0.1", PORT)
+    live["port"] = port
+    url = "http://127.0.0.1:%d" % port
     ring = load_ring()
+    colour = sys.stdout.isatty()
+
+    def w(s, c):
+        return (c + s + OFF) if colour else s
 
     print("")
-    print("  GOOGLE TTS AND STT v%d" % VERSION)
-    print("  %s" % url)
-    print("  %d account%s in %s" % (len(ring), "" if len(ring) == 1 else "s", KEYFILE))
+    for row in LOGO:
+        print("  " + w(row, AMBER))
+    print("")
+    print("  " + w("Google TTS and STT", SAND) + "   \u00b7   " + w(url, SLATE))
+    print("  " + w("v%d" % VERSION, SLATE) + "   \u00b7   " +
+          w("%d account%s" % (len(ring), "" if len(ring) == 1 else "s"), SLATE))
+    if note:
+        print("  " + w(note, SAND))
     if not ring:
         # An empty ring is not a reason to refuse to start. The picker that
         # fixes it is ON THE PAGE, so refusing to open the page is refusing to
-        # let anybody fix it. v5 exited here and left the browser unreachable.
-        print("  no keys yet — the Keys tab has a file picker, that is where they go")
-    print("  ctrl-c to stop")
+        # let anybody fix it.
+        print("  " + w("no keys yet \u2014 the KEYS tab has a file picker", SAND))
     print("")
 
-    # 127.0.0.1, not 0.0.0.0. This process holds credentials, and the rule is
-    # content binds wide, credentials bind to loopback.
+    threading.Thread(target=lambda: app.run(host="127.0.0.1", port=port, threaded=True,
+                                            debug=False, use_reloader=False),
+                     daemon=True).start()
+
     def kick():
-        time.sleep(1.2)
+        time.sleep(1.0)
         how = open_page(url)
-        print("  browser: %s" % (how or "could not open one, go to %s yourself" % url))
+        if not how:
+            print("  " + w("no way to open a browser from here, go to %s yourself" % url, RED))
     threading.Thread(target=kick, daemon=True).start()
 
     try:
@@ -1466,17 +1814,55 @@ def serve():
     except Exception:
         pass
 
+    # Plain lines and single keys, never a redrawn box. A panel built to a
+    # fixed inner width truncates whatever does not fit, and on a forty column
+    # phone terminal that means most of the key row disappears while still
+    # being bound. DEGRADES HONESTLY: with no terminal there is no key to
+    # press, so it just serves.
+    if not (sys.stdout.isatty() and sys.stdin.isatty()):
+        print("  serving. ctrl-c to stop.")
+        try:
+            while True:
+                time.sleep(3600)
+        except KeyboardInterrupt:
+            pass
+        return
+
+    print("  " + w("q", AMBER) + " quit   " + w("o", AMBER) + " open page   " +
+          w("u", AMBER) + " update   " + w("k", AMBER) + " keys   " +
+          w("t", AMBER) + " test")
+    print("")
+    import termios, tty
+    fd = sys.stdin.fileno()
+    old = termios.tcgetattr(fd)
     try:
-        from waitress import serve as waitress_serve
-        # Waitress, not the Flask development server: single threaded, no
-        # request limits, no backpressure, and it says so itself. Waitress is
-        # pure python and thread pooled with no compiled extensions, which is
-        # why it works in Termux where gunicorn does not.
-        waitress_serve(app, host="127.0.0.1", port=PORT, threads=8)
-    except ImportError:
-        print("  waitress is missing, using the development server")
-        app.run(host="127.0.0.1", port=PORT, threaded=True)
+        tty.setcbreak(fd)
+        while True:
+            r, _, _ = select.select([fd], [], [], 0.5)
+            if not r:
+                continue
+            ch = os.read(fd, 1).decode(errors="ignore").lower()
+            if ch in ("q", "\x03", "\x04"):
+                print("  stopped.")
+                break
+            if ch == "o":
+                print("  " + ("opening the browser" if open_page(url)
+                              else w("no way to open a browser from here", RED)))
+            if ch == "u":
+                print("  running gtt-update")
+                subprocess.call(["gtt-update"])
+            if ch == "k":
+                for l, k in load_ring():
+                    print("  %-24s %s" % (l, mask(k)))
+                if not load_ring():
+                    print("  the ring is empty")
+            if ch == "t":
+                for row in test_all_keys():
+                    print("  %-24s %-10s %s" % (row["label"], row["verdict"], row["why"]))
+    except KeyboardInterrupt:
+        pass
     finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
         try:
             subprocess.Popen(["termux-wake-unlock"], stdout=subprocess.DEVNULL,
                              stderr=subprocess.DEVNULL)

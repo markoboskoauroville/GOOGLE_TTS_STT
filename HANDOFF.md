@@ -20,6 +20,43 @@ own word:
 
 The v6 numbers still work and are no longer drawn.
 
+## What was ported, and from where
+
+Nothing here was written fresh where a file already solved it.
+
+| from | what came across |
+|---|---|
+| `MAHA_TRANSCRIBE_TERMUX_TERMINAL/portpick.py` | the port is never a reason not to start, and the port actually bound is the one everything downstream uses |
+| `MAHA_TRANSCRIBE_TERMUX_TERMINAL/localguard.py` | Host, Origin and a header only this page can send |
+| `MAHA_TRANSCRIBE_TERMUX_TERMINAL/console.py` | plain lines and single keys, never a redrawn box; `quiet_flask`; degrade honestly with no terminal |
+| `maha_transcribe.html` / ma-reader-web | the AGY tokens, the centred unit, the pill tabs, monospace throughout |
+| `Key_Tester/item_key.xml` | a card per account with its actions on the row they act on |
+| `Key_Tester` HANDOFF | the status glyphs and the five words |
+| `MAHA_TRANSCRIBE_STREAMLIT/ttt/keyring.py` | the ring rules: never drop a key for its shape, a key file is a working note |
+
+## The guard
+
+This app deletes keys and spends quota, so binding to loopback is not enough: a
+page you have open in another tab can make your browser send requests to
+127.0.0.1, and Host reflects where the browser actually connected, which is
+correctly 127.0.0.1 even for a cross-site fetch.
+
+    1  HOST        must be a loopback name. Catches DNS rebinding.
+    2  ORIGIN      if present, must be this app.
+    3  X-Gtt-Local a header this page always sends and a cross-site request
+                   cannot set at all.
+
+The page itself loads on 1 and 2 alone, because typing the address in yourself
+sends no Origin and no custom header. Everything under `/api/` needs all three.
+
+## The port
+
+Preferred, then the next fifteen, then whatever the system hands out. There is
+no path through it that ends in "could not start" — and the thing on 7311 is
+very often this app, still running from before. The number it actually bound is
+what the browser opens and what the guard checks; telling the guard the wrong
+one would refuse every request from the page it just opened.
+
 ## Opening the browser
 
 `webbrowser.open` DOES NOT WORK on Termux: it looks for desktop browsers and
@@ -72,10 +109,27 @@ second. `retryDelay`, `Retry-After`, `RetryInfo`, `QuotaFailure`, *per minute*,
 Only then the money words, and only the unambiguous ones: credit, balance,
 depleted, insufficient, billing, payment, prepayment.
 
+## The Keys tab
+
+A card per account, from `Key_Tester/item_key.xml`: the label, the status as a
+glyph and a word, the masked key, why, and three actions **on the row they act
+on** — test, models, delete. The question is usually about one account, and
+retesting twenty to answer it spends nineteen requests for nothing.
+
+    \u25cf working     \u25d0 busy     \uff04 no credit     \u2717 refused     ? unknown
+
+TEST ALL draws every row first with `\u2026 testing` and fills the verdicts in.
+Nothing appears and nothing disappears; twenty rows arriving one at a time is a
+page that jumps.
+
+`models` lists what that account can reach. It answers 200 with zero credit, so
+it says nothing about money — it is the catalogue, and it is worth seeing when a
+model name stops working.
+
 ## Deleting, and undoing it
 
-Test every account, then Delete removes the **refused** ones and only those. A
-busy account is never deleted and neither is an unknown one.
+DELETE REFUSED removes the refused ones and only those. A busy account is never
+deleted and neither is an unknown one. Every row also has its own delete.
 
 Nothing is destroyed. Deleted entries move to `~/.google_tts_stt/removed_keys`,
 chmod 600, and **Put back** returns them through the same merge the picker uses,

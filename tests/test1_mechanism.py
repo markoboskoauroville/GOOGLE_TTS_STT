@@ -195,6 +195,30 @@ check("a spent-out key drops off the list", [l for l, _, _ in order], ["svaram"]
 # ------------------------------------------------------------------ audio
 # 25 tokens a second, measured. The WAV header is written by hand because
 # Gemini returns raw PCM with no header at all.
+# --------------------------------------------------------- the port picker
+# Ported from MAHA_TRANSCRIBE_TERMUX_TERMINAL. An app that refuses to open
+# because something is on its port is an app that is not there when it is
+# wanted, and the thing on the port is very often this app from before.
+import socket as _s
+held = _s.socket()
+held.bind(("127.0.0.1", 0))
+taken = held.getsockname()[1]
+held.listen(1)
+check("a port in use is not free", app.port_is_free("127.0.0.1", taken), False)
+p_, note = app.pick_port("127.0.0.1", taken)
+check("it still returns a port", isinstance(p_, int) and p_ > 0, True)
+check("and not the one that was taken", p_ == taken, False)
+check("and it says why it moved", bool(note), True)
+check("the one it chose is really free", app.port_is_free("127.0.0.1", p_), True)
+held.close()
+free = _s.socket()
+free.bind(("127.0.0.1", 0))
+n_ = free.getsockname()[1]
+free.close()
+p2, note2 = app.pick_port("127.0.0.1", n_)
+check("a free port is returned unchanged", p2, n_)
+check("and says nothing, because nothing happened", note2, None)
+
 p = os.path.join(HOME, "t.wav")
 os.makedirs(app.OUTDIR, exist_ok=True)
 secs = app.pcm_to_wav(p, b"\x00\x01" * 24000)

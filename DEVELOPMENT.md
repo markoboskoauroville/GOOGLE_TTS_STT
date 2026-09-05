@@ -366,3 +366,59 @@ behind, so the new one exited *address already in use* and the check read that
 as the old server having died. It asks the operating system for a free port now.
 Second time in this project a fixed detail in a test has produced a false
 failure, and both times the app was innocent.
+
+---
+
+## 5.9.2026 — v8, the right Maha Transcribe
+
+### I read the wrong repository, and the manifest now says which is which
+
+Baba: *you were referencing my wrong Maha Transcribe Streamlit. When Marko said
+reference Maha Transcribe, you never go to Maha Transcribe Streamlit. You always
+go to Maha Transcribe for Termux and terminal.*
+
+`keyring.md` §9 names `MAHA_TRANSCRIBE_STREAMLIT` as the reference
+implementation, and that is correct — for **provider code**: the HTTP calls, the
+status mapping, the ring. I took it as permission to treat that repository as
+the whole of Maha Transcribe, which sent me to a Streamlit app for the shape of
+a Termux one.
+
+Both files now say so. `START_HERE.md` has a table of the names that have been
+got wrong, because that is the file every chat reads first, and §9 carries the
+boundary in its own paragraph.
+
+### What actually came across from the terminal edition
+
+`portpick.py`, `localguard.py` and `console.py`, condensed into this one file
+with their comments intact, per the house rule about reading the file that
+already solves a problem.
+
+The port picker matters more than it looks: the thing sitting on 7311 is very
+often this app still running from before, so a launcher that refuses to start on
+a busy port is blocking on its own success case. And the port it actually bound
+is what the browser opens and what the guard checks — tell the guard the wrong
+number and it refuses every request from the page it just opened.
+
+The guard matters because this app now deletes keys. Binding to loopback does
+not stop a page you have open in another tab from making your browser POST here:
+Host reflects where the browser actually connected, which is correctly 127.0.0.1
+even for a cross-site fetch. Three checks, and the page itself still loads
+without any of them, because typing an address in sends no Origin.
+
+### The look is ma-reader-web's
+
+The AGY tokens at the top of `maha_transcribe.html` are the same ones the reader
+page uses, so the three apps read as tabs of one thing rather than three
+products. Monospace throughout, one centred unit on a dark ground, pill tabs
+with amber for the active one. The palette I had invented at v1 was close but
+not the same, which is the worst kind of close.
+
+### The Keys tab is Key_Tester's item_key.xml
+
+A card per account, the status as a glyph and a word, and the actions on the row
+they act on: test, models, delete. Baba asked for exactly this and the Android
+app already had it. Testing one account by retesting twenty spends nineteen
+requests to answer a question about one.
+
+TEST ALL draws every row first as `… testing` and then fills the verdicts in,
+because twenty rows arriving one at a time is a page that jumps.
