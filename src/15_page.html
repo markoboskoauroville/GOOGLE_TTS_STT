@@ -67,6 +67,12 @@ th{color:var(--dim);font-weight:400;letter-spacing:.06em}
 .chip{display:inline-block;background:var(--surface-2);border:1px solid var(--line);
  border-radius:999px;padding:9px 13px;margin:0 5px 5px 0;font-size:11px;color:var(--prose);cursor:pointer}
 .chip.on{border-color:var(--amber);color:var(--amber)}
+.kcard.picked{border-color:var(--amber)}
+.kacts button.chosen{color:var(--bg);background:var(--amber);border-color:var(--amber)}
+.idcard{margin-top:9px;padding:10px;background:var(--surface);border:1px solid var(--line);
+ border-radius:8px;font-size:11px;line-height:1.6;color:var(--dim)}
+.idcard b{color:var(--prose);font-weight:400}
+.idcard .src{color:var(--amber)}
 .info{background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:11px;
  display:flex;gap:10px;align-items:center;margin-top:6px}
 .info .n{flex:1;min-width:0}
@@ -109,7 +115,8 @@ th{color:var(--dim);font-weight:400;letter-spacing:.06em}
     <div class="row"><input id="n2" value="MANAN"><select id="s2"></select></div>
     <label>FIND A VOICE</label>
     <input id="vq" placeholder="search by name or timbre">
-    <div id="vfacets" style="margin-top:8px"></div>
+    <button class="go ghost" id="vfoldbtn" style="margin-top:8px">FILTER &#9662;</button>
+    <div id="vfacets" style="margin-top:8px;display:none"></div>
     <div id="vlist" style="max-height:44vh;overflow:auto;margin-top:8px"></div>
   </div>
   <div id="setListen">
@@ -375,8 +382,12 @@ function refreshWho() {
 }
 el("n1").addEventListener("input", refreshWho);
 el("n2").addEventListener("input", refreshWho);
-el("s1").addEventListener("change", function () { SLOT[1].voice = el("s1").value; saveSlots(); refreshWho(); });
-el("s2").addEventListener("change", function () { SLOT[2].voice = el("s2").value; saveSlots(); refreshWho(); });
+el("s1").addEventListener("change", function () {
+  SLOT[1].voice = el("s1").value; saveSlots(); refreshWho(); drawVoices();
+});
+el("s2").addEventListener("change", function () {
+  SLOT[2].voice = el("s2").value; saveSlots(); refreshWho(); drawVoices();
+});
 
 // ------------------------------------------------------- the voice browser
 el("vq").addEventListener("input", drawVoices);
@@ -402,14 +413,22 @@ function drawVoices() {
     return okf && (v.name.toLowerCase().indexOf(q) >= 0 || v.timbre.indexOf(q) >= 0);
   });
   el("vlist").innerHTML = rows.length ? rows.map(function (v) {
-    return '<div class="kcard"><div class="khead"><div class="klabel">' + esc(v.name) +
-      '</div><div class="kwhy">' + esc(v.timbre) + "</div></div>" +
+    // the chosen voices carry a border, so the answer to "which one did I
+    // pick" is on the card and not only in the dropdown above it
+    var picked = (SLOT[1].voice === v.name ? " picked" : "") ||
+                 (SLOT[2].voice === v.name ? " picked" : "");
+    return '<div class="kcard' + picked + '"><div class="khead"><div class="klabel">' +
+      esc(v.name) + '</div><div class="kwhy">' + esc(v.timbre) + "</div></div>" +
       '<div class="kacts">' +
-      '<button data-use="1" data-v="' + esc(v.name) + '">voice 1</button>' +
-      '<button data-use="2" data-v="' + esc(v.name) + '">voice 2</button>' +
+      '<button data-use="1" data-v="' + esc(v.name) + '"' +
+      (SLOT[1].voice === v.name ? ' class="chosen"' : "") + ">voice 1</button>" +
+      '<button data-use="2" data-v="' + esc(v.name) + '"' +
+      (SLOT[2].voice === v.name ? ' class="chosen"' : "") + ">voice 2</button>" +
       '<button class="gold" data-play="' + esc(v.name) + '" data-emo="Neutral">&#9654;</button>' +
       '<button data-star="' + esc(v.name) + '">' +
-      (STAR.indexOf(v.name) >= 0 ? "\u2605" : "\u2606") + "</button></div></div>";
+      (STAR.indexOf(v.name) >= 0 ? "\u2605" : "\u2606") + "</button>" +
+      '<button data-info="' + esc(v.name) + '">i</button>' +
+      '</div><div class="idcard" style="display:none"></div></div>';
   }).join("") : '<div class="note">nothing matches</div>';
 }
 function drawEmotions() {
@@ -439,6 +458,7 @@ document.addEventListener("click", function (ev) {
     el("s" + b.dataset.use).value = b.dataset.v;
     saveSlots();
     refreshWho();
+    drawVoices();          // so the card shows which one was chosen
   } else if (b.dataset.star) {
     var n = b.dataset.star;
     STAR = STAR.indexOf(n) >= 0 ? STAR.filter(function (x) { return x !== n; }) : STAR.concat([n]);
@@ -448,6 +468,8 @@ document.addEventListener("click", function (ev) {
     hear(b.dataset.play || SLOT[1].voice, b.dataset.emo || "Neutral", b);
   } else if (b.dataset.hear) {
     hear(SLOT[b.dataset.hear].voice, "Neutral", b);
+  } else if (b.dataset.info) {
+    showVoice(b.dataset.info, b);
   } else if (b.dataset.insert) {
     insertTag(b.dataset.insert);
   } else if (b.dataset.one) {
@@ -458,6 +480,44 @@ document.addEventListener("click", function (ev) {
     dropKey(b.dataset.drop);
   }
 });
+
+el("vfoldbtn").addEventListener("click", function () {
+  var f = el("vfacets");
+  var open = f.style.display !== "none";
+  f.style.display = open ? "none" : "block";
+  el("vfoldbtn").innerHTML = open ? "FILTER \u25be" : "FILTER \u25b4";
+});
+
+function showVoice(name, btn) {
+  var card = btn.closest(".kcard").querySelector(".idcard");
+  if (card.style.display === "block") { card.style.display = "none"; return; }
+  var done = busy(btn, "");
+  api("/api/voice/" + encodeURIComponent(name), null, "reading up on " + name)
+    .then(function (v) {
+      done();
+      if (!v.ok) { card.textContent = v.error; card.style.display = "block"; return; }
+      var s = "<b>" + esc(v.name) + "</b> &middot; " + esc(v.timbre) + "<br>" +
+              esc(v.published) + "<br><br>";
+      if (v.origin_kind) {
+        s += "<b>" + esc(v.origin_kind) + "</b><br>" + esc(v.origin_note) +
+             '<br><span class="src">' + esc(v.origin_source) + "</span><br><br>";
+      } else {
+        s += "<b>where the name comes from: not established</b><br>" +
+             "Left blank rather than guessed.<br><br>";
+      }
+      s += "preview line: " + esc(v.preview_line) + "<br>";
+      if (v.cached) {
+        s += "measured from the cached preview: " + (v.seconds || 0).toFixed(1) + "s";
+        if (v.words_per_minute) s += ", about " + v.words_per_minute + " words a minute";
+        if (v.mean_db !== null) s += ", mean " + v.mean_db + " dB";
+        if (v.peak_db !== null) s += ", peak " + v.peak_db + " dB";
+      } else {
+        s += "not previewed yet, so there is nothing measured to show";
+      }
+      card.innerHTML = s;
+      card.style.display = "block";
+    }).catch(function () { done(); });
+}
 
 function insertTag(label) {
   var p = el("pace").value && el("pace").value !== "normal" ? ": " + el("pace").value : "";

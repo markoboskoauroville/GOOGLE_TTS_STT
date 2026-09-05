@@ -412,6 +412,31 @@ check("the text so far is what has landed", app.job_text(app.job_read("testjob")
 check("an unfinished job is listed as running",
       [x["state"] for x in app.job_list()], ["running"])
 
+# -------------------------------------------------------- the voice browser
+_mp = open(os.path.join(ROOT, "src", "15_page.html")).read()
+check("the filter folds, so thirty chips are not the first thing on the screen",
+      'id="vfoldbtn"' in _mp and 'id="vfacets" style="margin-top:8px;display:none"' in _mp, True)
+check("a chosen voice marks its card", "kcard.picked" in _mp, True)
+check("and its button", "button.chosen" in _mp, True)
+check("choosing redraws the list, or the mark never appears",
+      _mp.count("drawVoices();          // so the card shows which one was chosen"), 1)
+check("there is an info button on every voice", 'data-info=' in _mp, True)
+
+# the id card keeps three kinds of fact apart: published, measured, identified
+_card = app.voice_card("Zubenelgenubi")
+check("the card knows what Google publishes", _card["timbre"], "casual")
+check("and says that is all Google publishes", "no gender" in _card["published"], True)
+check("it names what the voice is named after", _card["origin_kind"], "star in Libra")
+check("and admits who identified it",
+      _card["origin_source"], "identified here, not by Google")
+check("a voice whose name is not established is left blank, not guessed",
+      app.voice_card("Kore")["origin_kind"], "")
+check("every other voice has one",
+      len([v for v in app.VOICE_TIMBRE if not app.VOICE_ORIGIN.get(v, ("", ""))[0]]), 1)
+check("an unknown voice is refused", app.voice_card("Nobody")["ok"], False)
+check("nothing is measured before there is a preview to measure",
+      app.voice_card("Sulafat")["seconds"], None)
+
 # ---------------------------------------------------------- the stages
 # "I want to see this app being alive nonstop and informing me what it does."
 # The three that take real time each say their own name, in this page and in
@@ -423,7 +448,6 @@ check("it counts the seconds while it waits, because a silent minute reads as a 
 check("and it reports up to the tab around it", "postMessage({ gtt: 'act'" in _tp, True)
 check("an empty transcript is a failure, not a silent success",
       "returned no words" in _tp, True)
-_mp = open(os.path.join(ROOT, "src", "15_page.html")).read()
 check("the main page has an activity line that is always there",
       'id="act"' in _mp and "ready" in _mp, True)
 check("and it listens for what the iframe reports", 'ev.data.gtt !== "act"' in _mp, True)

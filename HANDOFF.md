@@ -92,6 +92,28 @@ each with a one-character glyph so a direction can be found by shape before it
 is read, and nothing is an emoji because a monospace grid of them is a mess of
 different widths. Search across label, group and the direction itself.
 
+**The filter folds.** Thirty timbre chips are five rows before anything else,
+so they are behind FILTER and open when asked. The search box stays out, because
+typing a name is faster than finding a chip.
+
+**A chosen voice shows.** The card carries a border and the button it was chosen
+with fills in, so the answer to "which one did I pick" is on the card and not
+only in the dropdown above it. Choosing from either place redraws the list.
+
+**Every voice has an `i`.** It opens an ID card that keeps three kinds of fact
+apart, because they are not equally trustworthy:
+
+| | |
+|---|---|
+| **published** | the one adjective, and a note that Google publishes nothing else |
+| **measured** | length, words a minute, mean and peak dB — read off the cached preview with ffmpeg, and absent until there is one |
+| **identified** | what the name refers to, labelled *identified here, not by Google* |
+
+The names are astronomical: moons of the outer planets and named stars.
+`Zubenelgenubi` is hard to hold in the head; *alpha Librae, the southern claw,
+from when Libra was part of Scorpio* is not. **Kore is left blank**, because I
+could not establish it, and a blank is a fact while a guess is not.
+
 **The voice facets are only what Google publishes.** `Roles.kt`'s lesson kept: a
 blank is a fact, a guess is not. Hume gives four tags and Sample Player still
 had to read the *names* to find the role. Google gives one adjective and nothing

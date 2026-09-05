@@ -1,16 +1,16 @@
 # DELIVERY RECORD
 
-**v19, 5.9.2026.** What was measured, and what was not tested.
+**v20, 5.9.2026.** What was measured, and what was not tested.
 
 ## The gate
 
-    build is fresh          19-google-tts-stt-v19.sh matches src/
+    build is fresh          20-google-tts-stt-v20.sh matches src/
     installer is whole      --verify passes
-    TEST 1   mechanism      163 checks   0 failed
+    TEST 1   mechanism      176 checks   0 failed
     TEST 1b  the parser      73 checks   0 failed
     TEST 3   ugly cases      59 checks   0 failed
     TEST 4   upgrade         58 checks   0 failed
-                            353 checks   0 failed
+                            366 checks   0 failed
 
 TEST 2 was run against a fabricated ring at v8: everything structural passed —
 the guard refuses an api call with no header, refuses another page's Origin,
@@ -150,6 +150,17 @@ in them.
 ffmpeg call the optimizer uses and the job store is exercised directly, but no
 recording longer than 79 seconds has been through the whole path, and no job has
 survived an actual process death.
+
+## What the ID card claims, and on whose authority
+
+The origins are **mine, not Google's**, and the card says so on every one. They
+are the ordinary astronomical identifications — Charon is Pluto's large moon,
+Alnilam is the middle star of Orion's belt, Sulafat is gamma Lyrae — and they
+are stated because a name you can place is a name you can remember. If any is
+wrong it is wrong in the card and nowhere else: nothing depends on it.
+
+Kore is blank. I could not establish what it refers to and did not want to fill
+the field with something plausible.
 
 ## NOT TESTED
 

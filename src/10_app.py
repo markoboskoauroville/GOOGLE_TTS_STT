@@ -41,7 +41,7 @@ try:
 except Exception:
     PACIFIC = timezone(timedelta(hours=-8))
 
-VERSION = 19
+VERSION = 20
 PORT = int(os.environ.get("GTTS_PORT", "7311"))
 KEYFILE = os.environ.get("GEMINI_KEYS", os.path.expanduser("~/.gemini_keys"))
 HOME = os.path.expanduser("~/.google_tts_stt")
@@ -720,6 +720,94 @@ def preview(voice, label):
     spend(r["label"], r["model"], n=0, audio_out=secs)
     return {"ok": True, "file": h + ".wav", "cached": False, "seconds": round(secs, 1),
             "key": r["label"], "line": preview_line(voice, label)}
+
+
+# Where the names come from.
+#
+# Google publishes the timbre and NOTHING else — no gender, no age, no accent,
+# and no note about the names. But the pattern is not in doubt: every one of the
+# thirty is an astronomical name, mostly moons of the outer planets and named
+# stars. That is worth showing, because "Zubenelgenubi" is hard to hold in the
+# head and "the southern claw, alpha Librae" is not.
+#
+# THE IDENTIFICATION IS MINE, NOT GOOGLE'S, and the page says so. Where it is
+# not certain the field is left empty rather than filled with something
+# plausible: a blank is a fact, a guess is not — Roles.kt, and it applies here
+# for the same reason it applied to gender.
+VOICE_ORIGIN = {
+    "Zephyr":        ("the west wind", "Greek, the god of the west wind. The odd one out: not a moon or a star."),
+    "Puck":          ("moon of Uranus", "A small inner moon, named for the sprite in A Midsummer Night's Dream."),
+    "Charon":        ("moon of Pluto", "The largest, half Pluto's own width. They orbit a point outside them both."),
+    "Kore":          ("", ""),
+    "Fenrir":        ("moon of Saturn", "One of the far, retrograde outer group. Named for the wolf in Norse myth."),
+    "Leda":          ("moon of Jupiter", "About twenty kilometres across, found in 1974."),
+    "Orus":          ("asteroid", "A Jupiter trojan, one of the rocks the Lucy mission goes to."),
+    "Aoede":         ("moon of Jupiter", "Named for one of the three original Muses, the muse of song."),
+    "Callirrhoe":    ("moon of Jupiter", "An outer, retrograde moon."),
+    "Autonoe":       ("moon of Jupiter", "Another of the retrograde outer group."),
+    "Enceladus":     ("moon of Saturn", "The one with the water jets at its south pole, and an ocean under the ice."),
+    "Iapetus":       ("moon of Saturn", "Two-toned: one hemisphere dark as coal, the other bright as snow."),
+    "Umbriel":       ("moon of Uranus", "The darkest of the five large ones, named from Pope's Rape of the Lock."),
+    "Algieba":       ("star in Leo", "Gamma Leonis, a golden double star in the lion's mane."),
+    "Despina":       ("moon of Neptune", "An inner moon, found by Voyager 2 in 1989."),
+    "Erinome":       ("moon of Jupiter", "Small, outer, retrograde."),
+    "Algenib":       ("star in Pegasus", "Gamma Pegasi, a corner of the Great Square."),
+    "Rasalgethi":    ("star in Hercules", "Alpha Herculis, a red giant so large it would swallow Mars."),
+    "Laomedeia":     ("moon of Neptune", "One of the small outer moons found in 2002."),
+    "Achernar":      ("star in Eridanus", "Alpha Eridani, at the end of the river. It spins so fast it is visibly flattened."),
+    "Alnilam":       ("star in Orion", "Epsilon Orionis, the middle star of the belt."),
+    "Schedar":       ("star in Cassiopeia", "Alpha Cassiopeiae, the queen's breast, in the W."),
+    "Gacrux":        ("star in Crux", "Gamma Crucis, the top of the Southern Cross and the nearest red giant to us."),
+    "Pulcherrima":   ("star in Bootes", "Epsilon Bootis, also called Izar. Its name means 'most beautiful'."),
+    "Achird":        ("star in Cassiopeia", "Eta Cassiopeiae, a nearby double, one of them much like our sun."),
+    "Zubenelgenubi": ("star in Libra", "Alpha Librae. The name means 'the southern claw', from when Libra was part of Scorpio."),
+    "Vindemiatrix":  ("star in Virgo", "Epsilon Virginis. The name means 'the grape-gatherer': it rose before dawn at harvest."),
+    "Sadachbia":     ("star in Aquarius", "Gamma Aquarii, 'the lucky star of the tents'."),
+    "Sadaltager":    ("star in Aquarius", "Alpha Aquarii, 'the luck of the merchant'."),
+    "Sulafat":       ("star in Lyra", "Gamma Lyrae, one corner of the little parallelogram below Vega."),
+}
+
+
+def voice_card(name):
+    """Everything that can honestly be said about one voice.
+
+    Three kinds of fact and they are kept apart: what GOOGLE publishes (one
+    adjective), what was MEASURED here from the cached preview, and what the
+    name refers to, which is an identification made in this repository and
+    labelled as such."""
+    if name not in VOICE_TIMBRE:
+        return {"ok": False, "error": "no voice called %r" % name}
+    kind, note = VOICE_ORIGIN.get(name, ("", ""))
+    card = {"ok": True, "name": name, "timbre": VOICE_TIMBRE[name],
+            "published": "Google publishes one word for each voice and nothing "
+                         "else: no gender, no age, no accent.",
+            "origin_kind": kind, "origin_note": note,
+            "origin_source": "identified here, not by Google" if kind else "",
+            "preview_line": preview_line(name, "Neutral"),
+            "cached": False, "seconds": None, "mean_db": None, "peak_db": None}
+    h, _ = preview_key(name, "Neutral")
+    p = preview_path(h)
+    if p:
+        card["cached"] = True
+        card["file"] = os.path.basename(p)
+        card["seconds"] = probe_duration(p)
+        ff = ffmpeg_bin()
+        if ff:
+            try:
+                r = subprocess.run([ff, "-hide_banner", "-nostats", "-i", p,
+                                    "-af", "volumedetect", "-f", "null", "-"],
+                                   capture_output=True, text=True, timeout=60)
+                for line in (r.stderr or "").splitlines():
+                    if "mean_volume:" in line:
+                        card["mean_db"] = float(line.split("mean_volume:")[1].split("dB")[0])
+                    if "max_volume:" in line:
+                        card["peak_db"] = float(line.split("max_volume:")[1].split("dB")[0])
+            except Exception:
+                pass
+        if card["seconds"]:
+            words = len(card["preview_line"].split())
+            card["words_per_minute"] = round(words / card["seconds"] * 60)
+    return card
 
 
 def cache_state():
@@ -1918,6 +2006,10 @@ def serve():
     @app.get("/api/cache")
     def api_cache():
         return jsonify(cache_state())
+
+    @app.get("/api/voice/<name>")
+    def api_voice(name):
+        return jsonify(voice_card(name))
 
     @app.get("/api/voices")
     def api_voices():

@@ -926,3 +926,44 @@ What is not tested is a real five hour recording. The pieces are: the cut
 planner on synthetic pauses, `silence_points` on a 79 second file with real
 silences spliced into it, and the job store written and read directly. Nothing
 has run for an hour, and no job has yet survived an actual process death.
+
+---
+
+## 5.9.2026 — v20, the voice browser answers back
+
+Three things off one screenshot, and the middle one was a real fault.
+
+**The filter folds.** Thirty timbre chips are five rows of the screen before the
+voices themselves, which is the browser burying the thing it is for. Behind a
+FILTER button now. The search box stays out: typing "warm" is faster than
+finding the chip that says it.
+
+**A chosen voice showed nothing.** Tapping *voice 1* set the slot, saved it and
+updated the dropdown — and did not redraw the list, so the card looked exactly
+as it had a moment before. One missing `drawVoices()`. The card now carries a
+border and the button fills in, so the answer to "which did I pick" is where the
+picking happened.
+
+Found by driving the page: pick, then read the class names back. The dropdown
+said Leda and the card said nothing, in the same run.
+
+**And every voice has an `i`.** He asked for an ID card with everything that can
+be fetched, and the honest answer is that Google publishes one adjective. So the
+card keeps three kinds of fact apart rather than blending them into one
+confident paragraph:
+
+- what Google publishes, and a line saying that is all of it
+- what was MEASURED here from the cached preview, with ffmpeg: length, words a
+  minute, mean and peak dB. Absent until there is a preview, rather than filled
+  with a default.
+- what the name refers to, labelled **identified here, not by Google**.
+
+The names are astronomical, all thirty of them, mostly moons of the outer
+planets and named stars. That is worth showing because it makes them holdable:
+`Zubenelgenubi` is a wall of letters, and *alpha Librae, the southern claw, from
+when Libra was part of Scorpio* is a thing you can keep.
+
+**Kore is blank.** I could not establish what it refers to, and Roles.kt's rule
+applies here for the same reason it applied to gender: a blank is a fact and a
+guess is not. It would have been easy to write something plausible about
+Persephone. The field says the name is not established instead.
