@@ -607,3 +607,44 @@ take came back at a quarter the amplitude of the others — but that was one
 direction for one call. Per-line parentheticals are the standard screenplay
 shape and models have seen a great deal of it, which is the reason for the
 choice, not evidence for it. First thing to listen for once there are keys.
+
+---
+
+## 5.9.2026 — v13, the preview cache
+
+Baba: *do you have test caching? Once the user tests the voice, you cache it,
+and next time you play it from the cache. Voice is always the same because we
+are testing the predefined text.*
+
+He is describing the property that makes it possible: a preview is a **fixed**
+request. Same voice, same direction, same sentence, and Sample Player's
+`previewLine` already made that sentence short on purpose. So the second press
+is a question that has already been answered, and answering it again costs one
+of the ten requests that account has that day.
+
+**The key is the sha of the prompt that was actually sent**, not of the label.
+A label is a name for a direction, and if that direction's words are ever edited
+the audio must not still come back under the old key. Hashing what was sent
+makes the invalidation automatic rather than something somebody has to remember.
+It never expires, because the same input gives the same output and there is
+nothing for time to change.
+
+**47 previews ship inside the installer**, which is the other half of the ask —
+the FIRST press should not cost anything either. The installer is 1.2 MB now,
+about twice MAHA_COMMUTE's, and it buys back roughly five accounts' worth of
+daily budget on the first afternoon. It never overwrites: a file already in the
+cache has already been paid for and is byte-identical anyway.
+
+The button says `cached` or `new`. A preview that quietly spends a request looks
+free, and the person finds out at the daily wall.
+
+### The ring hit that wall today, seeding this
+
+36 of 38 directions on the default voice and 11 of 29 other voices got made, and
+then every account answered 429 with `PerDay, limit 10`. Whispered and
+Advertising are among the two that did not, which is why the first spot check
+looked like a cache miss and was not. The remaining twenty fill themselves in
+the first time they are pressed, or tomorrow.
+
+That is the argument for the cache stated by the thing itself: testing every
+emotion once, on eighteen accounts, is most of a day's budget.

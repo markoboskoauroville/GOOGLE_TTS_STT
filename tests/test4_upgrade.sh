@@ -209,6 +209,14 @@ HOME="$EMPTY" "$PY" "$EMPTY/.google_tts_stt/app.py" test > "$EMPTY/t.txt" 2>&1
 grep -q "ring is empty" "$EMPTY/t.txt" \
   && ok "gtt test on an empty ring says why, once" \
   || bad "gtt test on an empty ring says why, once"
+# THE SHIPPED PREVIEW CACHE. An install with no keys at all must still be able
+# to play a preview, because the first press should not cost anything either.
+P="$EMPTY/.google_tts_stt/previews"
+N=$(ls "$P" 2>/dev/null | wc -l | tr -d " ")
+[ "$N" -gt 30 ] && ok "previews ship with the installer ($N of them)" \
+  || bad "previews ship with the installer ($N of them)"
+grep -qi "no keys yet" "$EMPTY/out.txt" \
+  && ok "and that install had no keys at all" || bad "and that install had no keys at all"
 rm -rf "$EMPTY"
 
 # INSTALLING MUST NOT SPEND A KEY. This is the sharpest one on the list: the
@@ -266,6 +274,15 @@ if [ -f "$T" ]; then
     && ok "the renderers guard against the elements that were removed" \
     || bad "the renderers guard against the elements that were removed"
 fi
+
+# and they must survive an upgrade, because they were paid for once
+[ -d "$APPHOME/previews" ] && ok "the cache survives an upgrade" || bad "the cache survives an upgrade"
+BEFORE=$(ls "$APPHOME/previews" 2>/dev/null | wc -l | tr -d " ")
+printf 'not audio' > "$APPHOME/previews/mine.mp3"
+bash "$INSTALLER" --quiet >/dev/null 2>&1
+[ -f "$APPHOME/previews/mine.mp3" ] \
+  && ok "and a file already in it is never overwritten" \
+  || bad "and a file already in it is never overwritten"
 
 # the generated installer must match its sources
 if $PY "$ROOT/tools/build_installer.py" --check >/dev/null 2>&1; then

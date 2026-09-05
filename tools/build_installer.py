@@ -23,6 +23,7 @@ import engine_patches
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HEAD = os.path.join(ROOT, "src", "00_head.sh")
 TRANSCRIBE = os.path.join(ROOT, "src", "30_transcribe.html")
+SEED = os.path.join(ROOT, "src", "seed")
 APP = os.path.join(ROOT, "src", "10_app.py")
 TAIL = os.path.join(ROOT, "src", "20_tail.sh")
 
@@ -36,6 +37,30 @@ def version():
 
 def sha(path):
     return hashlib.sha256(open(path, "rb").read()).hexdigest()[:12]
+
+
+def seed_block():
+    """The preview cache, shipped in the installer.
+
+    A preview is the same request every time, so the FIRST press does not have
+    to cost anything either. These were generated once, here, and they land in
+    the cache at install: every direction on the default voice and every voice
+    on Neutral, as far as the daily wall allowed on the day they were made.
+    Anything missing fills itself in the first time it is pressed.
+
+    base64 in a heredoc, because the installer is one file and one file cannot
+    carry raw bytes. About a megabyte, which buys sixty-odd requests that would
+    otherwise come out of a ten-a-day budget."""
+    import base64 as b64
+    if not os.path.isdir(SEED):
+        return ""
+    out = []
+    for f in sorted(os.listdir(SEED)):
+        if not f.endswith(".mp3"):
+            continue
+        data = b64.b64encode(open(os.path.join(SEED, f), "rb").read()).decode()
+        out.append("%s %s" % (f, data))
+    return "\n".join(out)
 
 
 def engine_swapped():
@@ -59,6 +84,8 @@ def build():
         "#",
         "#   src/00_head.sh   %s" % sha(HEAD),
         "#   src/30_transcribe.html   %s   vendored, engine swapped at build" % sha(TRANSCRIBE),
+        "#   src/seed/                 %d cached previews" % len(
+            [f for f in os.listdir(SEED) if f.endswith(".mp3")] if os.path.isdir(SEED) else []),
         "#   src/10_app.py    %s" % sha(APP),
         "#   src/20_tail.sh   %s" % sha(TAIL),
     ])
@@ -77,6 +104,8 @@ def build():
     if "GTT_TRANSCRIBE_EOF" in page:
         sys.exit("the vendored page contains the heredoc marker")
     tail = tail.replace("@@TRANSCRIBE_HTML@@", page)
+    seed = seed_block()
+    tail = tail.replace("@@SEED_CACHE@@", seed)
     return name, head + app + tail
 
 

@@ -12,6 +12,26 @@ mv -f "$APPHOME/transcribe.html.new" "$APPHOME/transcribe.html"
 chmod 644 "$APPHOME/transcribe.html"
 done_
 
+# ------------------------------------------------------------ preview cache
+# A preview is the same request every time, so the first press does not have to
+# cost anything either. These were made once and shipped; the rest fill in as
+# they are pressed. Never overwrites: a preview already on disk is already paid
+# for and is identical anyway.
+step "preview cache"
+mkdir -p "$APPHOME/previews"
+SEEDED=0
+while IFS=' ' read -r NAME DATA; do
+  [ -z "$NAME" ] && continue
+  [ -f "$APPHOME/previews/$NAME" ] && continue
+  printf '%s' "$DATA" | base64 -d > "$APPHOME/previews/$NAME.new" 2>/dev/null \
+    && mv -f "$APPHOME/previews/$NAME.new" "$APPHOME/previews/$NAME" \
+    && SEEDED=$((SEEDED+1)) || rm -f "$APPHOME/previews/$NAME.new"
+done <<'GTT_SEED_EOF'
+@@SEED_CACHE@@
+GTT_SEED_EOF
+HAVE=$(ls "$APPHOME/previews" 2>/dev/null | wc -l | tr -d ' ')
+printf "%s ready, %s new\n" "$HAVE" "$SEEDED"
+
 # ---------------------------------------------------------------- commands
 # RENAME, NEVER TRUNCATE. gtt-update runs this installer, so while these lines
 # execute the old gtt-update is still open and bash is still reading it. A

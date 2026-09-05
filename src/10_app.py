@@ -31,7 +31,7 @@ THE THING THAT MATTERS
     counts down to it.
 """
 
-import base64, json, os, re, select, socket, subprocess, sys, tempfile, threading, time
+import base64, hashlib, json, os, re, select, socket, subprocess, sys, tempfile, threading, time
 import urllib.error, urllib.request, wave
 from datetime import datetime, timedelta, timezone
 
@@ -41,12 +41,13 @@ try:
 except Exception:
     PACIFIC = timezone(timedelta(hours=-8))
 
-VERSION = 12
+VERSION = 13
 PORT = int(os.environ.get("GTTS_PORT", "7311"))
 KEYFILE = os.environ.get("GEMINI_KEYS", os.path.expanduser("~/.gemini_keys"))
 HOME = os.path.expanduser("~/.google_tts_stt")
 LEDGER = os.path.join(HOME, "ledger.json")
 GRAVEYARD = os.path.join(HOME, "removed_keys")
+PREVIEWS = os.path.join(HOME, "previews")
 OUTDIR = os.path.join(HOME, "out")
 BASE = "https://generativelanguage.googleapis.com/v1beta/models/%s:%s"
 
@@ -642,6 +643,93 @@ EMOTIONS = [
 
 PACES = [("normal", ""), ("slow", "slowly"), ("fast", "quickly"),
          ("very slow", "very slowly, with space between the phrases")]
+
+
+# ------------------------------------------------------------ THE CACHE
+#
+# A preview is the same request every time: the same voice, the same direction,
+# the same fixed sentence. So the second person to press play on "angry" is
+# asking a question that has already been answered, and answering it again costs
+# one of ten requests that account has for the day.
+#
+# The key is the sha of the exact prompt and voice that were sent. Not of the
+# label — the label is a name for a direction, and if that direction's WORDS are
+# ever edited the audio must not still come back from the old key. Hashing what
+# was actually sent makes the invalidation automatic and impossible to forget.
+#
+# It never expires. The same input gives the same output, so there is nothing
+# for time to change.
+PREVIEW_MODEL = "gemini-2.5-flash-preview-tts"
+
+
+def preview_line(voice, label):
+    """SAMPLE_PLAYER/Emotions.kt: the voice's own name and what it is doing.
+
+    Short on purpose. Auditioning a voice across eight emotions is eight calls,
+    and a long sentence makes that a minute of waiting to hear four seconds of
+    difference. The name is in it so it is obvious which voice you are hearing."""
+    for group, lab, glyph, text, spoken in EMOTIONS:
+        if lab.lower() == (label or "").strip().lower():
+            return "%s %s." % (voice, spoken)
+    return "%s is speaking." % voice
+
+
+def preview_key(voice, label):
+    prompt, _, _ = compile_script("<PREVIEW: %s> %s" % (label, preview_line(voice, label)),
+                                  [{"name": "PREVIEW", "voice": voice}])
+    h = hashlib.sha256(("%s|%s|%s" % (PREVIEW_MODEL, voice, prompt)).encode()).hexdigest()[:20]
+    return h, prompt
+
+
+def preview_path(h):
+    for ext in (".wav", ".mp3"):
+        p = os.path.join(PREVIEWS, h + ext)
+        if os.path.exists(p) and os.path.getsize(p) > 1000:
+            return p
+    return None
+
+
+def preview(voice, label):
+    """Cached, and it says which it was. A preview that quietly spends a request
+    looks free, and the person finds out at the daily wall."""
+    h, prompt = preview_key(voice, label)
+    hit = preview_path(h)
+    if hit:
+        return {"ok": True, "file": os.path.basename(hit), "cached": True,
+                "line": preview_line(voice, label)}
+
+    def payload(_m):
+        return {"contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {"responseModalities": ["AUDIO"], "speechConfig":
+                    {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": voice}}}}}
+
+    r = with_fallback([PREVIEW_MODEL] + [m for m in TTS_CHAIN if m != PREVIEW_MODEL], payload)
+    if not r["ok"]:
+        return r
+    pcm = None
+    for c in r["data"].get("candidates", []):
+        for p in c.get("content", {}).get("parts", []):
+            if "inlineData" in p:
+                pcm = base64.b64decode(p["inlineData"]["data"])
+    if not pcm:
+        return {"ok": False, "error": "no audio in the reply"}
+    os.makedirs(PREVIEWS, exist_ok=True)
+    tmp = os.path.join(PREVIEWS, h + ".wav.new")
+    secs = pcm_to_wav(tmp, pcm)
+    os.replace(tmp, os.path.join(PREVIEWS, h + ".wav"))
+    spend(r["label"], r["model"], n=0, audio_out=secs)
+    return {"ok": True, "file": h + ".wav", "cached": False, "seconds": round(secs, 1),
+            "key": r["label"], "line": preview_line(voice, label)}
+
+
+def cache_state():
+    n, b = 0, 0
+    if os.path.isdir(PREVIEWS):
+        for f in os.listdir(PREVIEWS):
+            if f.endswith((".wav", ".mp3")):
+                n += 1
+                b += os.path.getsize(os.path.join(PREVIEWS, f))
+    return {"count": n, "bytes": b}
 
 
 def emotion_by_label(label):
@@ -1315,6 +1403,7 @@ Put the cursor where you want one and pick below.</div>
 <input id="eq" placeholder="search a direction: angry, whisper, teaching…" oninput="drawEmotions()">
 <div id="egroups" class="kacts" style="flex-wrap:wrap"></div>
 <div id="elist" style="max-height:30vh;overflow:auto;margin-top:8px"></div>
+<div class="note" id="cachenote">counting the cache…</div>
 
 <button class="go" id="sgo" onclick="doSpeak()">SPEAK</button>
 <div class="out idle" id="sout">nothing spoken yet</div>
@@ -1378,7 +1467,7 @@ async function loadCatalogues(){
  egroups.innerHTML='<button onclick="setEFacet(\'\')">all</button>'
   +groups.map(g=>'<button onclick="setEFacet(\''+g+'\')">'+g.toLowerCase()+'</button>').join('');
  ['normal','slow','fast','very slow'].forEach(p=>pace.add(new Option(p,p)));
- drawVoices();drawEmotions();refreshWho();}
+ drawVoices();drawEmotions();refreshWho();loadCache();}
 function refreshWho(){
  const cur=who.value;
  who.innerHTML='';
@@ -1398,8 +1487,31 @@ function drawVoices(){
   +'<div class="klabel">'+v.name+'</div><div class="kwhy">'+v.timbre+'</div></div>'
   +'<div class="kacts">'
   +'<button class="gold" onclick="chooseVoice(\''+v.name+'\')">use for '+(browsing||1)+'</button>'
+  +'<button onclick="hear(\''+v.name+'\',\'Neutral\',this)">\u25b6 hear</button>'
   +'<button onclick="star(\''+v.name+'\')">'+(STAR.includes(v.name)?'\u2605 starred':'\u2606 star')+'</button>'
   +'</div></div>').join(''):'<div class="note">nothing matches</div>';}
+
+// A preview is the same request every time, so the second press is free. The
+// button says which it was: a preview that quietly spends a request looks free
+// and the person finds out at the daily wall.
+let PLAYER=null;
+async function hear(voice,label,btn){
+ const was=btn.textContent;
+ btn.textContent='\u2026';btn.disabled=true;
+ const r=await(await api('/api/preview?voice='+encodeURIComponent(voice)
+   +'&emotion='+encodeURIComponent(label))).json();
+ btn.disabled=false;
+ if(!r.ok){btn.textContent='no';setTimeout(()=>btn.textContent=was,1800);return;}
+ btn.textContent=r.cached?'\u25b6 cached':'\u25b6 new';
+ setTimeout(()=>btn.textContent=was,2500);
+ if(PLAYER)PLAYER.pause();
+ PLAYER=new Audio('/preview/'+r.file);PLAYER.play();
+ loadCache();}
+async function loadCache(){
+ const c=await(await api('/api/cache')).json();
+ cachenote.textContent=c.count+' preview'+(c.count==1?'':'s')+' cached, '
+  +Math.round(c.bytes/1024)+' KB. A preview is the same request every time, so it '
+  +'is asked for once and then never again.';}
 function chooseVoice(name){
  const s=browsing||1;SLOT[s].voice=name;
  const v=VOICES.find(x=>x.name==name)||{timbre:''};
@@ -1412,7 +1524,10 @@ function drawEmotions(){
  elist.innerHTML=rows.length?rows.map(e=>
   '<button class="go ghost" style="text-align:left;margin-top:4px;border-radius:8px"'
   +' onclick="insertTag(\''+e.label+'\')">'+e.glyph+'  '+e.label
-  +'<span class="kwhy">  '+e.text+'</span></button>').join(''):'<div class="note">nothing matches</div>';}
+  +'<span class="kwhy">  '+e.text+'</span></button>'
+  +'<button class="go ghost" style="width:auto;margin:4px 0 0 6px;padding:10px 12px;border-radius:8px"'
+  +' onclick="hear(SLOT[1].voice,\''+e.label+'\',this)">\u25b6</button>').join('')
+  :'<div class="note">nothing matches</div>';}
 function insertTag(label){
  const p=pace.value&&pace.value!='normal'?(': '+pace.value):'';
  const tag='<'+who.value+': '+label+p+'> ';
@@ -1537,7 +1652,7 @@ MAX_PORT_TRIES = 16          # 7311 through 7326, then the OS decides
 GUARD_HEADER = "X-Gtt-Local"
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "[::1]", "::1"}
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
-OPEN_ENDPOINTS = {"index", "out", "favicon_ico", "transcribe_page"}
+OPEN_ENDPOINTS = {"index", "out", "favicon_ico", "transcribe_page", "preview_file"}
 _SELF_MARKER = b"GOOGLE TTS AND STT"
 
 
@@ -1795,6 +1910,22 @@ def serve():
         r["problems"] = problems
         r["prompt"] = prompt
         return jsonify(r)
+
+    @app.get("/preview/<path:f>")
+    def preview_file(f):
+        return send_from_directory(PREVIEWS, f)
+
+    @app.get("/api/preview")
+    def api_preview():
+        v = request.args.get("voice") or "Charon"
+        e = request.args.get("emotion") or "Neutral"
+        if v not in VOICE_TIMBRE:
+            return jsonify({"ok": False, "error": "no voice called %r" % v})
+        return jsonify(preview(v, e))
+
+    @app.get("/api/cache")
+    def api_cache():
+        return jsonify(cache_state())
 
     @app.get("/api/voices")
     def api_voices():

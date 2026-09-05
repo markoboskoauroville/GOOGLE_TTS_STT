@@ -278,6 +278,35 @@ check("thirty voices, each with the one word Google publishes",
 check("and no invented facets: no gender, no age, no accent",
       all(isinstance(v, str) for v in app.VOICE_TIMBRE.values()), True)
 
+# ------------------------------------------------------------- the cache
+# A preview is the same request every time. The key is the sha of what was
+# actually SENT, not of the label, so editing a direction's words invalidates
+# it automatically and nobody has to remember to.
+app.PREVIEWS = os.path.join(HOME, "previews")
+h1, pr1 = app.preview_key("Charon", "Angry")
+h2, _ = app.preview_key("Charon", "Angry")
+check("the same request gives the same key", h1, h2)
+check("a different voice gives a different key", app.preview_key("Puck", "Angry")[0] == h1, False)
+check("a different direction gives a different key",
+      app.preview_key("Charon", "Sad")[0] == h1, False)
+check("the preview line names the voice and what it is doing",
+      app.preview_line("Charon", "Angry"), "Charon is angry.")
+check("an unknown direction still gives a line rather than raising",
+      app.preview_line("Kore", "Sausage"), "Kore is speaking.")
+check("the direction's WORDS are what is hashed, not its label",
+      "angry, clipped and hard on the consonants" in pr1, True)
+
+check("nothing cached yet", app.preview_path(h1), None)
+os.makedirs(app.PREVIEWS, exist_ok=True)
+app.pcm_to_wav(os.path.join(app.PREVIEWS, h1 + ".wav"), b"\x00\x01" * 24000)
+check("once it is on disk it is a hit", bool(app.preview_path(h1)), True)
+r_ = app.preview("Charon", "Angry")
+check("and the second press is served from it", r_.get("cached"), True)
+check("without going anywhere near a key", r_.get("key"), None)
+check("an mp3 counts as a hit too, which is how the shipped ones arrive",
+      bool(app.preview_path(h1)), True)
+check("the cache reports what it holds", app.cache_state()["count"] >= 1, True)
+
 # -------------------------------------------------- the engine anchors
 # The vendored page is only usable if the swap actually applies. A missing
 # anchor at build time is fatal; this catches it a step earlier, in the test

@@ -38,6 +38,29 @@ had to read the *names* to find the role. Google gives one adjective and nothing
 else, so there is no gender facet, no age, no accent — a search box, the timbre,
 and what you have starred.
 
+### Previews are cached, and the first press is already paid for
+
+A preview is the same request every time: the same voice, the same direction,
+the same fixed sentence. So the second person to press play on *angry* is asking
+a question that has already been answered, and answering it again costs one of
+the ten requests that account has for the day.
+
+**47 previews ship inside the installer** — 36 of the 38 directions on the
+default voice and 11 other voices on Neutral — so an install with no keys at all
+can still play them. Anything not shipped is fetched once, the first time it is
+pressed, and never again. The button says which it was, `cached` or `new`,
+because a preview that quietly spends a request looks free and the person finds
+out at the daily wall.
+
+**The key is the sha of the exact prompt that was sent**, not of the label. A
+label is a name for a direction; if that direction's WORDS are ever edited the
+audio must not still come back from the old key. Hashing what was actually sent
+makes the invalidation automatic and impossible to forget. It never expires:
+same input, same output, nothing for time to change.
+
+`~/.google_tts_stt/previews`, and an upgrade never overwrites what is in it,
+because everything in there has already been paid for.
+
 ### The tag
 
 Invented, because Gemini has nothing like Hume's per-utterance `description`.

@@ -1,16 +1,16 @@
 # DELIVERY RECORD
 
-**v12, 5.9.2026.** What was measured, and what was not tested.
+**v13, 5.9.2026.** What was measured, and what was not tested.
 
 ## The gate
 
-    build is fresh          12-google-tts-stt-v12.sh matches src/
+    build is fresh          13-google-tts-stt-v13.sh matches src/
     installer is whole      --verify passes
-    TEST 1   mechanism       97 checks   0 failed
+    TEST 1   mechanism      109 checks   0 failed
     TEST 1b  the parser      73 checks   0 failed
     TEST 3   ugly cases      59 checks   0 failed
-    TEST 4   upgrade         51 checks   0 failed
-                            280 checks   0 failed
+    TEST 4   upgrade         55 checks   0 failed
+                            296 checks   0 failed
 
 TEST 2 was run against a fabricated ring at v8: everything structural passed —
 the guard refuses an api call with no header, refuses another page's Origin,
@@ -25,6 +25,28 @@ keys — it proves that what is on disk survives an install, which never needed 
 working account — so the only thing now standing between a build and a green
 gate is a live ring. Run `bash tests/gate.sh` with new keys in place and test 2
 is the part that will tell you whether the provider side still works.
+
+## The thirty-eight directions, measured 5.9.2026
+
+Every one produced audio. Same sentence, same voice, only the direction
+changing, compiled by the app itself. Eight takes transcribed back: not one
+contains the parenthetical, so the direction is acted on rather than read out.
+
+Against the Neutral take: Impatient 42% faster and 75% louder, Advertising 35%
+faster and 90% louder, Sad 33% slower and 31% quieter, Sleepy 20% slower,
+Whispered 25% quieter with the highest zero-crossing rate in the set. Sharp and
+Bright come out loud and fast, Low and Still quiet and slow.
+
+**Grateful is an outlier and it is reproducible.** 485 RMS against Neutral's
+3212, and two retakes at 934 and 1203. Its direction text begins *quietly
+grateful* and the model takes "quietly" as a level instruction. Unusable in a
+mix without a gain ride. One word in `Emotions.kt` would fix it; that list is
+Baba's, so it is reported rather than edited.
+
+Eight sit close to Neutral on duration and level: Disappointed, Regretful,
+Weary, Calm, Reverent, Anxious, Kind, Afraid. That is not a failure — Afraid has
+the second highest ZCR in the set, so it is doing something these two measures
+cannot see. Pitch and phrasing are where those live and nothing here can hear.
 
 ## Measured, not assumed
 
