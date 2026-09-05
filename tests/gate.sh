@@ -45,11 +45,9 @@ fi
 
 "$PY" "$ROOT/tests/test3_ugly.py" || FAILED="$FAILED test3"
 
-if [ "$OFFLINE" = "0" ]; then
-  bash "$ROOT/tests/test4_upgrade.sh" || FAILED="$FAILED test4"
-else
-  printf "\n${DIM}TEST 4 skipped by --offline${OFF}\n"
-fi
+# Test 4 spends nothing: it fabricates its keys, because what it proves is that
+# what is on disk survives an install, not that a key works.
+bash "$ROOT/tests/test4_upgrade.sh" || FAILED="$FAILED test4"
 
 printf "\n"
 if [ -z "$FAILED" ]; then

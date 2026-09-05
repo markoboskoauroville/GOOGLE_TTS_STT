@@ -22,8 +22,6 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 INSTALLER="$(ls "$ROOT"/[0-9]*-google-tts-stt-v[0-9]*.sh 2>/dev/null | head -1)"
 SANDBOX="$(mktemp -d)"
 PY="$(command -v python3 || command -v python)"
-REALKEYS="${GEMINI_KEYS:-$HOME/.gemini_keys}"
-[ -f "$REALKEYS" ] || REALKEYS="$HOME/.gemini_keys"
 PASS=0; FAIL=0
 
 ok()   { printf "   ok   %s\n" "$1"; PASS=$((PASS+1)); }
@@ -40,8 +38,10 @@ APPHOME="$HOME/.google_tts_stt"
 BIN="$HOME/bin"
 
 # --- 1. the previous version, for real -------------------------------------
-if [ -f "$REALKEYS" ]; then cp "$REALKEYS" "$HOME/.gemini_keys"
-else printf "old label\nAQ.Ab8RN6TESTKEYTESTKEYTESTKEYTEST\n" > "$HOME/.gemini_keys"; fi
+# Fabricated keys, on purpose. This test proves that what is on disk survives
+# an install; it never calls the provider, so a real key here would be spent
+# for nothing.
+printf 'old label\nAQ.Ab8RN6TESTKEYTESTKEYTESTKEYTEST\n\nlegacy one\nAIzaSyTESTTESTTESTTESTTESTTESTTESTTEST\n' > "$HOME/.gemini_keys"
 chmod 600 "$HOME/.gemini_keys"
 KEYSUM_BEFORE="$(cksum < "$HOME/.gemini_keys")"
 
@@ -94,6 +94,8 @@ want "the upgrade exits clean" "$RC" "0"
 
 # --- 5. check everything ---------------------------------------------------
 want "the key file is byte for byte the same" "$(cksum < "$HOME/.gemini_keys")" "$KEYSUM_BEFORE"
+want "a legacy AIza key in the ring is still there after the upgrade" \
+     "$(grep -c '^AIzaSyTESTTESTTESTTESTTESTTESTTESTTEST$' "$HOME/.gemini_keys")" "1"
 want "the key file is still 600" "$(ls -l "$HOME/.gemini_keys" | cut -c1-10)" "-rw-------"
 
 L="$APPHOME/ledger.json"

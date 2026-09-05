@@ -1,12 +1,21 @@
 # HANDOFF
 
-**GOOGLE TTS AND STT v2. The finished state, nothing historical.**
+**GOOGLE TTS AND STT v3. The finished state, nothing historical.**
 
 ## What it is
 
 A Flask server on `localhost:7311` with three tabs, installed by one file and
 started by one word. Speak makes audio from text. Listen makes text from audio.
 Keys tests every account and shows what is left of today.
+
+## Key formats
+
+`AQ.` is what Google issues. `AIza` is legacy, no longer handed out, still read,
+and flagged as old format on the Keys tab and in every import report. Reading is
+not issuing: dropping a format that still authenticates loses working accounts
+without saying so.
+
+One `KEY_RE`, defined above `load_ring`, used by the reader and the picker both.
 
 ## The file picker
 
@@ -45,6 +54,8 @@ is not it.
     ~/.google_tts_stt/ledger.json
     ~/.google_tts_stt/out/      every WAV Speak has made
     ~/.google_tts_stt/imports/  what each import added, with no keys in it
+    $PREFIX/bin                 Termux, already on the PATH
+    ~/bin                       macOS, may need adding to the PATH
     $PREFIX/bin/gtt             Termux
     ~/bin/gtt                   macOS
 

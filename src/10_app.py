@@ -41,7 +41,7 @@ try:
 except Exception:
     PACIFIC = timezone(timedelta(hours=-8))
 
-VERSION = 2
+VERSION = 3
 PORT = int(os.environ.get("GTTS_PORT", "7311"))
 KEYFILE = os.environ.get("GEMINI_KEYS", os.path.expanduser("~/.gemini_keys"))
 HOME = os.path.expanduser("~/.google_tts_stt")
@@ -74,11 +74,16 @@ _lock = threading.Lock()
 
 # ----------------------------------------------------------------- key ring
 
-# Both formats Google has used, in one place. The ring reader and the file
-# picker MUST agree about what a key looks like: an earlier version had the
-# picker accepting a key the reader then refused to read back, so an import
-# reported success and the ring stayed empty.
-KEY_RE = re.compile(r"(AIza[A-Za-z0-9_\-]{20,}|AQ\.[A-Za-z0-9_\-]{20,})")
+# ONE definition of what a key looks like, used by the ring reader and by the
+# file picker. v2 had two, twenty characters apart, and a key that fell between
+# them imported successfully into a ring that then read back empty.
+#
+# AQ. is the format Google issues now. AIza is legacy and no longer handed out,
+# but it is still READ: a ring assembled over two years holds AIza keys that
+# still authenticate, and a filter that drops them loses working accounts in
+# silence, which is worse than failing loudly. Reading is not issuing.
+KEY_RE = re.compile(r"(AQ\.[A-Za-z0-9_\-]{20,}|AIza[A-Za-z0-9_\-]{20,})")
+LEGACY_RE = re.compile(r"^AIza")
 
 
 def load_ring():
@@ -115,7 +120,8 @@ def mask(key):
 # clever labelling idea can never lose a key.
 
 # A filter written for AIza alone finds NOTHING in a file full of AQ. keys,
-# which is how a key once ended up printed in full. KEY_RE is defined once,
+# which is how a key once ended up printed in full — and it happened again on
+# the first command of the session that built this app. KEY_RE is defined once,
 # above load_ring, and both halves use that one.
 
 # Google has changed the format once and will change it again. This catches a
@@ -291,7 +297,8 @@ def import_keys(text, source_name=""):
     for label, key in pairs:
         if key in have:
             dupes.append({"label": next((l for l, k in existing if k == key), ""),
-                          "masked": mask(key)})
+                          "masked": mask(key),
+                          "legacy": bool(LEGACY_RE.match(key))})
             continue
         n += 1
         lab = unique_label(label, taken, n)
@@ -317,7 +324,8 @@ def import_keys(text, source_name=""):
 
     return {"ok": True,
             "found": len(pairs),
-            "added": [{"label": l, "masked": mask(k)} for l, k in added],
+            "added": [{"label": l, "masked": mask(k),
+                       "legacy": bool(LEGACY_RE.match(k))} for l, k in added],
             "duplicates": dupes,
             "maybes": [m[:6] + "\u2026" for m in maybes],
             "ring": len(load_ring()),
@@ -708,9 +716,12 @@ def test_all_keys():
             mark_dead(label, "401")
         else:
             state, why = "?", "HTTP %s" % code
+        if LEGACY_RE.match(key) and state == "live" and not why:
+            why = "old AIza format, still works, Google no longer issues these"
         with lock:
             rows.append({"label": label, "masked": mask(key), "state": state,
-                         "why": why, "ms": ms})
+                         "why": why, "ms": ms,
+                         "legacy": bool(LEGACY_RE.match(key))})
 
     ts = [threading.Thread(target=check, args=(p,)) for p in ring]
     for t in ts:
@@ -922,7 +933,7 @@ async function doImport(){
  if(!r.ok){kimp.textContent='no: '+r.error;return;}
  let s=r.found+' key'+(r.found==1?'':'s')+' found in '+r.source+'\\n';
  s+=r.added.length+' added, '+r.duplicates.length+' already in the ring\\n';
- r.added.forEach(a=>{s+='\\n  + '+a.label+'   '+a.masked});
+ r.added.forEach(a=>{s+='\\n  + '+a.label+'   '+a.masked+(a.legacy?'   old AIza format':'')});
  r.duplicates.forEach(a=>{s+='\\n  = '+(a.label||'already here')+'   '+a.masked});
  if(r.maybes.length)s+='\\n\\nnot a format I know, left alone: '+r.maybes.join(', ');
  s+='\\n\\nthe ring now holds '+r.ring;
@@ -1020,7 +1031,8 @@ def cli_import(path):
     r = import_keys(open(path, "rb").read().decode("utf-8", "replace"), os.path.basename(path))
     print("  %d key(s) found in %s" % (r["found"], r["source"]))
     for a in r["added"]:
-        print("  + %-24s %s" % (a["label"], a["masked"]))
+        print("  + %-24s %s%s" % (a["label"], a["masked"],
+                                  "   old AIza format, still works" if a.get("legacy") else ""))
     for a in r["duplicates"]:
         print("  = %-24s %s   already in the ring" % (a["label"] or "", a["masked"]))
     for m in r["maybes"]:

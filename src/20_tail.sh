@@ -124,7 +124,7 @@ fi
 
 # ---------------------------------------------------------------- the gate
 blank
-KEYCOUNT=$(grep -cE '^(AIza[A-Za-z0-9_-]{20,}|AQ\.[A-Za-z0-9_-]{20,})$' "$KEYS" 2>/dev/null || echo 0)
+KEYCOUNT=$(grep -cE '^(AQ\.[A-Za-z0-9_-]{20,}|AIza[A-Za-z0-9_-]{20,})$' "$KEYS" 2>/dev/null || echo 0)
 if [ "$QUIET" = "1" ]; then
   say "${DIM}tests skipped by --quiet${OFF}"
   RC=0

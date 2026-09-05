@@ -1,19 +1,24 @@
 # DELIVERY RECORD
 
-**v2, 5.9.2026.** What was measured, and what was not tested.
+**v3, 5.9.2026.** What was measured, and what was not tested.
 
 ## The gate
 
-    build is fresh          2-google-tts-stt-v2.sh matches src/
+    build is fresh          3-google-tts-stt-v3.sh matches src/
     installer is whole      --verify passes
     TEST 1   mechanism       34 checks   0 failed
-    TEST 1b  the parser      70 checks   0 failed
-    TEST 2   running app     32 checks   0 failed
+    TEST 1b  the parser      73 checks   0 failed
     TEST 3   ugly cases      44 checks   0 failed
-    TEST 4   upgrade         22 checks   0 failed
-                            202 checks   0 failed
+    TEST 4   upgrade         23 checks   0 failed
+                            174 checks   0 failed
 
-Run on Linux with real keys, 5.9.2026.
+**TEST 2 was NOT run for v3.** It is the one test that spends real provider
+requests, and the keys used through v1 and v2 have been retired. It last ran
+green at v2 with 32 checks. Test 4 was rewritten for v3 to fabricate its own
+keys — it proves that what is on disk survives an install, which never needed a
+working account — so the only thing now standing between a build and a green
+gate is a live ring. Run `bash tests/gate.sh` with new keys in place and test 2
+is the part that will tell you whether the provider side still works.
 
 ## Measured, not assumed
 

@@ -162,3 +162,53 @@ environment, so the sandbox's import went into the real ring and the sandbox's
 own ring stayed empty. Both were the test lying rather than the app breaking,
 which is the failure mode the manifest warns about: any detail the system keys
 on has to match reality or the test proves nothing about reality.
+
+---
+
+## 5.9.2026 — v3, AQ. is the format, and Termux installs its own dependencies
+
+### The manifest had the two key formats the wrong way round
+
+`apis/gemini.md` called `AIza` "the long-standing one" and `AQ.` "the newer
+format". True when it was written, and it reads backwards now: `AQ.` is the
+only format Google issues, and a chat skimming that table writes an `AIza`
+filter and finds nothing. Which is exactly the leak the same file warns about,
+and exactly what happened on the first command of the session that built this
+app.
+
+Corrected in the manifest, with the reason written next to it so the next chat
+does not have to be told twice. The free-tier image note was corrected in the
+same commit: no image model answers on the free tier any more, measured across
+twenty-one accounts.
+
+### AIza is still read, and that is deliberate
+
+The instruction was not to use those keys. The app still *matches* the format,
+because reading is not issuing: a ring assembled over two years holds AIza keys
+that still authenticate, and a filter that drops them loses working accounts in
+silence. Silent loss is worse than a loud failure. So they are read, and marked
+`old AIza format` everywhere they appear — the import report, the Keys tab —
+so the accounts to replace are visible rather than guessed at.
+
+`AQ.` now comes first in the regular expression and first in every list, which
+is the only part of this that is cosmetic and the part most likely to stop the
+next person writing an `AIza` filter.
+
+### Termux installs its own dependencies
+
+v2 found python missing and told you to run `pkg install python` yourself.
+Asking someone holding a phone to run one more command by hand is asking them
+to stop. `pkg` is right there; the installer now uses it for python and for
+ffmpeg, and says `already there` in grey when they are present. Termux has no
+PEP 668 restriction and needs no venv, so that is the whole dependency story on
+Android.
+
+### Test 4 no longer spends a real key
+
+It copied the real ring in to have something to preserve. But what it proves is
+that what is on disk survives an install — it never calls the provider — so a
+real key there was spent for nothing and the test could not run once the keys
+were retired. It fabricates its own now, including a legacy AIza one, and
+checks that too is still in the ring afterwards. Test 2 remains the only test
+that needs a live account, which is now the only thing standing between this
+repository and a full green gate.

@@ -116,6 +116,17 @@ PY=""
 for c in python3 python; do command -v "$c" >/dev/null 2>&1 && PY="$c" && break; done
 step "python"
 if [ -z "$PY" ]; then
+  if [ "$PLATFORM" = "termux" ]; then
+    # pkg is right here and asking a phone user to run one more command by hand
+    # is asking them to stop. Termux has no PEP 668 restriction and no venv is
+    # needed, so this is the whole dependency story on Android.
+    printf "${DIM}installing${OFF}"
+    pkg install -y python >/dev/null 2>&1
+    for c in python3 python; do command -v "$c" >/dev/null 2>&1 && PY="$c" && break; done
+    printf "\r"; step "python"
+  fi
+fi
+if [ -z "$PY" ]; then
   fail_ "not found"
   say "${DIM}Termux: pkg install python   macOS: brew install python${OFF}"
   exit 1
@@ -148,9 +159,14 @@ fi
 step "ffmpeg"
 if command -v ffmpeg >/dev/null 2>&1; then
   skip_ "already there"
+elif [ "$PLATFORM" = "termux" ]; then
+  printf "${DIM}installing${OFF}"
+  pkg install -y ffmpeg >/dev/null 2>&1
+  printf "\r"; step "ffmpeg"
+  command -v ffmpeg >/dev/null 2>&1 && done_ || skip_ "Listen takes wav mp3 flac ogg aac only"
 else
   skip_ "Listen takes wav mp3 flac ogg aac only"
-  say "${DIM}Termux: pkg install ffmpeg   macOS: brew install ffmpeg${OFF}"
+  say "${DIM}macOS: brew install ffmpeg${OFF}"
 fi
 
 # ---------------------------------------------------------------- key ring
@@ -158,13 +174,16 @@ step "key ring"
 if [ ! -f "$KEYS" ]; then
   cat > "$KEYS" <<'KEY_EOF'
 # One account per pair of lines: the label, then the key, then a blank line.
-# Delete these three comment lines once the first account is in.
+# Keys from AI Studio start with AQ. — that is the format Google issues now.
+# Old AIza keys are still read if you have any; they are simply not made any
+# more. You do not have to edit this file by hand: gtt import <file> takes
+# whatever shape your keys were saved in.
 KEY_EOF
   chmod 600 "$KEYS"
   skip_ "created empty"
 else
   chmod 600 "$KEYS"
-  KN=$(grep -cE '^(AIza[A-Za-z0-9_-]{20,}|AQ\.[A-Za-z0-9_-]{20,})$' "$KEYS" 2>/dev/null || echo 0)
+  KN=$(grep -cE '^(AQ\.[A-Za-z0-9_-]{20,}|AIza[A-Za-z0-9_-]{20,})$' "$KEYS" 2>/dev/null || echo 0)
   printf "%s accounts\n" "$KN"
 fi
 

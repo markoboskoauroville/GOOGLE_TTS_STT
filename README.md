@@ -14,6 +14,16 @@ wrong by the evening.
 
 ## Install
 
+**Termux**
+
+    pkg install -y curl && curl -fsSL https://raw.githubusercontent.com/markoboskoauroville/GOOGLE_TTS_STT/main/get.sh -o get.sh && bash get.sh
+
+Python and ffmpeg are installed by the installer itself with `pkg` if they are
+not already there, and skipped with a word if they are. The command lands in
+`$PREFIX/bin`, which is already on the PATH, so no rc file is touched.
+
+**macOS**
+
     curl -fsSL https://raw.githubusercontent.com/markoboskoauroville/GOOGLE_TTS_STT/main/get.sh -o get.sh && bash get.sh
 
 `get.sh` has no version number in it, so the command never goes stale. It asks
@@ -49,10 +59,15 @@ survive, existing entries are never rewritten, and **a key already in the ring
 is never added twice**, whatever name the new file gives it. A new key that
 wants a name already taken is numbered rather than overwriting anything.
 
-Both Gemini formats are read, `AIza…` and the newer `AQ.…`, by one regular
-expression the ring reader and the picker share. A long token in a format
-neither recognises is reported rather than imported, because Google has
-changed the format once and will do it again.
+**`AQ.` is the format Google issues now.** Every key made in AI Studio today
+looks like that. `AIza` keys are legacy and no longer handed out, and they are
+still *read*: a ring assembled over two years holds AIza keys that still
+authenticate, and a filter that drops them loses working accounts in silence,
+which is worse than failing loudly. They are marked as old format wherever they
+appear so you can see which accounts to replace. One regular expression, shared
+by the ring reader and the picker. A long token in a format neither recognises
+is reported rather than imported, because Google has changed this once and will
+do it again.
 
 No key is in this repository and none is ever sent to the page: six characters
 at the front, four at the back.
