@@ -77,11 +77,19 @@ trap 'rm -rf "\$TMP"' EXIT
 if [ -t 1 ]; then AM="\033[38;5;214m"; BAD="\033[1;31m"; DIM="\033[0;90m"; OFF="\033[0m"
 else AM=""; BAD=""; DIM=""; OFF=""; fi
 printf "\n  \${AM}gtt-update\${OFF}  installed $GTT_VERSION\n\n"
-LIST="\$(curl -fsSL "https://api.github.com/repos/\$REPO/contents/" 2>/dev/null)" || {
-  printf "  \${BAD}cannot reach GitHub\${OFF}, nothing changed\n\n"; exit 1; }
-NAME="\$(printf '%s' "\$LIST" | grep -o '"name": *"[0-9]*-google-tts-stt-v[0-9]*\.sh"' \
-  | sed 's/.*"\(.*\)"/\1/' | sort -t v -k2 -n | tail -1)"
-[ -z "\$NAME" ] && { printf "  \${BAD}no installer found in the repository\${OFF}\n\n"; exit 1; }
+# raw first, the API only if raw has nothing. The API is sixty an hour per
+# address to an unauthenticated caller, and on mobile data that address is the
+# carrier's, not yours.
+NAME="\$(curl -fsSL "https://raw.githubusercontent.com/\$REPO/main/LATEST" 2>/dev/null | tr -d '\r\n ')"
+if [ -z "\$NAME" ]; then
+  LIST="\$(curl -fsSL "https://api.github.com/repos/\$REPO/contents/" 2>/dev/null)" || true
+  NAME="\$(printf '%s' "\$LIST" | grep -o '"name": *"[0-9]*-google-tts-stt-v[0-9]*\.sh"' \
+    | sed 's/.*"\(.*\)"/\1/' | sort -t v -k2 -n | tail -1)"
+fi
+case "\$NAME" in
+  [0-9]*-google-tts-stt-v[0-9]*.sh) : ;;
+  *) printf "  \${BAD}cannot work out which installer is newest\${OFF}, nothing changed\n\n"; exit 1 ;;
+esac
 NEWV="v\${NAME##*-v}"; NEWV="\${NEWV%.sh}"
 if [ "\$NEWV" = "$GTT_VERSION" ]; then
   printf "  already on \$NEWV, nothing to do\n\n"; exit 0

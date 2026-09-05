@@ -1,10 +1,10 @@
 # DELIVERY RECORD
 
-**v3, 5.9.2026.** What was measured, and what was not tested.
+**v4, 5.9.2026.** What was measured, and what was not tested.
 
 ## The gate
 
-    build is fresh          3-google-tts-stt-v3.sh matches src/
+    build is fresh          4-google-tts-stt-v4.sh matches src/
     installer is whole      --verify passes
     TEST 1   mechanism       34 checks   0 failed
     TEST 1b  the parser      73 checks   0 failed
@@ -77,9 +77,9 @@ Named rather than left to silence.
   v1. Test 4 installs v1 over itself and hand-writes a ledger in an older shape
   so there is genuinely something from before to misread. From v2 the test uses
   the actual previous release and the stand-in comes out.
-- **`gtt-update` and `get.sh` end to end.** Both ask GitHub which installer is
-  newest and neither could be run against a repository holding v2 until v2 was
-  pushed. Their parts were checked: the listing call, the version compare, and
+- **`gtt-update` end to end.** It needs a version newer than the installed one
+  to actually replace anything. `get.sh` HAS now been run end to end against
+  the live repository, which is how the API rate limit was found. Their parts were checked: the listing call, the version compare, and
   `--verify` on the download. The path that replaces a running updater is
   covered by the rename check in test 4. Run `gtt-update` once v3 exists and it
   will be proven or it will not.

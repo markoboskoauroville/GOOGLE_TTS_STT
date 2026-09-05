@@ -3,8 +3,8 @@
 # Edit src/00_head.sh, src/10_app.py, src/20_tail.sh and build again.
 #
 #   src/00_head.sh   375ba03ccefc
-#   src/10_app.py    d2124a18b92a
-#   src/20_tail.sh   e26efe80b53f
+#   src/10_app.py    8fbd45d8d39f
+#   src/20_tail.sh   74e0d8e44258
 #
 # GOOGLE TTS AND STT, one roof over the two halves of the same job.
 #
@@ -18,10 +18,10 @@
 # ledgers, and two ledgers that each think they own the daily budget are both
 # wrong by dinner time.
 #
-#   bash 3-google-tts-stt-v3.sh                 install, then run the tests
-#   bash 3-google-tts-stt-v3.sh --keys FILE     install, and take the keys out of FILE
-#   bash 3-google-tts-stt-v3.sh --quiet         install, no tests
-#   bash 3-google-tts-stt-v3.sh --verify        check this file is whole, change nothing
+#   bash 4-google-tts-stt-v4.sh                 install, then run the tests
+#   bash 4-google-tts-stt-v4.sh --keys FILE     install, and take the keys out of FILE
+#   bash 4-google-tts-stt-v4.sh --quiet         install, no tests
+#   bash 4-google-tts-stt-v4.sh --verify        check this file is whole, change nothing
 #
 # --keys takes ANY file: a note, a .env, a JSON export, a CSV, a markdown
 # table. It finds the keys, keeps the account names where they are there, and
@@ -40,8 +40,8 @@
 
 set -u
 
-GTT_VERSION="v3"
-GTT_FILE="3-google-tts-stt-v3.sh"
+GTT_VERSION="v4"
+GTT_FILE="4-google-tts-stt-v4.sh"
 GTT_REPO="markoboskoauroville/GOOGLE_TTS_STT"
 
 # --- the platform layer, and nothing below this block knows the platform ---
@@ -238,7 +238,7 @@ try:
 except Exception:
     PACIFIC = timezone(timedelta(hours=-8))
 
-VERSION = 3
+VERSION = 4
 PORT = int(os.environ.get("GTTS_PORT", "7311"))
 KEYFILE = os.environ.get("GEMINI_KEYS", os.path.expanduser("~/.gemini_keys"))
 HOME = os.path.expanduser("~/.google_tts_stt")
@@ -1325,11 +1325,19 @@ trap 'rm -rf "\$TMP"' EXIT
 if [ -t 1 ]; then AM="\033[38;5;214m"; BAD="\033[1;31m"; DIM="\033[0;90m"; OFF="\033[0m"
 else AM=""; BAD=""; DIM=""; OFF=""; fi
 printf "\n  \${AM}gtt-update\${OFF}  installed $GTT_VERSION\n\n"
-LIST="\$(curl -fsSL "https://api.github.com/repos/\$REPO/contents/" 2>/dev/null)" || {
-  printf "  \${BAD}cannot reach GitHub\${OFF}, nothing changed\n\n"; exit 1; }
-NAME="\$(printf '%s' "\$LIST" | grep -o '"name": *"[0-9]*-google-tts-stt-v[0-9]*\.sh"' \
-  | sed 's/.*"\(.*\)"/\1/' | sort -t v -k2 -n | tail -1)"
-[ -z "\$NAME" ] && { printf "  \${BAD}no installer found in the repository\${OFF}\n\n"; exit 1; }
+# raw first, the API only if raw has nothing. The API is sixty an hour per
+# address to an unauthenticated caller, and on mobile data that address is the
+# carrier's, not yours.
+NAME="\$(curl -fsSL "https://raw.githubusercontent.com/\$REPO/main/LATEST" 2>/dev/null | tr -d '\r\n ')"
+if [ -z "\$NAME" ]; then
+  LIST="\$(curl -fsSL "https://api.github.com/repos/\$REPO/contents/" 2>/dev/null)" || true
+  NAME="\$(printf '%s' "\$LIST" | grep -o '"name": *"[0-9]*-google-tts-stt-v[0-9]*\.sh"' \
+    | sed 's/.*"\(.*\)"/\1/' | sort -t v -k2 -n | tail -1)"
+fi
+case "\$NAME" in
+  [0-9]*-google-tts-stt-v[0-9]*.sh) : ;;
+  *) printf "  \${BAD}cannot work out which installer is newest\${OFF}, nothing changed\n\n"; exit 1 ;;
+esac
 NEWV="v\${NAME##*-v}"; NEWV="\${NEWV%.sh}"
 if [ "\$NEWV" = "$GTT_VERSION" ]; then
   printf "  already on \$NEWV, nothing to do\n\n"; exit 0

@@ -18,11 +18,21 @@ if [ -t 1 ]; then AM="\033[38;5;214m"; BAD="\033[1;31m"; DIM="\033[0;90m"; OFF="
 else AM=""; BAD=""; DIM=""; OFF=""; fi
 
 printf "\n  ${AM}GOOGLE TTS AND STT${OFF}  fetching the newest installer\n\n"
-LIST="$(curl -fsSL "https://api.github.com/repos/$REPO/contents/" 2>/dev/null)" || {
-  printf "  ${BAD}cannot reach GitHub${OFF}\n\n"; exit 1; }
-NAME="$(printf '%s' "$LIST" | grep -o '"name": *"[0-9]*-google-tts-stt-v[0-9]*\.sh"' \
-  | sed 's/.*"\(.*\)"/\1/' | sort -t v -k2 -n | tail -1)"
-[ -z "$NAME" ] && { printf "  ${BAD}no installer in the repository${OFF}\n\n"; exit 1; }
+
+# raw first. It is a CDN and has no per-IP hourly limit. The API allows sixty
+# an hour to an unauthenticated caller and that allowance is shared by
+# everything behind one address, which on mobile data is a whole carrier —
+# measured 403 from a shared host on 5.9.2026, which is why LATEST exists.
+NAME="$(curl -fsSL "https://raw.githubusercontent.com/$REPO/main/LATEST" 2>/dev/null | tr -d '\r\n ')"
+if [ -z "$NAME" ]; then
+  LIST="$(curl -fsSL "https://api.github.com/repos/$REPO/contents/" 2>/dev/null)" || true
+  NAME="$(printf '%s' "$LIST" | grep -o '"name": *"[0-9]*-google-tts-stt-v[0-9]*\.sh"' \
+    | sed 's/.*"\(.*\)"/\1/' | sort -t v -k2 -n | tail -1)"
+fi
+case "$NAME" in
+  [0-9]*-google-tts-stt-v[0-9]*.sh) : ;;
+  *) printf "  ${BAD}cannot work out which installer is newest${OFF}\n\n"; exit 1 ;;
+esac
 printf "  ${DIM}%s${OFF}\n" "$NAME"
 curl -fsSL "https://raw.githubusercontent.com/$REPO/main/$NAME" -o "$TMP/$NAME" || {
   printf "  ${BAD}download failed${OFF}\n\n"; exit 1; }

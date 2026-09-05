@@ -26,9 +26,11 @@ not already there, and skipped with a word if they are. The command lands in
 
     curl -fsSL https://raw.githubusercontent.com/markoboskoauroville/GOOGLE_TTS_STT/main/get.sh -o get.sh && bash get.sh
 
-`get.sh` has no version number in it, so the command never goes stale. It asks
-the repository which installer is newest, checks the download is whole, and
-runs it. To hand it your keys at the same time:
+`get.sh` has no version number in it, so the command never goes stale. It reads
+`LATEST` to find the newest installer, checks the download is whole, and runs
+it. `LATEST` is fetched from raw.githubusercontent, not the GitHub API: the API
+allows an unauthenticated caller sixty requests an hour **per address**, and on
+mobile data that address belongs to the carrier. To hand it your keys at the same time:
 
     bash get.sh --keys ~/Downloads/whatever-the-file-is-called.txt
 

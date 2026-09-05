@@ -10,8 +10,8 @@ The short list, for anyone who does not want to read all of
   are retired.
 - macOS on real hardware.
 - An upgrade from a genuinely older release. There is not one yet.
-- `gtt-update` and `get.sh` end to end. They need two versions in the
-  repository to run against.
+- `gtt-update` end to end. It needs a newer version in the repository than the
+  one installed. `get.sh` has been run against the live repository.
 - A key file that is not UTF-8.
 - A key file over 8 MB, which is refused by size rather than read.
 - waitress serving. It is installed; the app still starts the Flask dev server.

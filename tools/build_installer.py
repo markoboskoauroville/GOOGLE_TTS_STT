@@ -77,6 +77,10 @@ def main():
         if others:
             print("STALE: old installers still here: %s" % ", ".join(others))
             return 1
+        latest = os.path.join(ROOT, "LATEST")
+        if not os.path.exists(latest) or open(latest).read().strip() != name:
+            print("STALE: LATEST does not say %s" % name)
+            return 1
         print("fresh: %s" % name)
         return 0
 
@@ -86,6 +90,11 @@ def main():
             print("removed old %s" % f)
     open(out, "w").write(text)
     os.chmod(out, 0o755)
+    # LATEST names the current installer, so get.sh and gtt-update can ask raw
+    # githubusercontent instead of the API. Raw is a CDN with no per-IP hourly
+    # limit; the API gives an unauthenticated caller sixty an hour, shared with
+    # everyone behind the same address. On mobile data that is a carrier.
+    open(os.path.join(ROOT, "LATEST"), "w").write(name + "\n")
     r = subprocess.run(["bash", "-n", out], capture_output=True)
     if r.returncode != 0:
         print(r.stderr.decode())

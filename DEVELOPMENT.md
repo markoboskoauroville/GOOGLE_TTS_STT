@@ -212,3 +212,29 @@ were retired. It fabricates its own now, including a legacy AIza one, and
 checks that too is still in the ring afterwards. Test 2 remains the only test
 that needs a live account, which is now the only thing standing between this
 repository and a full green gate.
+
+---
+
+## 5.9.2026 — v4, the updater stopped depending on the GitHub API
+
+Found by running `get.sh` against the live repository rather than trusting it.
+It answered `cannot reach GitHub`, twice, twenty seconds apart. GitHub was fine:
+
+    403 API rate limit exceeded for 35.196.153.210
+
+The API allows sixty requests an hour to an unauthenticated caller and counts
+them **per address**. On a shared host that is everyone on the host. On a phone
+on mobile data it is everyone on the carrier's NAT, which is a number you
+cannot influence and cannot see coming. An updater that fails on someone else's
+traffic is not an updater.
+
+So `LATEST` is now written beside the installer by the build tool and read from
+`raw.githubusercontent.com`, which is a CDN with no such limit. The API call
+survives as a fallback for the case where `LATEST` is missing, and the name
+that comes back either way is checked against the filename pattern before it is
+used to build a URL. `--check` fails if `LATEST` does not name the installer
+that was just built, so the two cannot drift.
+
+The lesson is the one the manifest already has: anything outside the process
+needs a deadline and a second path, and the way to find out whether it has one
+is to run it, not to read it.
