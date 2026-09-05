@@ -45,8 +45,15 @@ transcription.
 
 ## The menu
 
-`gtt` draws four quadrants, the same shape MAHA COMMUTE uses, because the hand
-should not have to learn a second layout.
+`gtt` **starts the app and opens the browser.** The panel below prints once on
+the way past, as a picture of what the app does — every quadrant is a tab on the
+page, and the page is where everything is set. `gtt menu` gives the interactive
+version, for when the terminal is where your hands already are.
+
+That is the difference from MAHA COMMUTE, which is a launcher for four separate
+servers and needs a menu because there is a choice to make. Here there is one
+server and one page, so a menu in front of it is a door in front of a door. The
+layout is still MC's, because the hand should not have to learn a second one.
 
 ```
   GOOGLE TTS AND STT v1
@@ -60,9 +67,23 @@ should not have to learn a second layout.
   |  what is left today |  room for a fourth  |
   +---------------------+---------------------+
 
-  1 run      2 test     3 keys     4 output
-  5 update   6 import   0 quit
+  R un       T est      K eys      O utput
+  U pdate    I mport    Q uit
 ```
+
+**Every label is spelled by its own key.** R un, T est, K eys, O utput, U pdate,
+I mport, Q uit. A key whose letter does not begin its word has to be read rather
+than recognised, and this row is meant to be recognised. Termux has no F keys on
+a soft keyboard, so the letter is what is pressed.
+
+The numbers from v6 still work, because fingers that learned them should not be
+punished for it, but they are no longer drawn: two labels for one action is two
+things to read.
+
+Padded on the plain text with the colour wrapped around the letter only. printf
+counts the bytes of an escape sequence as width, so a coloured string handed to
+`%-10s` comes out short by the length of its escapes and every column after it
+walks left. Four cells of ten, then three.
 
 Three lines to a quadrant, always three. The label, what it does, what it is
 for. The fourth quadrant is drawn while it is empty, because a screen that

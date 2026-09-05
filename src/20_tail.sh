@@ -49,22 +49,34 @@ panel() {
   printf "  +---------------------+---------------------+\n"
   printf "  \${DIM}all four are tabs on the page, and the page is where\n"
   printf "  everything is done. This is the picture of it.\${OFF}\n"
+  printf "  \${DIM}R un  T est  K eys  O utput  U pdate  I mport  Q uit\n"
+  printf "  are the keys, and each one spells its own word.\${OFF}\n"
 }
 
 if [ "\$MENU" = "1" ]; then
   while true; do
     panel
-    printf "\n  1 run      2 test     3 keys     4 output\n"
-    printf "  5 update   6 import   0 quit\n\n  > "
+    # EVERY LABEL IS SPELLED BY ITS OWN KEY. R un, T est, K eys, O utput,
+    # U pdate, I mport, Q uit. A key whose letter does not begin its word has
+    # to be read rather than recognised, and this row is meant to be
+    # recognised. The numbers still work because fingers that learned them in
+    # v6 should not be punished, but they are not drawn any more: two labels
+    # for one action is two things to read.
+    # Padded on the plain text, the colour wrapped around the letter only.
+    # printf counts the bytes of an escape sequence as width, so a coloured
+    # string handed to %-10s comes out short by the length of its escapes and
+    # every column after it walks left. Four cells of ten, then three.
+    printf "\n  \${AM}R\${OFF} un       \${AM}T\${OFF} est      \${AM}K\${OFF} eys      \${AM}O\${OFF} utput\n"
+    printf "  \${AM}U\${OFF} pdate    \${AM}I\${OFF} mport    \${AM}Q\${OFF} uit\n\n  > "
     read -rsn1 k; printf "\n\n"
     case "\$k" in
-      1|r|R) "\$PY" "\$APP" ;;
-      2|t|T) "\$PY" "\$APP" test ;;
-      3|k|K) \${EDITOR:-nano} "\$KEYS" ;;
-      4|o|O) ls -la "\$OUT" ;;
-      5|u|U) gtt-update ;;
-      6|i|I) printf "  path to the key file: "; read -r f; [ -n "\$f" ] && "\$PY" "\$APP" import "\$f" ;;
-      0|q|Q) exit 0 ;;
+      r|R|1) "\$PY" "\$APP" ;;
+      t|T|2) "\$PY" "\$APP" test ;;
+      k|K|3) \${EDITOR:-nano} "\$KEYS" ;;
+      o|O|4) ls -la "\$OUT" ;;
+      u|U|5) gtt-update ;;
+      i|I|6) printf "  path to the key file: "; read -r f; [ -n "\$f" ] && "\$PY" "\$APP" import "\$f" ;;
+      q|Q|0) exit 0 ;;
     esac
   done
 fi

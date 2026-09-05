@@ -335,3 +335,34 @@ pressed Test twice in one second.
 Delete removes the refused and only the refused. Busy is never deleted. Nothing
 is destroyed: removed keys go to a file, chmod 600, and Put back returns them
 through the same merge the picker uses, so restoring cannot double a key.
+
+---
+
+## 5.9.2026 — v7, the action row is letters
+
+`R un`, `T est`, `K eys`, `O utput`, `U pdate`, `I mport`, `Q uit`. Every label
+is spelled by its own key, which is the rule MAHA COMMUTE's function row already
+follows: a key whose letter does not begin its word has to be read rather than
+recognised, and a row that has to be read is a row that gets read every time.
+Termux has no F keys on a soft keyboard, so the letter is what is actually
+pressed and the numbers were only there because mc put some there.
+
+The v6 numbers still work — fingers that learned them in the last hour should
+not be punished — but they are no longer drawn. Two labels for one action is two
+things to read.
+
+Padded on the plain text with the colour wrapped around the letter only, because
+printf counts the bytes of an escape sequence as width and a coloured cell handed
+to a width comes out short by exactly the length of its escapes.
+
+Test 4 now checks the drawn label and the case arm agree letter by letter, so a
+label cannot be reworded later without its key moving with it.
+
+### A test that was lying, again
+
+`the old server is running during the upgrade` started failing, and the app was
+fine. The test starts a server on a fixed port; a previous run had left one
+behind, so the new one exited *address already in use* and the check read that
+as the old server having died. It asks the operating system for a free port now.
+Second time in this project a fixed detail in a test has produced a false
+failure, and both times the app was innocent.

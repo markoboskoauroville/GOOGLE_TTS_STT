@@ -3,8 +3,8 @@
 # Edit src/00_head.sh, src/10_app.py, src/20_tail.sh and build again.
 #
 #   src/00_head.sh   1980117fc821
-#   src/10_app.py    1d13cf77f31a
-#   src/20_tail.sh   3a43fdd7642b
+#   src/10_app.py    081f53fcf04a
+#   src/20_tail.sh   00c74033eabe
 #
 # GOOGLE TTS AND STT, one roof over the two halves of the same job.
 #
@@ -18,10 +18,10 @@
 # ledgers, and two ledgers that each think they own the daily budget are both
 # wrong by dinner time.
 #
-#   bash 6-google-tts-stt-v6.sh                 install, then run the tests
-#   bash 6-google-tts-stt-v6.sh --keys FILE     install, and take the keys out of FILE
-#   bash 6-google-tts-stt-v6.sh --quiet         install, no tests
-#   bash 6-google-tts-stt-v6.sh --verify        check this file is whole, change nothing
+#   bash 7-google-tts-stt-v7.sh                 install, then run the tests
+#   bash 7-google-tts-stt-v7.sh --keys FILE     install, and take the keys out of FILE
+#   bash 7-google-tts-stt-v7.sh --quiet         install, no tests
+#   bash 7-google-tts-stt-v7.sh --verify        check this file is whole, change nothing
 #
 # --keys takes ANY file: a note, a .env, a JSON export, a CSV, a markdown
 # table. It finds the keys, keeps the account names where they are there, and
@@ -40,8 +40,8 @@
 
 set -u
 
-GTT_VERSION="v6"
-GTT_FILE="6-google-tts-stt-v6.sh"
+GTT_VERSION="v7"
+GTT_FILE="7-google-tts-stt-v7.sh"
 GTT_REPO="markoboskoauroville/GOOGLE_TTS_STT"
 
 # --- the platform layer, and nothing below this block knows the platform ---
@@ -239,7 +239,7 @@ try:
 except Exception:
     PACIFIC = timezone(timedelta(hours=-8))
 
-VERSION = 6
+VERSION = 7
 PORT = int(os.environ.get("GTTS_PORT", "7311"))
 KEYFILE = os.environ.get("GEMINI_KEYS", os.path.expanduser("~/.gemini_keys"))
 HOME = os.path.expanduser("~/.google_tts_stt")
@@ -1558,22 +1558,34 @@ panel() {
   printf "  +---------------------+---------------------+\n"
   printf "  \${DIM}all four are tabs on the page, and the page is where\n"
   printf "  everything is done. This is the picture of it.\${OFF}\n"
+  printf "  \${DIM}R un  T est  K eys  O utput  U pdate  I mport  Q uit\n"
+  printf "  are the keys, and each one spells its own word.\${OFF}\n"
 }
 
 if [ "\$MENU" = "1" ]; then
   while true; do
     panel
-    printf "\n  1 run      2 test     3 keys     4 output\n"
-    printf "  5 update   6 import   0 quit\n\n  > "
+    # EVERY LABEL IS SPELLED BY ITS OWN KEY. R un, T est, K eys, O utput,
+    # U pdate, I mport, Q uit. A key whose letter does not begin its word has
+    # to be read rather than recognised, and this row is meant to be
+    # recognised. The numbers still work because fingers that learned them in
+    # v6 should not be punished, but they are not drawn any more: two labels
+    # for one action is two things to read.
+    # Padded on the plain text, the colour wrapped around the letter only.
+    # printf counts the bytes of an escape sequence as width, so a coloured
+    # string handed to %-10s comes out short by the length of its escapes and
+    # every column after it walks left. Four cells of ten, then three.
+    printf "\n  \${AM}R\${OFF} un       \${AM}T\${OFF} est      \${AM}K\${OFF} eys      \${AM}O\${OFF} utput\n"
+    printf "  \${AM}U\${OFF} pdate    \${AM}I\${OFF} mport    \${AM}Q\${OFF} uit\n\n  > "
     read -rsn1 k; printf "\n\n"
     case "\$k" in
-      1|r|R) "\$PY" "\$APP" ;;
-      2|t|T) "\$PY" "\$APP" test ;;
-      3|k|K) \${EDITOR:-nano} "\$KEYS" ;;
-      4|o|O) ls -la "\$OUT" ;;
-      5|u|U) gtt-update ;;
-      6|i|I) printf "  path to the key file: "; read -r f; [ -n "\$f" ] && "\$PY" "\$APP" import "\$f" ;;
-      0|q|Q) exit 0 ;;
+      r|R|1) "\$PY" "\$APP" ;;
+      t|T|2) "\$PY" "\$APP" test ;;
+      k|K|3) \${EDITOR:-nano} "\$KEYS" ;;
+      o|O|4) ls -la "\$OUT" ;;
+      u|U|5) gtt-update ;;
+      i|I|6) printf "  path to the key file: "; read -r f; [ -n "\$f" ] && "\$PY" "\$APP" import "\$f" ;;
+      q|Q|0) exit 0 ;;
     esac
   done
 fi

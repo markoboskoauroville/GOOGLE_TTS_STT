@@ -13,7 +13,12 @@ Speak makes audio from text. Listen makes text from audio. Keys imports, tests
 and prunes the ring.
 
 `gtt menu` still gives the old panel with keys on it, for when the terminal is
-where your hands already are.
+where your hands already are. Its action row is letters, each one spelling its
+own word:
+
+    R un   T est   K eys   O utput   U pdate   I mport   Q uit
+
+The v6 numbers still work and are no longer drawn.
 
 ## Opening the browser
 

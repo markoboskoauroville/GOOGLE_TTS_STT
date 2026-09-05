@@ -84,7 +84,11 @@ grep -q "$IMPKEY" "$HOME/.gemini_keys" && ok "the old version imported a key" \
 # --- 3. leave it running ---------------------------------------------------
 # Started the way the launcher starts it, absolute path and all. A test that
 # starts it differently proves nothing about the real thing.
-GTTS_PORT=7398 GEMINI_KEYS="$HOME/.gemini_keys" "$PY" "$APPHOME/app.py" >/dev/null 2>&1 &
+# A fixed port made this test fail when a previous run left a server behind:
+# the new one exited "address already in use" and the check read that as the
+# old server having died. Ask the operating system for a free one instead.
+TESTPORT="$("$PY" -c "import socket;s=socket.socket();s.bind(('127.0.0.1',0));print(s.getsockname()[1]);s.close()")"
+GTTS_PORT="$TESTPORT" GEMINI_KEYS="$HOME/.gemini_keys" "$PY" "$APPHOME/app.py" > "$SANDBOX/server.log" 2>&1 &
 OLDPID=$!
 sleep 3
 if kill -0 "$OLDPID" 2>/dev/null; then ok "the old server is running during the upgrade"
@@ -176,6 +180,28 @@ grep -q 'exec "\$PY" "\$APP"$' "$EMPTY/bin/gtt" \
   && ok "gtt with no argument runs the app" || bad "gtt with no argument runs the app"
 grep -q 'menu)   MENU=1' "$EMPTY/bin/gtt" \
   && ok "the panel is still reachable as gtt menu" || bad "the panel is still reachable as gtt menu"
+
+# EVERY LABEL IS SPELLED BY ITS OWN KEY. The row is meant to be recognised
+# rather than read, and a letter that does not begin its word has to be read.
+# This checks the drawn row and the case arm agree, letter by letter, so a
+# label cannot be reworded later without its key moving with it.
+ROWFAIL=""
+for pair in "R:un" "T:est" "K:eys" "O:utput" "U:pdate" "I:mport" "Q:uit"; do
+  L="${pair%%:*}"; W="${pair#*:}"
+  l="$(printf '%s' "$L" | tr 'A-Z' 'a-z')"
+  # the letter is drawn immediately before the rest of its own word
+  grep -q "}$L\${OFF} $W" "$EMPTY/bin/gtt" || ROWFAIL="$ROWFAIL $L-label"
+  # and that same letter is the arm that runs it
+  grep -q "$l|$L|" "$EMPTY/bin/gtt" || ROWFAIL="$ROWFAIL $L-key"
+done
+[ -z "$ROWFAIL" ] && ok "every action key spells its own word" \
+  || bad "every action key spells its own word:$ROWFAIL"
+grep -qE '^ *[0-9] (run|test|keys|output|update|import|quit)' "$EMPTY/bin/gtt" \
+  && bad "the numbered labels are gone from the drawn row" \
+  || ok "the numbered labels are gone from the drawn row"
+grep -q 'r|R|1)' "$EMPTY/bin/gtt" \
+  && ok "but the old numbers still work for fingers that learned them" \
+  || bad "but the old numbers still work for fingers that learned them"
 if [ -x "$EMPTY/bin/gtts" ]; then
   HOME="$EMPTY" "$EMPTY/bin/gtts" out >/dev/null 2>&1 \
     && ok "gtts runs the same thing as gtt" || bad "gtts runs the same thing as gtt"
