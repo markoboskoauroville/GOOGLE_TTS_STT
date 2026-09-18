@@ -222,13 +222,41 @@ def _slug(title):
     return "%s-%d" % (s, int(time.time()))
 
 
-def lib_save(raw):
+def lib_spoken(tid):
+    """The exact string the PAGE built, or "" if it never sent one."""
+    try:
+        return open(os.path.join(LIB_DIR, tid, "spoken.txt"),
+                    encoding="utf-8").read()
+    except Exception:
+        return ""
+
+
+def lib_save(raw, spoken=""):
+    """Save the source, and the page's own rendering of it if it sent one.
+
+    SPOKEN.TXT IS NOT A CACHE, IT IS THE SHARED COORDINATE SYSTEM.
+
+    A Markdown text is drawn by the page, one span per word, and the highlight
+    is a class on a range of those spans. Which spans belong to sentence 5 is
+    decided by character offsets — and offsets only mean anything if both ends
+    are counting into the SAME string.
+
+    The page therefore sends the exact string its renderer produced, and it is
+    kept verbatim and used for the splitting, the synthesis and the offsets.
+    Letting the server re-derive it with clean_text() instead produces a string
+    that is nearly identical and differs somewhere in the whitespace, and the
+    page then refuses to map rather than map wrongly — which is right, and
+    which is why a Markdown text showed up beautifully formatted with nothing
+    ever highlighted. That was this function dropping the argument.
+    """
     text = clean_text(raw)
     title = (text.strip().splitlines() or ["Untitled"])[0][:64]
     tid = _slug(title)
     d = os.path.join(LIB_DIR, tid)
     os.makedirs(d, exist_ok=True)
     open(os.path.join(d, "text.txt"), "w", encoding="utf-8").write(raw)
+    if (spoken or "").strip():
+        open(os.path.join(d, "spoken.txt"), "w", encoding="utf-8").write(spoken)
     json.dump({"title": title, "created": int(time.time())},
               open(os.path.join(d, "meta.json"), "w", encoding="utf-8"),
               ensure_ascii=False)
@@ -278,9 +306,21 @@ def lib_delete(tid):
 
 
 def text_payload(tid):
-    """Everything the page needs to render and play a text."""
-    text = clean_text(lib_text(tid))
-    units = split_units(text)
+    """Everything the page needs to render and play a text.
+
+    `spoken` is the exact string the voice is given AND the string the page's
+    spans are numbered against; `spans` are the character ranges of each
+    sentence inside it. Those two travel together or neither is any use.
+
+    A rendered text splits on BLANK LINES as well as on full stops, because in
+    a rendering a blank line is a real boundary — a heading, a list item, a
+    table row — and without that a heading is glued to the paragraph beneath
+    it and read as one sentence.
+    """
+    sp = lib_spoken(tid)
+    rendered = bool(sp.strip())
+    text = sp if rendered else clean_text(lib_text(tid))
+    units = split_units(text, blocks=rendered)
     m = lib_meta(tid)
     return {"id": tid, "title": m.get("title", "") or
             ((text.strip().splitlines() or ["Untitled"])[0][:64]),
@@ -421,7 +461,9 @@ _DEFAULT_STATE = {
     "hideBar": True,
     # where each of the two voice wheels was left standing
     "vscrollM": 0, "vscrollF": 0,
-    "rgbSent": [255, 217, 59], "rgbWord": [226, 59, 78],
+    # Red: the band is the only highlight there is now, so it carries the
+    # whole job of saying where you are.
+    "rgbSent": [214, 45, 56], "rgbWord": [226, 59, 78],
     "rgbFont": [255, 255, 255], "rgbText": None,
     "starred": [],
 }
@@ -604,7 +646,8 @@ def mount(app_module, flask_app):
         raw = (j.get("text") or "").strip()
         if not raw:
             return jsonify({"error": "nothing to read"}), 400
-        return jsonify(text_payload(lib_save(raw)))
+        # The page's own rendering, when it made one. See lib_save.
+        return jsonify(text_payload(lib_save(raw, j.get("spoken") or "")))
 
     @flask_app.get("/reader/api/library")
     def r_library():

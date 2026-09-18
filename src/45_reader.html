@@ -28,21 +28,21 @@ body[data-theme="night"]{
   --bg:#080a10; --bg2:#0b0e15; --panel:#11141d; --line:#1d2230;
   --text:#cdd0d6; --dim:#7c8294; --faint:#565d6e;
   --page:#080a10; --page-text:#cdd0d6;
-  --sent:#ffd93b; --sent-fg:#10120a; --sent-soft:rgba(255,217,59,.34);
+  --sent:#d62d38; --sent-fg:#f4f6ee; --sent-soft:rgba(214,45,56,.34);
   --wordbg:#e23b4e; --wordfg:#ffffff;     /* the word being read, in red */
 }
 body[data-theme="sepia"]{
   --bg:#efe3cc; --bg2:#ece0c6; --panel:#e6d9bd; --line:#d6c5a1;
   --text:#4a3f2e; --dim:#8a7a5c; --faint:#a99a78;
   --page:#f4ead4; --page-text:#43392a;
-  --sent:#e7b53f; --sent-fg:#2a2113; --sent-soft:rgba(231,181,63,.40);
+  --sent:#c62834; --sent-fg:#f6f2f2; --sent-soft:rgba(198,40,52,.40);
   --wordbg:#c0392b; --wordfg:#ffffff;
 }
 body[data-theme="day"]{
   --bg:#f6f7fa; --bg2:#eef0f5; --panel:#ffffff; --line:#e1e4ea;
   --text:#1c2026; --dim:#5a616e; --faint:#9aa0ac;
   --page:#ffffff; --page-text:#1b1f25;
-  --sent:#ffd93b; --sent-fg:#10120a; --sent-soft:rgba(245,196,0,.30);
+  --sent:#d62d38; --sent-fg:#f4f6ee; --sent-soft:rgba(214,45,56,.30);
   --wordbg:#d62828; --wordfg:#ffffff;
 }
 :root{
@@ -1593,7 +1593,13 @@ const ST = {
   speed: 1.0, volume: 100, gap: 0.0, lag: 0.0, wgap: 0.0, loop: false,
   size: 4, autoplay: false, focus: false,
   theme: "night", font: "serif", lineheight: 3, wordhl: true,
-  rgbSent: [255,217,59], rgbWord: [226,59,78], rgbFont: [255,255,255],
+  /* RED, because that is what a teleprompter line is. The band is the only
+     highlight left now that the word marker is gone, so it carries the whole
+     job of saying where you are, and it should be unmistakable. --sent-fg is
+     not set alongside it: applyHiColors picks black or white from the
+     luminance of whatever colour is chosen, so a red band gets white text
+     without anyone having to remember to change a second setting. */
+  rgbSent: [214,45,56], rgbWord: [226,59,78], rgbFont: [255,255,255],
   rgbText: null,
   wordoffsets: {}, aimeta:false, resume:true,
 };
