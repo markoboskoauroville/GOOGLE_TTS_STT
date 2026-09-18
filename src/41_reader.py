@@ -335,6 +335,11 @@ def text_payload(tid):
 
 _SAFE = re.compile(r"[^A-Za-z0-9]+")
 
+# The key that made the most recent clip, for the response header. A single
+# slot and not a return value: it has to cross ensure_unit, which already
+# returns three things and is called from two places that do not care.
+SPOKE_BY = [None]
+
 
 def vkey_for(voice, emotion, pace):
     """One cache key for one way of speaking.
@@ -400,6 +405,22 @@ def synth(app, sentence, voice, emotion, pace, wav_path):
                     "speechConfig": {"voiceConfig": {
                         "prebuiltVoiceConfig": {"voiceName": voice}}}}}
 
+    # NOTHING LEFT IS NOT THE SAME AS EVERYTHING REFUSED.
+    #
+    # with_fallback walks the candidates the ledger says still have budget. If
+    # that list is empty it never asks anybody anything and returns "every key
+    # and model refused", which is untrue and unactionable: no key refused,
+    # there was simply nothing left to spend. Read as a refusal it sends
+    # somebody to check their keys, which are fine.
+    #
+    # It is worth its own answer because it is the ordinary end of a busy day
+    # — ten requests a key, and a long text is one request a sentence — and
+    # because unlike every other failure it has a KNOWN CURE with a time on
+    # it: the ledger rolls over at midnight Pacific.
+    if not app.candidates(app.TTS_CHAIN):
+        return 0.0, {"quota": True,
+                     "error": "The day's voice budget is used up.",
+                     "resets_in": int(app.seconds_to_reset())}
     r = app.with_fallback(app.TTS_CHAIN, payload)
     if not r.get("ok"):
         return 0.0, (r.get("error") or "the voice did not answer")
@@ -418,6 +439,16 @@ def synth(app, sentence, voice, emotion, pace, wav_path):
         app.spend(r["label"], r["model"], n=0, audio_out=secs)
     except Exception:
         pass
+    # Which key spoke, and what it has left after doing so. The page shows it
+    # and says so when one runs out, because the ring emptying silently is the
+    # thing that looked like the app breaking.
+    try:
+        d = app.read_ledger()
+        cap = app.limit_for(r["model"], "rpd") or 0
+        used = d.get("spend", {}).get("%s|%s" % (r["label"], r["model"]), 0)
+        SPOKE_BY[0] = {"label": r["label"], "left": max(cap - used, 0)}
+    except Exception:
+        SPOKE_BY[0] = {"label": r.get("label", ""), "left": -1}
     return secs, ""
 
 
@@ -609,7 +640,44 @@ def mount(app_module, flask_app):
 
     @flask_app.get("/reader/api/keys")
     def r_keys():
-        return jsonify({"keys": [], "note": "Gemini keys live in the Keys tab"})
+        """EVERY KEY, AND WHAT IS LEFT ON IT TODAY.
+
+        The ring already walks itself — candidates() sorts by budget remaining
+        and with_fallback moves on the moment one is spent, so falling back is
+        not a thing that needed building. What was missing is that it happened
+        in silence, and a ring quietly emptying looks exactly like an app that
+        works until the hour it does not.
+
+        The allowance per key is LEARNED, not assumed: `measured` says whether
+        the number came from the provider telling us its limit or from this
+        app's own guess, and a guess is labelled as one rather than shown as
+        a fact. See note_limit and read_quota in app.py.
+        """
+        d = app_module.read_ledger()
+        dead = d.get("dead", {})
+        rows = []
+        for label, key in app_module.load_ring():
+            per, left_total, used_total = [], 0, 0
+            for model in app_module.TTS_CHAIN:
+                cap = app_module.limit_for(model, "rpd") or 0
+                used = d.get("spend", {}).get("%s|%s" % (label, model), 0)
+                left = max(cap - used, 0)
+                left_total += left
+                used_total += used
+                per.append({"model": model, "used": used, "cap": cap,
+                            "left": left,
+                            "measured": (app_module.LIMITS.get(model, {})
+                                         .get("rpd") is not None)})
+            why = dead.get(label)
+            rows.append({"label": label, "mask": app_module.mask(key),
+                         "dead": bool(why), "why": (why or ""),
+                         "used": used_total,
+                         "left": (0 if why else left_total), "models": per})
+        live = [r for r in rows if not r["dead"]]
+        return jsonify({"keys": rows,
+                        "left": sum(r["left"] for r in live),
+                        "spent_keys": sum(1 for r in live if r["left"] == 0),
+                        "resets_in": int(app_module.seconds_to_reset())})
 
     @flask_app.get("/reader/api/groq/status")
     def r_groq_status():
@@ -693,8 +761,35 @@ def mount(app_module, flask_app):
     def r_audio(tid, vkey, idx):
         wav, _js, err = _unit(tid, vkey, idx)
         if err:
+            # A structured error carries through; a plain string is wrapped so
+            # the page always gets the same shape to read.
+            if isinstance(err, dict):
+                return jsonify(err), (503 if err.get("quota") else 400)
             return jsonify({"error": err}), 400
-        return send_file(wav, mimetype="audio/wav", conditional=True)
+        resp = send_file(wav, mimetype="audio/wav", conditional=True)
+        info = SPOKE_BY[0]
+        if info:
+            SPOKE_BY[0] = None
+            resp.headers["X-Gtt-Key"] = str(info.get("label", ""))[:40]
+            resp.headers["X-Gtt-Key-Left"] = str(info.get("left", -1))
+        return resp
+
+    @flask_app.get("/reader/api/budget")
+    def r_budget():
+        """What is left to speak with today, and when it comes back.
+
+        Shown in Settings, because running out is ordinary rather than
+        exceptional and finding out mid-sentence is the wrong moment."""
+        try:
+            b = app_module.budget()
+            tts = [m for m in b.get("models", []) if m.get("use") == "tts"]
+            left = sum(m.get("left", 0) for m in tts)
+            total = sum(m.get("total", 0) for m in tts)
+            return jsonify({"left": left, "total": total,
+                            "keys": b.get("keys_live", 0),
+                            "resets_in": int(app_module.seconds_to_reset())})
+        except Exception as e:
+            return jsonify({"left": None, "error": str(e)})
 
     # No bounds endpoint: it served the word times, and the only timing
     # left is the clip's own length, which the audio element already knows.

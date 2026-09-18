@@ -8,9 +8,9 @@
 #   src/10_app.py    9e4f2c4b39bb
 #   src/15_page.html 8968972cd977
 #   src/20_tail.sh   299ff8ca57a5
-#   src/41_reader.py     4681c1ff9b76
+#   src/41_reader.py     b72599ecf4da
 #   src/42_voicesex.py   693670981a6d
-#   src/45_reader.html   01a7e669162f
+#   src/45_reader.html   9df2d071631c
 #   src/46_marked.umd.js eaccee2fb9fb
 #   src/47_icon.svg      231dd5038e47
 #   src/voice_sex.json   35dcb92926b5
@@ -5755,6 +5755,11 @@ def text_payload(tid):
 
 _SAFE = re.compile(r"[^A-Za-z0-9]+")
 
+# The key that made the most recent clip, for the response header. A single
+# slot and not a return value: it has to cross ensure_unit, which already
+# returns three things and is called from two places that do not care.
+SPOKE_BY = [None]
+
 
 def vkey_for(voice, emotion, pace):
     """One cache key for one way of speaking.
@@ -5820,6 +5825,22 @@ def synth(app, sentence, voice, emotion, pace, wav_path):
                     "speechConfig": {"voiceConfig": {
                         "prebuiltVoiceConfig": {"voiceName": voice}}}}}
 
+    # NOTHING LEFT IS NOT THE SAME AS EVERYTHING REFUSED.
+    #
+    # with_fallback walks the candidates the ledger says still have budget. If
+    # that list is empty it never asks anybody anything and returns "every key
+    # and model refused", which is untrue and unactionable: no key refused,
+    # there was simply nothing left to spend. Read as a refusal it sends
+    # somebody to check their keys, which are fine.
+    #
+    # It is worth its own answer because it is the ordinary end of a busy day
+    # — ten requests a key, and a long text is one request a sentence — and
+    # because unlike every other failure it has a KNOWN CURE with a time on
+    # it: the ledger rolls over at midnight Pacific.
+    if not app.candidates(app.TTS_CHAIN):
+        return 0.0, {"quota": True,
+                     "error": "The day's voice budget is used up.",
+                     "resets_in": int(app.seconds_to_reset())}
     r = app.with_fallback(app.TTS_CHAIN, payload)
     if not r.get("ok"):
         return 0.0, (r.get("error") or "the voice did not answer")
@@ -5838,6 +5859,16 @@ def synth(app, sentence, voice, emotion, pace, wav_path):
         app.spend(r["label"], r["model"], n=0, audio_out=secs)
     except Exception:
         pass
+    # Which key spoke, and what it has left after doing so. The page shows it
+    # and says so when one runs out, because the ring emptying silently is the
+    # thing that looked like the app breaking.
+    try:
+        d = app.read_ledger()
+        cap = app.limit_for(r["model"], "rpd") or 0
+        used = d.get("spend", {}).get("%s|%s" % (r["label"], r["model"]), 0)
+        SPOKE_BY[0] = {"label": r["label"], "left": max(cap - used, 0)}
+    except Exception:
+        SPOKE_BY[0] = {"label": r.get("label", ""), "left": -1}
     return secs, ""
 
 
@@ -6029,7 +6060,44 @@ def mount(app_module, flask_app):
 
     @flask_app.get("/reader/api/keys")
     def r_keys():
-        return jsonify({"keys": [], "note": "Gemini keys live in the Keys tab"})
+        """EVERY KEY, AND WHAT IS LEFT ON IT TODAY.
+
+        The ring already walks itself — candidates() sorts by budget remaining
+        and with_fallback moves on the moment one is spent, so falling back is
+        not a thing that needed building. What was missing is that it happened
+        in silence, and a ring quietly emptying looks exactly like an app that
+        works until the hour it does not.
+
+        The allowance per key is LEARNED, not assumed: `measured` says whether
+        the number came from the provider telling us its limit or from this
+        app's own guess, and a guess is labelled as one rather than shown as
+        a fact. See note_limit and read_quota in app.py.
+        """
+        d = app_module.read_ledger()
+        dead = d.get("dead", {})
+        rows = []
+        for label, key in app_module.load_ring():
+            per, left_total, used_total = [], 0, 0
+            for model in app_module.TTS_CHAIN:
+                cap = app_module.limit_for(model, "rpd") or 0
+                used = d.get("spend", {}).get("%s|%s" % (label, model), 0)
+                left = max(cap - used, 0)
+                left_total += left
+                used_total += used
+                per.append({"model": model, "used": used, "cap": cap,
+                            "left": left,
+                            "measured": (app_module.LIMITS.get(model, {})
+                                         .get("rpd") is not None)})
+            why = dead.get(label)
+            rows.append({"label": label, "mask": app_module.mask(key),
+                         "dead": bool(why), "why": (why or ""),
+                         "used": used_total,
+                         "left": (0 if why else left_total), "models": per})
+        live = [r for r in rows if not r["dead"]]
+        return jsonify({"keys": rows,
+                        "left": sum(r["left"] for r in live),
+                        "spent_keys": sum(1 for r in live if r["left"] == 0),
+                        "resets_in": int(app_module.seconds_to_reset())})
 
     @flask_app.get("/reader/api/groq/status")
     def r_groq_status():
@@ -6113,8 +6181,35 @@ def mount(app_module, flask_app):
     def r_audio(tid, vkey, idx):
         wav, _js, err = _unit(tid, vkey, idx)
         if err:
+            # A structured error carries through; a plain string is wrapped so
+            # the page always gets the same shape to read.
+            if isinstance(err, dict):
+                return jsonify(err), (503 if err.get("quota") else 400)
             return jsonify({"error": err}), 400
-        return send_file(wav, mimetype="audio/wav", conditional=True)
+        resp = send_file(wav, mimetype="audio/wav", conditional=True)
+        info = SPOKE_BY[0]
+        if info:
+            SPOKE_BY[0] = None
+            resp.headers["X-Gtt-Key"] = str(info.get("label", ""))[:40]
+            resp.headers["X-Gtt-Key-Left"] = str(info.get("left", -1))
+        return resp
+
+    @flask_app.get("/reader/api/budget")
+    def r_budget():
+        """What is left to speak with today, and when it comes back.
+
+        Shown in Settings, because running out is ordinary rather than
+        exceptional and finding out mid-sentence is the wrong moment."""
+        try:
+            b = app_module.budget()
+            tts = [m for m in b.get("models", []) if m.get("use") == "tts"]
+            left = sum(m.get("left", 0) for m in tts)
+            total = sum(m.get("total", 0) for m in tts)
+            return jsonify({"left": left, "total": total,
+                            "keys": b.get("keys_live", 0),
+                            "resets_in": int(app_module.seconds_to_reset())})
+        except Exception as e:
+            return jsonify({"left": None, "error": str(e)})
 
     # No bounds endpoint: it served the word times, and the only timing
     # left is the clip's own length, which the audio element already knows.
@@ -6268,6 +6363,19 @@ header{
 
 /* ---------- Languages panel (Settings) ---------- */
 .langhint{font-size:11.5px; color:var(--faint); line-height:1.5; margin:2px 0 10px}
+/* One row per key: what it is, a bar of what is left, and the count. A ring
+   emptying quietly is what made the app look broken, so it is shown. */
+.keybars{display:flex; flex-direction:column; gap:5px; margin:2px 0 10px}
+.kbar{display:flex; align-items:center; gap:8px; font-size:11.5px}
+.kbar .kn{color:var(--dim); min-width:5.2em; overflow:hidden;
+  text-overflow:ellipsis; white-space:nowrap}
+.kbar .kt{flex:1; height:6px; border-radius:3px; background:var(--line);
+  overflow:hidden}
+.kbar .kf{height:100%; background:var(--play); border-radius:3px}
+.kbar.spent .kf{background:var(--exit)}
+.kbar.dead .kn{text-decoration:line-through; opacity:.6}
+.kbar .kv{color:var(--text); min-width:3.4em; text-align:right;
+  font-variant-numeric:tabular-nums}
 .emogroups{display:flex; flex-direction:column; gap:9px; margin-bottom:4px}
 .emogrp > b{display:block; font-size:10.5px; letter-spacing:.07em;
   text-transform:uppercase; color:var(--faint); margin:0 0 5px 2px}
@@ -7592,6 +7700,14 @@ body.fullread .reader-scroll{position:fixed; inset:0; max-height:none;
       <button class="chip" id="chromeTog">Open in Chrome</button>
     </div>
     <div class="langhint">Ask for Chrome by name instead of the phone default.</div>
+    <div class="wsub">Today's voice budget</div>
+    <div class="setlegend" id="budgetNote">checking&hellip;</div>
+    <div class="langhint">One request makes one sentence, so a long text costs
+      as many as it has sentences. The allowance is per key and per day and it
+      rolls over at midnight Pacific. A number marked <b>?</b> is this app's
+      own guess at the daily limit rather than one the provider stated.</div>
+    <div class="keybars" id="keyBars"></div>
+
     <div class="wsub">How it reads aloud</div>
     <div class="timing-help">Each sentence is synthesised into its own clip the
       first time it is reached, and three are kept ready ahead of the one
@@ -8184,6 +8300,51 @@ function loadDirection(){
     renderDirection();
   }).catch(()=>{});
 }
+/* WHAT IS LEFT TO SPEAK WITH TODAY.
+   Running out is ordinary — ten requests a key, one request a sentence — and
+   the wrong moment to discover it is halfway through a text. */
+function renderBudget(){
+  const el = $("#budgetNote");
+  if(!el) return;
+  api("/api/budget").then(r=>r.json()).then(d=>{
+    if(d.left === null || d.left === undefined){ el.textContent = "not known"; return; }
+    const mins = Math.round((d.resets_in || 0)/60);
+    const when = mins >= 120 ? Math.round(mins/60) + " hours"
+               : mins >= 60  ? "about an hour" : mins + " minutes";
+    el.textContent = d.left > 0
+      ? (d.left + " of " + d.total + " sentences left today, across " +
+         d.keys + " keys. Resets in " + when + ".")
+      : ("None left today. It comes back in " + when + ".");
+  }).catch(()=>{ el.textContent = "not known"; });
+}
+/* EVERY KEY AND WHAT IS LEFT ON IT. */
+function renderKeyBars(){
+  const box = $("#keyBars");
+  if(!box) return;
+  api("/api/keys").then(r=>r.json()).then(d=>{
+    box.innerHTML = "";
+    (d.keys || []).forEach((k, i)=>{
+      const cap = (k.models || []).reduce((a,m)=>a+(m.cap||0), 0) || 1;
+      const guess = (k.models || []).some(m=>!m.measured);
+      const row = document.createElement("div");
+      row.className = "kbar" + (k.dead ? " dead" : (k.left === 0 ? " spent" : ""));
+      const nm = document.createElement("span");
+      nm.className = "kn"; nm.textContent = "Key " + (i+1);
+      nm.title = k.label + "  " + k.mask + (k.why ? "  (" + k.why + ")" : "");
+      const tr = document.createElement("span"); tr.className = "kt";
+      const fl = document.createElement("span"); fl.className = "kf";
+      fl.style.width = Math.round(100 * (k.left / cap)) + "%";
+      tr.appendChild(fl);
+      const vv = document.createElement("span");
+      vv.className = "kv";
+      vv.textContent = k.dead ? (k.why || "dead")
+                              : (k.left + (guess ? " ?" : ""));
+      row.appendChild(nm); row.appendChild(tr); row.appendChild(vv);
+      box.appendChild(row);
+    });
+    if(!(d.keys || []).length) box.textContent = "no keys in the ring";
+  }).catch(()=>{ box.textContent = "not known"; });
+}
 function renderDirection(){
   const box = $("#emoGroups");
   if(box){
@@ -8465,6 +8626,7 @@ function setPane(p){
    right and the screen never heard about it. */
 function applyPane(){
   const pane = ST.pane || "edge";
+  if(pane === "app"){ try{ renderBudget(); renderKeyBars(); }catch(e){} }
   document.querySelectorAll("#engTabs .engtab").forEach(b=>
     b.classList.toggle("on", b.dataset.pane === pane));
   document.querySelectorAll("#sheet .group[data-eng]").forEach(g=>{
@@ -9367,6 +9529,7 @@ const PREFETCH_AHEAD = 3;       // sentences kept fetched ahead of the one playi
 const HANDOFF_LEAD = 0.04;      // cross to the next clip this early, in seconds
 const warmed = new Map();       // "tid/vkey/idx" -> promise, so we ask only once
 const clipUrls = new Map();     // "tid/vkey/idx" -> blob: URL of the finished mp3
+const clipErr  = new Map();     // "tid/vkey/idx" -> why it could not be made
 function warmKey(i){ return ST.tid+"/"+ST.vkey+"/"+i; }
 function clearWarm(){
   warmed.clear();
@@ -9383,7 +9546,14 @@ function warmUnit(i){
   const k = warmKey(i);
   if(warmed.has(k)) return warmed.get(k);
   const p = api(audioUrl(i))
-    .then(r => r.ok ? r.blob() : null)
+    .then(r => {
+      if(r.ok){ noteSpeakingKey(r); return r.blob(); }
+      /* Keep the reason. A clip that cannot be made is not a mystery to be
+         reported as "could not load": the server says whether the day's
+         budget is gone, and that is the whole of the useful answer. */
+      return r.json().then(j => { clipErr.set(k, j || {}); return null; })
+                     .catch(()=> { clipErr.set(k, {}); return null; });
+    })
     .then(b => {
       if(!b) return null;
       const u = URL.createObjectURL(b);
@@ -9455,9 +9625,22 @@ function startGenerating(from){
       genDone = Math.max(genDone, i+1); genNote(); return worker();
     }
     api(audioUrlFor(tid, vkey, i))
+      .then(r=>{
+        if(r && !r.ok && r.status === 503){
+          /* The day's budget is gone. Asking for the remaining fourteen
+             sentences will not change that; it only spends the time proving
+             it again. */
+          return r.json().catch(()=>({})).then(j=>{
+            clipErr.set(tid+"/"+vkey+"/"+i, j || {});
+            stopGenerating();
+            return "stop";
+          });
+        }
+        return null;
+      })
       .catch(()=>null)
-      .then(()=>{
-        if(!alive()) return;
+      .then((halt)=>{
+        if(halt === "stop" || !alive()) return;
         genDone = Math.max(genDone, i+1);
         genNote();
         worker();
@@ -9555,6 +9738,50 @@ function wgRunAt(runs, t){        /* binary search: zero cost per frame */
   }
   return -1;
 }
+/* A SENTENCE THAT CANNOT BE MADE STOPS THE READING, AND SAYS SO.
+   It used to set a status line and nothing else: ST.playing stayed true, the
+   button kept showing pause, the spinner kept turning, and the app sat there
+   looking exactly like an app that was reading. It had stopped at sentence 19
+   of 33 and every visible thing said otherwise.
+
+   Stopping honestly means all of it: the state, the icon, the spinner, the
+   background run — and the reason, which is nearly always the same reason and
+   has a time on it. */
+function clipFailed(i){
+  const k = warmKey(i);
+  /* The audio element fetches the url itself, and an element's error event
+     carries no body — so the REASON comes from our own parallel fetch, which
+     may not have landed yet. Wait for it once rather than reporting "could
+     not load" when the server took the trouble to say why. */
+  if(!clipErr.has(k) && warmed.has(k)){
+    const done = ()=> reportClipFailure(i);
+    warmed.get(k).then(done, done);
+    return;
+  }
+  reportClipFailure(i);
+}
+function reportClipFailure(i){
+  const why = clipErr.get(warmKey(i)) || {};
+  stopGenerating();
+  busyHide();
+  ST.playing = false; setPlayIcon(false);
+  try{ highlight(ST.idx, true); }catch(e){}
+  if(why.quota){
+    const mins = Math.max(1, Math.round((why.resets_in || 0) / 60));
+    const when = mins >= 120 ? Math.round(mins/60) + " hours"
+               : mins >= 60  ? "about an hour"
+                             : mins + " minutes";
+    setStatus("Stopped at sentence " + (i+1) + ". " + why.error +
+              " It comes back in " + when + ".");
+    toast("Voice budget used up \u2014 back in " + when);
+  } else {
+    setStatus("Stopped at sentence " + (i+1) + ". " +
+              (why.error || "That sentence could not be made.") +
+              " Press play to try again.");
+    toast("Could not make sentence " + (i+1));
+  }
+}
+
 /* ---------- core playback ---------- */
 function startAt(i, viaHandoff){
   atEnd = false;
@@ -9589,12 +9816,17 @@ function startAt(i, viaHandoff){
   if(!clipReady(i)){
     const n = ST.sentences.length;
     busyShow("Generating sentence " + (i + 1) + " of " + n);
+    /* Asked for through api() as well as by the element, because only this
+       one can read the server's answer when it is not audio. The server
+       makes the clip once and holds a lock, so the second caller waits and
+       gets the same file rather than a second synthesis. */
+    warmUnit(i);
   } else {
     busyHide();
   }
   const seq = ++playSeq;
   el.onended = ()=> onEnded(i, seq);
-  el.onerror = ()=> setStatus("Could not load sentence "+(i+1)+".");
+  el.onerror = ()=> clipFailed(i);
   prefetchAhead(i);
   armNext(i);
   const p = el.play(); if(p && p.catch) p.catch(()=>{});
@@ -9937,6 +10169,27 @@ function busyHide(){
   const w = $("#busyWrap");
   if(w) w.classList.remove("on");
   if(busyT){ clearInterval(busyT); busyT = null; }
+}
+/* WHICH KEY IS SPEAKING, AND WHEN ONE RUNS DRY.
+   The ring has always fallen back by itself: the candidate list is sorted by
+   what is left and a spent key simply stops being a candidate. What it never
+   did was say so, and a ring emptying in silence is what made the reading
+   stop at sentence nineteen and look like a broken app rather than a spent
+   allowance. So the key that spoke rides back on the response, and the moment
+   one hits zero it is announced — once per key, not once per sentence. */
+let lastKey = "", spentSaid = {};
+function noteSpeakingKey(r){
+  try{
+    const label = r.headers.get("X-Gtt-Key") || "";
+    const left = parseInt(r.headers.get("X-Gtt-Key-Left") || "-1", 10);
+    if(!label) return;
+    if(left === 0 && !spentSaid[label]){
+      spentSaid[label] = 1;
+      toast("That key is spent for today \u2014 moving to another");
+      try{ renderKeyBars(); }catch(e){}
+    }
+    lastKey = label;
+  }catch(e){}
 }
 /* Is this sentence already in hand? The clip is fetched into a blob the
    moment it exists, so having the blob IS being ready. */
@@ -11724,7 +11977,7 @@ function boot(){
     applyPane(); renderSpAccents(); renderSpGrid(); renderSpKeys();
     renderEdgeGrid(); renderSpKeyList(); renderSpDead(); loadCroVoices();
     renderGroq(); wireGroq(); renderKeyList(); wireKeys();
-    loadDirection(); armBarHide();
+    loadDirection(); armBarHide(); renderBudget(); renderKeyBars();
     mediaSetup(); wireFloat(); wireFloatF(); wireFloatS(); wireFsWatch(); wirePersistFlush();
     renderVoices(); renderLangList();
     applySpeed(); applyVolume(); applyGap(); applyLag(); applySize();

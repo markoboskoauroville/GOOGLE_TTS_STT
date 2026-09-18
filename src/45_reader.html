@@ -141,6 +141,19 @@ header{
 
 /* ---------- Languages panel (Settings) ---------- */
 .langhint{font-size:11.5px; color:var(--faint); line-height:1.5; margin:2px 0 10px}
+/* One row per key: what it is, a bar of what is left, and the count. A ring
+   emptying quietly is what made the app look broken, so it is shown. */
+.keybars{display:flex; flex-direction:column; gap:5px; margin:2px 0 10px}
+.kbar{display:flex; align-items:center; gap:8px; font-size:11.5px}
+.kbar .kn{color:var(--dim); min-width:5.2em; overflow:hidden;
+  text-overflow:ellipsis; white-space:nowrap}
+.kbar .kt{flex:1; height:6px; border-radius:3px; background:var(--line);
+  overflow:hidden}
+.kbar .kf{height:100%; background:var(--play); border-radius:3px}
+.kbar.spent .kf{background:var(--exit)}
+.kbar.dead .kn{text-decoration:line-through; opacity:.6}
+.kbar .kv{color:var(--text); min-width:3.4em; text-align:right;
+  font-variant-numeric:tabular-nums}
 .emogroups{display:flex; flex-direction:column; gap:9px; margin-bottom:4px}
 .emogrp > b{display:block; font-size:10.5px; letter-spacing:.07em;
   text-transform:uppercase; color:var(--faint); margin:0 0 5px 2px}
@@ -1465,6 +1478,14 @@ body.fullread .reader-scroll{position:fixed; inset:0; max-height:none;
       <button class="chip" id="chromeTog">Open in Chrome</button>
     </div>
     <div class="langhint">Ask for Chrome by name instead of the phone default.</div>
+    <div class="wsub">Today's voice budget</div>
+    <div class="setlegend" id="budgetNote">checking&hellip;</div>
+    <div class="langhint">One request makes one sentence, so a long text costs
+      as many as it has sentences. The allowance is per key and per day and it
+      rolls over at midnight Pacific. A number marked <b>?</b> is this app's
+      own guess at the daily limit rather than one the provider stated.</div>
+    <div class="keybars" id="keyBars"></div>
+
     <div class="wsub">How it reads aloud</div>
     <div class="timing-help">Each sentence is synthesised into its own clip the
       first time it is reached, and three are kept ready ahead of the one
@@ -2057,6 +2078,51 @@ function loadDirection(){
     renderDirection();
   }).catch(()=>{});
 }
+/* WHAT IS LEFT TO SPEAK WITH TODAY.
+   Running out is ordinary — ten requests a key, one request a sentence — and
+   the wrong moment to discover it is halfway through a text. */
+function renderBudget(){
+  const el = $("#budgetNote");
+  if(!el) return;
+  api("/api/budget").then(r=>r.json()).then(d=>{
+    if(d.left === null || d.left === undefined){ el.textContent = "not known"; return; }
+    const mins = Math.round((d.resets_in || 0)/60);
+    const when = mins >= 120 ? Math.round(mins/60) + " hours"
+               : mins >= 60  ? "about an hour" : mins + " minutes";
+    el.textContent = d.left > 0
+      ? (d.left + " of " + d.total + " sentences left today, across " +
+         d.keys + " keys. Resets in " + when + ".")
+      : ("None left today. It comes back in " + when + ".");
+  }).catch(()=>{ el.textContent = "not known"; });
+}
+/* EVERY KEY AND WHAT IS LEFT ON IT. */
+function renderKeyBars(){
+  const box = $("#keyBars");
+  if(!box) return;
+  api("/api/keys").then(r=>r.json()).then(d=>{
+    box.innerHTML = "";
+    (d.keys || []).forEach((k, i)=>{
+      const cap = (k.models || []).reduce((a,m)=>a+(m.cap||0), 0) || 1;
+      const guess = (k.models || []).some(m=>!m.measured);
+      const row = document.createElement("div");
+      row.className = "kbar" + (k.dead ? " dead" : (k.left === 0 ? " spent" : ""));
+      const nm = document.createElement("span");
+      nm.className = "kn"; nm.textContent = "Key " + (i+1);
+      nm.title = k.label + "  " + k.mask + (k.why ? "  (" + k.why + ")" : "");
+      const tr = document.createElement("span"); tr.className = "kt";
+      const fl = document.createElement("span"); fl.className = "kf";
+      fl.style.width = Math.round(100 * (k.left / cap)) + "%";
+      tr.appendChild(fl);
+      const vv = document.createElement("span");
+      vv.className = "kv";
+      vv.textContent = k.dead ? (k.why || "dead")
+                              : (k.left + (guess ? " ?" : ""));
+      row.appendChild(nm); row.appendChild(tr); row.appendChild(vv);
+      box.appendChild(row);
+    });
+    if(!(d.keys || []).length) box.textContent = "no keys in the ring";
+  }).catch(()=>{ box.textContent = "not known"; });
+}
 function renderDirection(){
   const box = $("#emoGroups");
   if(box){
@@ -2338,6 +2404,7 @@ function setPane(p){
    right and the screen never heard about it. */
 function applyPane(){
   const pane = ST.pane || "edge";
+  if(pane === "app"){ try{ renderBudget(); renderKeyBars(); }catch(e){} }
   document.querySelectorAll("#engTabs .engtab").forEach(b=>
     b.classList.toggle("on", b.dataset.pane === pane));
   document.querySelectorAll("#sheet .group[data-eng]").forEach(g=>{
@@ -3240,6 +3307,7 @@ const PREFETCH_AHEAD = 3;       // sentences kept fetched ahead of the one playi
 const HANDOFF_LEAD = 0.04;      // cross to the next clip this early, in seconds
 const warmed = new Map();       // "tid/vkey/idx" -> promise, so we ask only once
 const clipUrls = new Map();     // "tid/vkey/idx" -> blob: URL of the finished mp3
+const clipErr  = new Map();     // "tid/vkey/idx" -> why it could not be made
 function warmKey(i){ return ST.tid+"/"+ST.vkey+"/"+i; }
 function clearWarm(){
   warmed.clear();
@@ -3256,7 +3324,14 @@ function warmUnit(i){
   const k = warmKey(i);
   if(warmed.has(k)) return warmed.get(k);
   const p = api(audioUrl(i))
-    .then(r => r.ok ? r.blob() : null)
+    .then(r => {
+      if(r.ok){ noteSpeakingKey(r); return r.blob(); }
+      /* Keep the reason. A clip that cannot be made is not a mystery to be
+         reported as "could not load": the server says whether the day's
+         budget is gone, and that is the whole of the useful answer. */
+      return r.json().then(j => { clipErr.set(k, j || {}); return null; })
+                     .catch(()=> { clipErr.set(k, {}); return null; });
+    })
     .then(b => {
       if(!b) return null;
       const u = URL.createObjectURL(b);
@@ -3328,9 +3403,22 @@ function startGenerating(from){
       genDone = Math.max(genDone, i+1); genNote(); return worker();
     }
     api(audioUrlFor(tid, vkey, i))
+      .then(r=>{
+        if(r && !r.ok && r.status === 503){
+          /* The day's budget is gone. Asking for the remaining fourteen
+             sentences will not change that; it only spends the time proving
+             it again. */
+          return r.json().catch(()=>({})).then(j=>{
+            clipErr.set(tid+"/"+vkey+"/"+i, j || {});
+            stopGenerating();
+            return "stop";
+          });
+        }
+        return null;
+      })
       .catch(()=>null)
-      .then(()=>{
-        if(!alive()) return;
+      .then((halt)=>{
+        if(halt === "stop" || !alive()) return;
         genDone = Math.max(genDone, i+1);
         genNote();
         worker();
@@ -3428,6 +3516,50 @@ function wgRunAt(runs, t){        /* binary search: zero cost per frame */
   }
   return -1;
 }
+/* A SENTENCE THAT CANNOT BE MADE STOPS THE READING, AND SAYS SO.
+   It used to set a status line and nothing else: ST.playing stayed true, the
+   button kept showing pause, the spinner kept turning, and the app sat there
+   looking exactly like an app that was reading. It had stopped at sentence 19
+   of 33 and every visible thing said otherwise.
+
+   Stopping honestly means all of it: the state, the icon, the spinner, the
+   background run — and the reason, which is nearly always the same reason and
+   has a time on it. */
+function clipFailed(i){
+  const k = warmKey(i);
+  /* The audio element fetches the url itself, and an element's error event
+     carries no body — so the REASON comes from our own parallel fetch, which
+     may not have landed yet. Wait for it once rather than reporting "could
+     not load" when the server took the trouble to say why. */
+  if(!clipErr.has(k) && warmed.has(k)){
+    const done = ()=> reportClipFailure(i);
+    warmed.get(k).then(done, done);
+    return;
+  }
+  reportClipFailure(i);
+}
+function reportClipFailure(i){
+  const why = clipErr.get(warmKey(i)) || {};
+  stopGenerating();
+  busyHide();
+  ST.playing = false; setPlayIcon(false);
+  try{ highlight(ST.idx, true); }catch(e){}
+  if(why.quota){
+    const mins = Math.max(1, Math.round((why.resets_in || 0) / 60));
+    const when = mins >= 120 ? Math.round(mins/60) + " hours"
+               : mins >= 60  ? "about an hour"
+                             : mins + " minutes";
+    setStatus("Stopped at sentence " + (i+1) + ". " + why.error +
+              " It comes back in " + when + ".");
+    toast("Voice budget used up \u2014 back in " + when);
+  } else {
+    setStatus("Stopped at sentence " + (i+1) + ". " +
+              (why.error || "That sentence could not be made.") +
+              " Press play to try again.");
+    toast("Could not make sentence " + (i+1));
+  }
+}
+
 /* ---------- core playback ---------- */
 function startAt(i, viaHandoff){
   atEnd = false;
@@ -3462,12 +3594,17 @@ function startAt(i, viaHandoff){
   if(!clipReady(i)){
     const n = ST.sentences.length;
     busyShow("Generating sentence " + (i + 1) + " of " + n);
+    /* Asked for through api() as well as by the element, because only this
+       one can read the server's answer when it is not audio. The server
+       makes the clip once and holds a lock, so the second caller waits and
+       gets the same file rather than a second synthesis. */
+    warmUnit(i);
   } else {
     busyHide();
   }
   const seq = ++playSeq;
   el.onended = ()=> onEnded(i, seq);
-  el.onerror = ()=> setStatus("Could not load sentence "+(i+1)+".");
+  el.onerror = ()=> clipFailed(i);
   prefetchAhead(i);
   armNext(i);
   const p = el.play(); if(p && p.catch) p.catch(()=>{});
@@ -3810,6 +3947,27 @@ function busyHide(){
   const w = $("#busyWrap");
   if(w) w.classList.remove("on");
   if(busyT){ clearInterval(busyT); busyT = null; }
+}
+/* WHICH KEY IS SPEAKING, AND WHEN ONE RUNS DRY.
+   The ring has always fallen back by itself: the candidate list is sorted by
+   what is left and a spent key simply stops being a candidate. What it never
+   did was say so, and a ring emptying in silence is what made the reading
+   stop at sentence nineteen and look like a broken app rather than a spent
+   allowance. So the key that spoke rides back on the response, and the moment
+   one hits zero it is announced — once per key, not once per sentence. */
+let lastKey = "", spentSaid = {};
+function noteSpeakingKey(r){
+  try{
+    const label = r.headers.get("X-Gtt-Key") || "";
+    const left = parseInt(r.headers.get("X-Gtt-Key-Left") || "-1", 10);
+    if(!label) return;
+    if(left === 0 && !spentSaid[label]){
+      spentSaid[label] = 1;
+      toast("That key is spent for today \u2014 moving to another");
+      try{ renderKeyBars(); }catch(e){}
+    }
+    lastKey = label;
+  }catch(e){}
 }
 /* Is this sentence already in hand? The clip is fetched into a blob the
    moment it exists, so having the blob IS being ready. */
@@ -5597,7 +5755,7 @@ function boot(){
     applyPane(); renderSpAccents(); renderSpGrid(); renderSpKeys();
     renderEdgeGrid(); renderSpKeyList(); renderSpDead(); loadCroVoices();
     renderGroq(); wireGroq(); renderKeyList(); wireKeys();
-    loadDirection(); armBarHide();
+    loadDirection(); armBarHide(); renderBudget(); renderKeyBars();
     mediaSetup(); wireFloat(); wireFloatF(); wireFloatS(); wireFsWatch(); wirePersistFlush();
     renderVoices(); renderLangList();
     applySpeed(); applyVolume(); applyGap(); applyLag(); applySize();
