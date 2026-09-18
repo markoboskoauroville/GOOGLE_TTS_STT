@@ -10,7 +10,7 @@
 #   src/20_tail.sh   299ff8ca57a5
 #   src/41_reader.py     4681c1ff9b76
 #   src/42_voicesex.py   693670981a6d
-#   src/45_reader.html   73c942399f6e
+#   src/45_reader.html   01a7e669162f
 #   src/46_marked.umd.js eaccee2fb9fb
 #   src/47_icon.svg      231dd5038e47
 #   src/voice_sex.json   35dcb92926b5
@@ -8242,15 +8242,52 @@ function vkeyNow(){
 /* Changing the direction changes the audio, so everything measured about the
    old audio has to go with it. Same shape as changing the voice, because it
    is the same kind of change. */
-function directionChanged(msg){
-  ST.vkey = vkeyNow();
+/* ================= RULE TWO: THE SENTENCE IN HAND FINISHES =================
+   Touching the voice, the direction or the pace says: from here on, read it
+   differently. It does NOT say: stop in the middle of this sentence and say
+   it again.
+
+   So the change is held. The sentence being spoken finishes in the voice it
+   started in — cutting a sentence in half and restarting it is jarring, and
+   the half already heard was not wrong, it was just the old choice — and the
+   new one takes effect at the NEXT sentence, which is then generated, along
+   with everything after it, under the new settings.
+
+   Changing it while nothing is playing applies at once: there is no sentence
+   in hand to protect.
+
+   The held change also switches OFF the early handover in follow(), which
+   crosses into the next clip forty milliseconds before this one ends. That
+   clip was made with the old voice. Letting it cross would play exactly the
+   one sentence the change was supposed to catch. */
+let PENDING = null;          /* a vkey waiting for the current sentence to end */
+
+function voiceChanged(msg){
+  const want = vkeyNow();
+  if(want === ST.vkey && !PENDING){ if(msg) setStatus(msg); return; }
+  if(ST.tid && ST.playing){
+    PENDING = want;
+    renderVoices(); try{ renderDirection(); }catch(e){} persist();
+    setStatus((msg ? msg + " \u2014 " : "") + "from the next sentence");
+    toast("From the next sentence");
+    return;
+  }
+  applyVoiceNow(want, msg);
+}
+/* Take the held change: new key, nothing kept from the old voice, and the
+   whole rest of the text queued up again under the new one. */
+function applyVoiceNow(vkey, msg){
+  PENDING = null;
+  ST.vkey = vkey || vkeyNow();
   clearWarm();
-  const wasPlaying = ST.playing;
-  renderVoices(); renderDirection(); persist();
-  if(ST.tid && wasPlaying){ startAt(ST.idx); }
-  if(ST.tid) prefetch(ST.idx);
+  renderVoices(); try{ renderDirection(); }catch(e){} persist();
+  if(ST.tid){
+    prefetch(ST.idx);
+    startGenerating(ST.idx);          /* rule one, under the new settings */
+  }
   if(msg) setStatus(msg);
 }
+function directionChanged(msg){ voiceChanged(msg); }
 function setVoice(id, quiet){
   /* A Croatian seat is not a catalogue voice, it is a choice of WHICH foreign
      voice reads Croatian, so it is stored as that and nothing else moves. */
@@ -8275,14 +8312,9 @@ function setVoice(id, quiet){
     return;
   }
   const v = anyVoice(id); if(!v) return;
-  const wasPlaying = ST.playing;
-  ST.voice = id; ST.vkey = vkeyNow();
-  clearWarm();
-  renderVoices(); persist();
-  if(ST.tid && wasPlaying){ startAt(ST.idx); }
-  if(ST.tid) prefetch(ST.idx);
+  ST.voice = id;
   try{ renderEdgeGrid(); }catch(e){}
-  setStatus("Voice: " + v.name + ", " + (v.label || "clear"));
+  voiceChanged("Voice: " + v.name + ", " + (v.label || "clear"));
 }
 
 /* ---------- the two engines ---------- */
@@ -9305,7 +9337,7 @@ function follow(){
      negative gap, that much earlier still) and only once the next clip is
      genuinely decoded and waiting, so the two run into each other seamlessly. */
   const dur = el.duration;
-  if(!handedOff && ST.gap <= 0 && dur && isFinite(dur)){
+  if(!handedOff && !PENDING && ST.gap <= 0 && dur && isFinite(dur)){
     const ni = ST.idx + 1;
     const cross = dur + Math.min(ST.gap, -HANDOFF_LEAD);
     if(ni < ST.sentences.length && el.currentTime >= cross && nextReady(ni)){
@@ -9367,6 +9399,85 @@ function warmUnit(i){
 function prefetch(i){
   if(i<0 || i>=ST.sentences.length) return;
   warmUnit(i);
+}
+
+/* ================= RULE ONE: FINISH THE TEXT =================
+   ONCE A TEXT STARTS BEING READ, EVERY SENTENCE IN IT IS GENERATED, IN ORDER,
+   TO THE END. Not three ahead and no further: to the end, and it does not
+   stop for anything except the text being closed or the voice being changed.
+
+   Why this and not a window: a sentence takes about three seconds to make and
+   about four to speak, so generation outruns playback — but only while it is
+   running. Keeping three ahead meant that pausing for a minute, or a slow
+   sentence, or a moment of bad signal, left the reader waiting at exactly the
+   place a window would have covered if it had simply carried on. Carrying on
+   costs nothing once the clip is on disk: it is made once per voice and kept.
+
+   TWO AT A TIME, not all at once. The server makes one clip per request and
+   the ring has a per-minute limit; firing a hundred requests at a paste would
+   spend the day's budget in a minute and arrive out of order. Two keeps the
+   pipe full and stays polite.
+
+   THE BODY IS THROWN AWAY. warmUnit keeps the blob for the sentences about to
+   play, because a blob is a swap and a fetch is a round trip. Out here only
+   the FILE matters: the point is that the server has made it, so that when
+   the reader arrives the answer is instant. Holding four hundred clips in
+   memory to prove it would be the same mistake in the other direction. */
+const GEN_WORKERS = 2;
+let genSeq = 0, genDone = 0, genTotal = 0, genFor = "";
+
+function audioUrlFor(tid, vkey, i){
+  return `${READER}/api/audio/${tid}/${vkey}/${i}.wav`;
+}
+function stopGenerating(){ genSeq++; genDone = 0; genTotal = 0; genFor = ""; }
+/* Called on every sentence, so it must be idempotent: a run already going for
+   this text in this voice is left alone rather than restarted from the top. */
+function ensureGenerating(from){
+  if(genFor === ST.tid + "/" + ST.vkey) return;
+  startGenerating(from);
+}
+
+function startGenerating(from){
+  stopGenerating();
+  genFor = ST.tid + "/" + ST.vkey;
+  const mine = genSeq, tid = ST.tid, vkey = ST.vkey;
+  const n = (ST.sentences || []).length;
+  if(!tid || !n) return;
+  let next = Math.max(0, from|0);
+  genTotal = n; genDone = next;
+  const alive = ()=> mine === genSeq && tid === ST.tid && vkey === ST.vkey;
+  const worker = ()=>{
+    if(!alive()) return;
+    if(next >= n){ genNote(); return; }
+    const i = next++;
+    /* A clip already in hand needs no request at all. */
+    if(clipUrls.has(tid+"/"+vkey+"/"+i)){
+      genDone = Math.max(genDone, i+1); genNote(); return worker();
+    }
+    api(audioUrlFor(tid, vkey, i))
+      .catch(()=>null)
+      .then(()=>{
+        if(!alive()) return;
+        genDone = Math.max(genDone, i+1);
+        genNote();
+        worker();
+      });
+  };
+  for(let w=0; w<GEN_WORKERS; w++) worker();
+}
+/* What the notice says while the background run is going. It never speaks
+   over the one that says a sentence is being waited FOR: that one is about
+   the reader standing still, this one is about work happening behind it. */
+function genNote(){
+  if(genTotal && genDone < genTotal){
+    if(!$("#busyWrap").classList.contains("on"))
+      busyShow("Generating " + (genDone+1) + " of " + genTotal);
+    else if(($("#busyWhat").textContent||"").indexOf("Generating ") === 0)
+      $("#busyWhat").textContent = "Generating " + (genDone+1) + " of " + genTotal;
+  } else if(genTotal && genDone >= genTotal){
+    if(($("#busyWhat").textContent||"").indexOf("Generating ") === 0) busyHide();
+    genTotal = 0;
+  }
 }
 /* keep three sentences ready while the current one plays */
 function prefetchAhead(i){
@@ -9467,6 +9578,11 @@ function startAt(i, viaHandoff){
   ST.idx = i; ST.playing = true; handedOff = false;
   highlight(i, false); setPlayIcon(true);
   el.playbackRate = ST.speed; el.volume = ST.volume/100;
+  /* RULE ONE. Reading has started, so every sentence to the end of the text
+     is queued up now — not on merely opening it, which would spend the day's
+     budget on a text somebody glanced at and closed. Idempotent: this runs on
+     every sentence and only the first one starts anything. */
+  ensureGenerating(0);
   /* Say so BEFORE the wait, not after it. If the clip is already in hand
      this never shows at all, which is the common case once reading is under
      way and three sentences are always kept ahead. */
@@ -9497,6 +9613,9 @@ function onEnded(i, seq){
   if(seq !== playSeq) return;   /* an overlapped predecessor finishing: ignore */
   if(handedOff) return;         /* follow() already crossed over */
   const ni = i + 1;
+  /* The sentence that was protected has finished. Take the change now, before
+     deciding what plays next, so the next one is made the new way. */
+  if(PENDING) applyVoiceNow(PENDING, "");
   if(ni >= ST.sentences.length){
     if(ST.loop){ startAt(0); return; }
     atEnd = true;
@@ -9910,7 +10029,7 @@ function openPayload(p, autoplay){
      it. Speech and highlight share these coordinates. */
   ST.spoken = (typeof p.spoken === "string") ? p.spoken : "";
   ST.spans  = Array.isArray(p.spans) ? p.spans : [];
-  handedOff = false; clearWarm();
+  handedOff = false; PENDING = null; clearWarm();
   $("#readerTitle").textContent = ST.title;
   renderDoc(); markSession(); updateCounter(); showReader();
   prefetchAhead(-1);
@@ -10457,6 +10576,7 @@ function bind(){
 /* Only one thing may speak at a time. Starting either player silences the
    other; opening a new text stops whatever was playing before. */
 function stopOnline(){
+  stopGenerating(); PENDING = null;
   try{ cancelGap(); }catch(e){}
   ST.playing=false; try{ setPlayIcon(false); }catch(e){}
   players.forEach(p=>{ try{ p.pause(); }catch(e){} });
