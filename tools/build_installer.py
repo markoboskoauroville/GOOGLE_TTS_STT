@@ -178,6 +178,41 @@ def main():
         if not os.path.exists(latest) or open(latest).read().strip() != name:
             print("STALE: LATEST does not say %s" % name)
             return 1
+        # THE VERSION MUST HAVE BEEN BUMPED FOR THIS CHANGE.
+        #
+        # --check proved the installer matches src/. It did not prove the
+        # NUMBER moved, and on 18.9.2026 that gap shipped nine different
+        # installers all called v23, each one overwriting the last on GitHub.
+        # gtt-update compares numbers, so a phone already on v23 was told
+        # "already on v23, nothing to do" and could not receive any of them.
+        #
+        # modules/versioning.md: every change is a new number, and never
+        # overwrite a file that has left the machine. This is that rule with
+        # a check behind it: if the installer differs from the committed copy
+        # under the same name, the number is stale.
+        # The try wraps ONLY the git calls, and only because git may be
+        # absent. It used to wrap the whole block including the message, which
+        # referred to a variable that is not in scope here — so the guard
+        # raised NameError on the line that was supposed to report the
+        # problem, the bare except swallowed it, and the check printed
+        # "fresh". A guard inside a blanket except is a guard that can fail
+        # silently, which is the thing it was written to prevent.
+        tracked = changed = False
+        try:
+            tracked = subprocess.run(
+                ["git", "-C", ROOT, "ls-files", "--error-unmatch", name],
+                capture_output=True).returncode == 0
+            if tracked:
+                changed = subprocess.run(
+                    ["git", "-C", ROOT, "diff", "--quiet", "HEAD", "--", name],
+                    capture_output=True).returncode != 0
+        except OSError:
+            pass                       # no git here: nothing to compare against
+        if tracked and changed:
+            print("STALE: %s has changed but VERSION is still %d.\n"
+                  "       Every change is a new number "
+                  "(modules/versioning.md §1)." % (name, version()))
+            return 1
         print("fresh: %s" % name)
         return 0
 

@@ -5,7 +5,7 @@
 #   src/00_head.sh   9b27f46ee8bc
 #   src/30_transcribe.html   67e73826805d   vendored, engine swapped at build
 #   src/seed/                 47 cached previews
-#   src/10_app.py    37b04f43fc0b
+#   src/10_app.py    8bcfc6eea147
 #   src/15_page.html 8968972cd977
 #   src/20_tail.sh   299ff8ca57a5
 #   src/41_reader.py     153752ae042a
@@ -27,10 +27,10 @@
 # ledgers, and two ledgers that each think they own the daily budget are both
 # wrong by dinner time.
 #
-#   bash 23-google-tts-stt-v23.sh                 install
-#   bash 23-google-tts-stt-v23.sh --keys FILE     install, and take the keys out of FILE
-#   bash 23-google-tts-stt-v23.sh --test          install, then run the four tests
-#   bash 23-google-tts-stt-v23.sh --verify        check this file is whole, change nothing
+#   bash 24-google-tts-stt-v24.sh                 install
+#   bash 24-google-tts-stt-v24.sh --keys FILE     install, and take the keys out of FILE
+#   bash 24-google-tts-stt-v24.sh --test          install, then run the four tests
+#   bash 24-google-tts-stt-v24.sh --verify        check this file is whole, change nothing
 #
 # INSTALLING SPENDS NOTHING. The four tests make real calls against a real
 # ring, and a TTS account has ten requests a day, so they run when you ask for
@@ -53,8 +53,8 @@
 
 set -u
 
-GTT_VERSION="v23"
-GTT_FILE="23-google-tts-stt-v23.sh"
+GTT_VERSION="v24"
+GTT_FILE="24-google-tts-stt-v24.sh"
 GTT_REPO="markoboskoauroville/GOOGLE_TTS_STT"
 
 # --- the platform layer, and nothing below this block knows the platform ---
@@ -254,7 +254,7 @@ try:
 except Exception:
     PACIFIC = timezone(timedelta(hours=-8))
 
-VERSION = 23
+VERSION = 24
 PORT = int(os.environ.get("GTTS_PORT", "7311"))
 KEYFILE = os.environ.get("GEMINI_KEYS", os.path.expanduser("~/.gemini_keys"))
 HOME = os.path.expanduser("~/.google_tts_stt")
