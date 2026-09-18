@@ -341,6 +341,50 @@ _SAFE = re.compile(r"[^A-Za-z0-9]+")
 SPOKE_BY = [None]
 
 
+# ---------------------------------------------------------------------------
+# THE CURRENT KEY
+# ---------------------------------------------------------------------------
+# ONE KEY AT A TIME, NAMED, AND CHANGED ON PURPOSE.
+#
+# The ring used to walk itself: sorted by budget, first one that answers wins.
+# That is the right behaviour for a thing nobody is watching, and the wrong one
+# for this. Two reasons it was wrong here:
+#
+#   * eighteen keys means up to eighteen round trips to discover the ring is
+#     empty, and every one of them is a wait with nothing happening on screen
+#   * whoever is reading cannot say which key is speaking, because it changes
+#     per sentence and silently
+#
+# So there is a CURRENT key. It is named on screen at all times, it is the only
+# one asked, and it moves when a person moves it. Stepping to the next one is
+# one press and costs nothing until the next sentence proves it.
+
+def ring_labels(app):
+    return [l for l, _k in app.load_ring()]
+
+
+def current_key(app):
+    """The pinned key, or the first in the ring if none has been chosen yet.
+    Always a name, never empty — a blank here is what made the old ring
+    impossible to talk about."""
+    labels = ring_labels(app)
+    if not labels:
+        return ""
+    want = (load_state().get("pinnedKey") or "").strip()
+    return want if want in labels else labels[0]
+
+
+def step_key(app, by=1):
+    """Move to the next key and remember it. Spends nothing."""
+    labels = ring_labels(app)
+    if not labels:
+        return "", 0, 0
+    cur = current_key(app)
+    i = (labels.index(cur) + by) % len(labels)
+    save_state({"pinnedKey": labels[i]})
+    return labels[i], i + 1, len(labels)
+
+
 def vkey_for(voice, emotion, pace):
     """One cache key for one way of speaking.
 
@@ -417,11 +461,10 @@ def synth(app, sentence, voice, emotion, pace, wav_path):
     # — ten requests a key, and a long text is one request a sentence — and
     # because unlike every other failure it has a KNOWN CURE with a time on
     # it: the ledger rolls over at midnight Pacific.
-    if not app.candidates(app.TTS_CHAIN):
-        return 0.0, {"quota": True,
-                     "error": "The day's voice budget is used up.",
-                     "resets_in": int(app.seconds_to_reset())}
-    r = app.with_fallback(app.TTS_CHAIN, payload)
+    pin = current_key(app)
+    if not pin:
+        return 0.0, {"error": "there are no keys in the ring"}
+    r = app.with_fallback(app.TTS_CHAIN, payload, only=current_key(app))
     if not r.get("ok"):
         return 0.0, (r.get("error") or "the voice did not answer")
     import base64
@@ -494,6 +537,8 @@ _DEFAULT_STATE = {
     "hideBar": True,
     # where each of the two voice wheels was left standing
     "vscrollM": 0, "vscrollF": 0,
+    # which key speaks. Empty means "the first one"; see current_key.
+    "pinnedKey": "",
     # None means the THEME decides the band. Each scheme names its own, and a
     # colour here would win over all of them, so switching scheme would leave
     # the highlight behind wearing the old one.
@@ -785,32 +830,32 @@ def mount(app_module, flask_app):
             resp.headers["X-Gtt-Key-Left"] = str(info.get("left", -1))
         return resp
 
-    @flask_app.post("/reader/api/rescan")
-    def r_rescan():
-        """Forget today's refusals and let the ring be tried again.
+    @flask_app.post("/reader/api/nextkey")
+    def r_nextkey():
+        """Step to the next key in the ring. Costs nothing.
 
-        A wall is the provider saying no AT A MOMENT, and a free tier is not a
-        cliff: a key that answered 429 half an hour ago can answer 200 now.
-        Measured here on 18.9.2026 — `calisthenics` refused, then spoke a few
-        minutes later. The wall exists so the discovery pass is not repeated on
-        every sentence, not because the refusal is permanent.
+        NO SCANNING. The old button cleared every refusal and let the ring walk
+        itself, which on eighteen keys is eighteen round trips and a wait with
+        nothing on screen. This moves the pin one place and says the name. The
+        test is the next sentence: if it speaks, that key works, and you have
+        the sentence as well as the answer. If it does not, press again.
 
-        So this is the one thing the app cannot decide for itself: whether it
-        is worth spending a round trip per key to find out again. Pressing it
-        says yes. It clears nothing else — a key marked DEAD stays dead, since
-        that is about the key rather than about today.
+        The wall on the key being moved TO is cleared, because pressing this is
+        somebody saying "try that one" and a wall is only a note that it
+        refused earlier. A key marked DEAD is skipped entirely — that is about
+        the key rather than about today.
         """
+        label, idx, total = step_key(app_module, 1)
+        if not label:
+            return jsonify({"ok": False, "error": "there are no keys"}), 400
         with app_module._lock:
             d = app_module.read_ledger()
-            cleared = len(d.get("wall", {}))
-            d["wall"] = {}
+            w = d.get("wall", {})
+            for m in app_module.TTS_CHAIN:
+                w.pop("%s|%s" % (label, m), None)
+            d["wall"] = w
             app_module.write_ledger(d)
-        ring = app_module.load_ring()
-        dead = app_module.read_ledger().get("dead", {})
-        return jsonify({"ok": True, "cleared": cleared,
-                        "keys_ok": sum(1 for l, _k in ring if l not in dead),
-                        "keys_total": len(ring),
-                        "resets_in": int(app_module.seconds_to_reset())})
+        return jsonify({"ok": True, "key": label, "index": idx, "total": total})
 
     @flask_app.get("/reader/api/budget")
     def r_budget():
@@ -840,10 +885,14 @@ def mount(app_module, flask_app):
                        for m in app_module.TTS_CHAIN):
                     continue
                 ok += 1                      # still worth asking
+            cur = current_key(app_module)
+            labels = ring_labels(app_module)
             return jsonify({"left": left, "total": total, "made": made,
                             "keys": b.get("keys_live", 0),
                             "keys_ok": ok, "keys_total": len(ring),
                             "keys_spent": len(ring) - ok,
+                            "key": cur,
+                            "key_index": (labels.index(cur) + 1) if cur in labels else 0,
                             "resets_in": int(app_module.seconds_to_reset())})
         except Exception as e:
             return jsonify({"left": None, "error": str(e)})

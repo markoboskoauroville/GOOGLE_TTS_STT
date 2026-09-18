@@ -5,12 +5,12 @@
 #   src/00_head.sh   9b27f46ee8bc
 #   src/30_transcribe.html   67e73826805d   vendored, engine swapped at build
 #   src/seed/                 47 cached previews
-#   src/10_app.py    bb3ccbcad372
+#   src/10_app.py    96b2cb9effa5
 #   src/15_page.html 8968972cd977
 #   src/20_tail.sh   299ff8ca57a5
-#   src/41_reader.py     a7850187f02c
+#   src/41_reader.py     85c25014221e
 #   src/42_voicesex.py   693670981a6d
-#   src/45_reader.html   df18bf99a4f0
+#   src/45_reader.html   19566e2535fd
 #   src/46_marked.umd.js eaccee2fb9fb
 #   src/47_icon.svg      231dd5038e47
 #   src/voice_sex.json   35dcb92926b5
@@ -27,10 +27,10 @@
 # ledgers, and two ledgers that each think they own the daily budget are both
 # wrong by dinner time.
 #
-#   bash 27-google-tts-stt-v27.sh                 install
-#   bash 27-google-tts-stt-v27.sh --keys FILE     install, and take the keys out of FILE
-#   bash 27-google-tts-stt-v27.sh --test          install, then run the four tests
-#   bash 27-google-tts-stt-v27.sh --verify        check this file is whole, change nothing
+#   bash 28-google-tts-stt-v28.sh                 install
+#   bash 28-google-tts-stt-v28.sh --keys FILE     install, and take the keys out of FILE
+#   bash 28-google-tts-stt-v28.sh --test          install, then run the four tests
+#   bash 28-google-tts-stt-v28.sh --verify        check this file is whole, change nothing
 #
 # INSTALLING SPENDS NOTHING. The four tests make real calls against a real
 # ring, and a TTS account has ten requests a day, so they run when you ask for
@@ -53,8 +53,8 @@
 
 set -u
 
-GTT_VERSION="v27"
-GTT_FILE="27-google-tts-stt-v27.sh"
+GTT_VERSION="v28"
+GTT_FILE="28-google-tts-stt-v28.sh"
 GTT_REPO="markoboskoauroville/GOOGLE_TTS_STT"
 
 # --- the platform layer, and nothing below this block knows the platform ---
@@ -254,7 +254,7 @@ try:
 except Exception:
     PACIFIC = timezone(timedelta(hours=-8))
 
-VERSION = 27
+VERSION = 28
 PORT = int(os.environ.get("GTTS_PORT", "7311"))
 KEYFILE = os.environ.get("GEMINI_KEYS", os.path.expanduser("~/.gemini_keys"))
 HOME = os.path.expanduser("~/.google_tts_stt")
@@ -765,10 +765,27 @@ def candidates(chain):
     return [(l, k, m) for _, l, k, m in fresh + overdrawn]
 
 
-def with_fallback(chain, build_payload, verb="generateContent", tries=40):
-    """Walks the ring. A 429 costs nothing but a retry, and teaches the ledger."""
+def with_fallback(chain, build_payload, verb="generateContent", tries=40,
+                  only=None):
+    """Walks the ring. A 429 costs nothing but a retry, and teaches the ledger.
+
+    `only` pins it to ONE key. The reader uses that: walking eighteen keys to
+    find a live one spends eighteen round trips and leaves nobody able to say
+    which key is speaking. Pinned, the answer is always one name, and moving
+    to the next key is something a person does on purpose. Everything else —
+    the classifier, the wall, the learned limit — is unchanged, because a
+    refusal means the same thing whoever it came from.
+    """
     log = []
-    for label, key, model in candidates(chain)[:tries]:
+    cands = candidates(chain)
+    if only:
+        cands = [c for c in cands if c[0] == only]
+        if not cands:
+            # the pin names a key the ledger would skip; ask it anyway, which
+            # is the entire point of having pinned it
+            cands = [(l, k, m) for l, k in load_ring() if l == only
+                     for m in chain]
+    for label, key, model in cands[:tries]:
         code, body = post(model, verb, build_payload(model), key)
         if code == 200:
             spend(label, model)
@@ -5798,6 +5815,50 @@ _SAFE = re.compile(r"[^A-Za-z0-9]+")
 SPOKE_BY = [None]
 
 
+# ---------------------------------------------------------------------------
+# THE CURRENT KEY
+# ---------------------------------------------------------------------------
+# ONE KEY AT A TIME, NAMED, AND CHANGED ON PURPOSE.
+#
+# The ring used to walk itself: sorted by budget, first one that answers wins.
+# That is the right behaviour for a thing nobody is watching, and the wrong one
+# for this. Two reasons it was wrong here:
+#
+#   * eighteen keys means up to eighteen round trips to discover the ring is
+#     empty, and every one of them is a wait with nothing happening on screen
+#   * whoever is reading cannot say which key is speaking, because it changes
+#     per sentence and silently
+#
+# So there is a CURRENT key. It is named on screen at all times, it is the only
+# one asked, and it moves when a person moves it. Stepping to the next one is
+# one press and costs nothing until the next sentence proves it.
+
+def ring_labels(app):
+    return [l for l, _k in app.load_ring()]
+
+
+def current_key(app):
+    """The pinned key, or the first in the ring if none has been chosen yet.
+    Always a name, never empty — a blank here is what made the old ring
+    impossible to talk about."""
+    labels = ring_labels(app)
+    if not labels:
+        return ""
+    want = (load_state().get("pinnedKey") or "").strip()
+    return want if want in labels else labels[0]
+
+
+def step_key(app, by=1):
+    """Move to the next key and remember it. Spends nothing."""
+    labels = ring_labels(app)
+    if not labels:
+        return "", 0, 0
+    cur = current_key(app)
+    i = (labels.index(cur) + by) % len(labels)
+    save_state({"pinnedKey": labels[i]})
+    return labels[i], i + 1, len(labels)
+
+
 def vkey_for(voice, emotion, pace):
     """One cache key for one way of speaking.
 
@@ -5874,11 +5935,10 @@ def synth(app, sentence, voice, emotion, pace, wav_path):
     # — ten requests a key, and a long text is one request a sentence — and
     # because unlike every other failure it has a KNOWN CURE with a time on
     # it: the ledger rolls over at midnight Pacific.
-    if not app.candidates(app.TTS_CHAIN):
-        return 0.0, {"quota": True,
-                     "error": "The day's voice budget is used up.",
-                     "resets_in": int(app.seconds_to_reset())}
-    r = app.with_fallback(app.TTS_CHAIN, payload)
+    pin = current_key(app)
+    if not pin:
+        return 0.0, {"error": "there are no keys in the ring"}
+    r = app.with_fallback(app.TTS_CHAIN, payload, only=current_key(app))
     if not r.get("ok"):
         return 0.0, (r.get("error") or "the voice did not answer")
     import base64
@@ -5951,6 +6011,8 @@ _DEFAULT_STATE = {
     "hideBar": True,
     # where each of the two voice wheels was left standing
     "vscrollM": 0, "vscrollF": 0,
+    # which key speaks. Empty means "the first one"; see current_key.
+    "pinnedKey": "",
     # None means the THEME decides the band. Each scheme names its own, and a
     # colour here would win over all of them, so switching scheme would leave
     # the highlight behind wearing the old one.
@@ -6242,32 +6304,32 @@ def mount(app_module, flask_app):
             resp.headers["X-Gtt-Key-Left"] = str(info.get("left", -1))
         return resp
 
-    @flask_app.post("/reader/api/rescan")
-    def r_rescan():
-        """Forget today's refusals and let the ring be tried again.
+    @flask_app.post("/reader/api/nextkey")
+    def r_nextkey():
+        """Step to the next key in the ring. Costs nothing.
 
-        A wall is the provider saying no AT A MOMENT, and a free tier is not a
-        cliff: a key that answered 429 half an hour ago can answer 200 now.
-        Measured here on 18.9.2026 — `calisthenics` refused, then spoke a few
-        minutes later. The wall exists so the discovery pass is not repeated on
-        every sentence, not because the refusal is permanent.
+        NO SCANNING. The old button cleared every refusal and let the ring walk
+        itself, which on eighteen keys is eighteen round trips and a wait with
+        nothing on screen. This moves the pin one place and says the name. The
+        test is the next sentence: if it speaks, that key works, and you have
+        the sentence as well as the answer. If it does not, press again.
 
-        So this is the one thing the app cannot decide for itself: whether it
-        is worth spending a round trip per key to find out again. Pressing it
-        says yes. It clears nothing else — a key marked DEAD stays dead, since
-        that is about the key rather than about today.
+        The wall on the key being moved TO is cleared, because pressing this is
+        somebody saying "try that one" and a wall is only a note that it
+        refused earlier. A key marked DEAD is skipped entirely — that is about
+        the key rather than about today.
         """
+        label, idx, total = step_key(app_module, 1)
+        if not label:
+            return jsonify({"ok": False, "error": "there are no keys"}), 400
         with app_module._lock:
             d = app_module.read_ledger()
-            cleared = len(d.get("wall", {}))
-            d["wall"] = {}
+            w = d.get("wall", {})
+            for m in app_module.TTS_CHAIN:
+                w.pop("%s|%s" % (label, m), None)
+            d["wall"] = w
             app_module.write_ledger(d)
-        ring = app_module.load_ring()
-        dead = app_module.read_ledger().get("dead", {})
-        return jsonify({"ok": True, "cleared": cleared,
-                        "keys_ok": sum(1 for l, _k in ring if l not in dead),
-                        "keys_total": len(ring),
-                        "resets_in": int(app_module.seconds_to_reset())})
+        return jsonify({"ok": True, "key": label, "index": idx, "total": total})
 
     @flask_app.get("/reader/api/budget")
     def r_budget():
@@ -6297,10 +6359,14 @@ def mount(app_module, flask_app):
                        for m in app_module.TTS_CHAIN):
                     continue
                 ok += 1                      # still worth asking
+            cur = current_key(app_module)
+            labels = ring_labels(app_module)
             return jsonify({"left": left, "total": total, "made": made,
                             "keys": b.get("keys_live", 0),
                             "keys_ok": ok, "keys_total": len(ring),
                             "keys_spent": len(ring) - ok,
+                            "key": cur,
+                            "key_index": (labels.index(cur) + 1) if cur in labels else 0,
                             "resets_in": int(app_module.seconds_to_reset())})
         except Exception as e:
             return jsonify({"left": None, "error": str(e)})
@@ -6965,12 +7031,6 @@ body.mode-edit .doc.mdhidden{display:none}
   display:flex; align-items:center; justify-content:center}
 .sheet-x:active{color:var(--text); border-color:var(--tune)}
 
-.toast{position:fixed; left:50%; bottom:calc(18px + env(safe-area-inset-bottom));
-  transform:translateX(-50%); background:var(--panel); color:var(--text);
-  border:1px solid var(--line); border-radius:10px; padding:10px 16px;
-  font-size:13px; z-index:60; box-shadow:0 6px 24px rgba(0,0,0,.5);
-  max-width:90%; opacity:0; transition:opacity .2s; pointer-events:none}
-.toast.show{opacity:1}
 
 /* ---------- v2: tabs, offline reader, help ---------- */
 .topbar{display:flex; align-items:center; gap:6px; margin-bottom:8px}
@@ -7397,14 +7457,14 @@ body.fullread:not(.hasfloat):not(.hasfloatf) > .fsout{display:flex !important}
    the right way round.
 
    What stays: the text, and the one floating button to get out. That is all.
-   The toast stays too, because a message you cannot see is worse than useless,
-   and the paste catcher stays because it only opens when it is wanted. */
+   The wait notice stays, because in here there is nothing else on screen to
+   say the app is alive, and the paste catcher stays because it only opens
+   when it is wanted. The toast used to be on this list; there is no toast. */
 body.fullread > *{display:none !important}
 body.fullread > main{display:block !important}
 body.fullread > .floatp{display:flex !important}
 body.fullread > .floatf{display:flex !important}
 body.fullread > .floats{display:flex !important}
-body.fullread > .toast{display:block !important}
 /* The wait notice is exactly the thing you need in immersive, where there is
    nothing else on screen at all to say whether the app is still alive. */
 body.fullread > .busywrap.on{display:flex !important}
@@ -7899,7 +7959,6 @@ body.fullread .reader-scroll{position:fixed; inset:0; max-height:none;
        stroke-linecap="round" stroke-linejoin="round">
     <path d="M4 9h3a2 2 0 0 0 2-2V4M20 9h-3a2 2 0 0 1-2-2V4M4 15h3a2 2 0 0 1 2 2v3M20 15h-3a2 2 0 0 0-2 2v3"/>
   </svg></button>
-<div class="toast" id="toast"></div>
 
 <!-- marked, vendored whole. No build step, no CDN, no network: the phone is
      often offline and this is a local server. If the file is missing or fails
@@ -8048,10 +8107,18 @@ let armWanted = -1;
    word times. Empty for a clip the server could not measure. */
 
 /* ---------- helpers ---------- */
-function toast(msg){
-  const t = $("#toast"); t.textContent = msg; t.classList.add("show");
-  clearTimeout(toast._t); toast._t = setTimeout(()=>t.classList.remove("show"),2600);
-}
+/* ---------- SAYING SOMETHING ----------
+   There was a toast here: a box that slid up, said one thing, and took it
+   away after 2.6 seconds. It is gone, and not because it was ugly. A message
+   that removes itself is a message you have to be looking at, and the moment
+   you most want it — an error while your eyes are on the text — is the moment
+   you are not.
+
+   So everything that used to pop up now goes to the status line and STAYS
+   there until something replaces it. Same eighty-six messages, same words, a
+   place to read them in your own time. The ring has its own line below this
+   one; this is for everything else. */
+function say(msg){ setStatus(msg); }
 /* THE URL MUST NAME THE VOICE THAT WILL SPEAK.
    A Speechify vkey says only "Speechify"; which voice and which model
    actually speak is decided from the language switch and the two seats. So
@@ -8099,7 +8166,7 @@ function autoDetect(text){
       if(was !== ST.langAuto){
         renderVoices(); renderEdgeGrid();
         try{ renderCroGrid(); }catch(e){}
-        toast((ST.langAuto === "hr" ? "Croatian" : "English") +
+        say((ST.langAuto === "hr" ? "Croatian" : "English") +
               (d.by === "groq" ? "" : " (guessed here)"));
       }
       persist();
@@ -8232,7 +8299,7 @@ function previewVoice(v){
   const done = (msg)=>{
     if(PREVIEW !== a) return;
     stopPreview();
-    if(msg) toast(msg);
+    if(msg) say(msg);
     if(PREVIEW_WAS){ PREVIEW_WAS = false; try{ resume(); }catch(e){} }
   };
   a.onended = ()=> done("");
@@ -8576,7 +8643,7 @@ function voiceChanged(msg){
     PENDING = want;
     renderVoices(); try{ renderDirection(); }catch(e){} persist();
     setStatus((msg ? msg + " \u2014 " : "") + "from the next sentence");
-    toast("From the next sentence");
+    say("From the next sentence");
     return;
   }
   applyVoiceNow(want, msg);
@@ -8614,7 +8681,7 @@ function setVoice(id, quiet){
     persist();
     if(!quiet){
       const cv = (CROV || []).find(x => x.id === ST.croVoice);
-      toast((cv ? cv.name : "That voice") + " reads Croatian");
+      say((cv ? cv.name : "That voice") + " reads Croatian");
     }
     return;
   }
@@ -8654,7 +8721,7 @@ function soundChanged(why){
     setTimeout(()=>{ try{ startAt(at); }catch(e){} }, 40);
   }
   persistNow();
-  if(why) toast(why);
+  if(why) say(why);
 }
 
 function setLang(l){
@@ -8676,7 +8743,7 @@ function setLang(l){
   soundChanged("");
   try{ renderCroGrid(); }catch(e){}
   persist();
-  toast(l === "auto" ? "Language decided automatically"
+  say(l === "auto" ? "Language decided automatically"
       : l === "hr"   ? "Reading Croatian" : "Reading English");
   if(l === "auto") autoDetect();
 }
@@ -8696,17 +8763,17 @@ function setLang(l){
    minute the first time, and nothing at all the second. */
 function downloadOne(){
   const b = $("#dlBtn"); if(!b) return;
-  if(!ST.tid){ toast("Nothing to save yet."); return; }
+  if(!ST.tid){ say("Nothing to save yet."); return; }
   if(b.classList.contains("busy")) return;
   b.classList.add("busy");
-  toast("Making one file. The first time takes a moment.");
+  say("Making one file. The first time takes a moment.");
   api("/api/download_one", {method:"POST",
       headers:{"Content-Type":"application/json"},
       body: JSON.stringify({tid: ST.tid, vkey: ST.vkey})})
     .then(r=>r.json()).then(d=>{
       b.classList.remove("busy");
-      if(d.error){ toast(d.error); return; }
-      toast("Saved: " + (d.name || "one mp3"));
+      if(d.error){ say(d.error); return; }
+      say("Saved: " + (d.name || "one mp3"));
       /* handed to the browser as a normal download, so it lands wherever
          downloads land on this machine and needs no file permission */
       const a = document.createElement("a");
@@ -8714,7 +8781,7 @@ function downloadOne(){
       a.download = d.name || "reading.mp3";
       document.body.appendChild(a); a.click(); a.remove();
     })
-    .catch(()=>{ b.classList.remove("busy"); toast("Could not make the file."); });
+    .catch(()=>{ b.classList.remove("busy"); say("Could not make the file."); });
 }
 /* The three floater switches live on the dashboard now. They were buried in
    Advanced, which is a poor home for something toggled several times a day. */
@@ -8737,7 +8804,7 @@ function wireFloatTogs(){
       ST[key] = !ST[key];
       refreshToggles(); renderFloatTogs(); persistNow();
       if(ST[key]){ try{ place(); }catch(e){} }
-      toast(label + (ST[key] ? " shown" : " hidden"));
+      say(label + (ST[key] ? " shown" : " hidden"));
     };
   });
 }
@@ -8846,8 +8913,8 @@ function renderVoiceRadios(){
         const a = new Audio(url); a.dataset.u = url; croAudio = a;
         play.innerHTML = "&#9632;";
         a.onended = stopCroPreview;
-        a.onerror = ()=>{ stopCroPreview(); toast("Could not play that voice."); };
-        a.play().catch(()=>{ stopCroPreview(); toast("Could not play that voice."); });
+        a.onerror = ()=>{ stopCroPreview(); say("Could not play that voice."); };
+        a.play().catch(()=>{ stopCroPreview(); say("Could not play that voice."); });
       };
       row.onclick = ()=> pick(v);
       row.appendChild(dot); row.appendChild(txt); row.appendChild(play);
@@ -8906,17 +8973,17 @@ function wireKeys(){
     file.onchange = ()=>{
       const f=file.files && file.files[0]; if(!f) return;
       const fd=new FormData(); fd.append("file", f);
-      toast("Reading the file...");
+      say("Reading the file...");
       api("/api/keys/import",{method:"POST", body:fd}).then(r=>r.json()).then(d=>{
-        if(d.error){ toast(d.error); return; }
+        if(d.error){ say(d.error); return; }
         const bits=[];
         Object.keys(d.added||{}).forEach(p=>bits.push(d.added[p]+" "+p));
         const other=Object.keys(d.other||{});
         let msg = bits.length ? ("Added " + bits.join(", ")) : "Nothing new to add";
         if(other.length) msg += " \u00b7 " + other.join(", ") + " not needed here";
-        toast(msg);
+        say(msg);
         renderKeyList(); renderGroq(); try{ renderSpKeyList(); }catch(e){}
-      }).catch(()=>toast("Could not read that file."));
+      }).catch(()=>say("Could not read that file."));
       file.value="";
     };
   }
@@ -8934,11 +9001,11 @@ function renderGroq(){
 function wireGroq(){
   const test=$("#groqTest");
   if(test) test.onclick = ()=>{
-    toast("Asking Groq...");
+    say("Asking Groq...");
     api("/api/groq/test", {method:"POST"}).then(r=>r.json()).then(d=>{
-      toast(d.ok ? ("Groq answered, using " + d.model) : (d.err || "Groq did not answer"));
+      say(d.ok ? ("Groq answered, using " + d.model) : (d.err || "Groq did not answer"));
       renderGroq();
-    }).catch(()=>toast("Groq could not be reached."));
+    }).catch(()=>say("Groq could not be reached."));
   };
 }
 function renderSpKeyList(){
@@ -9004,8 +9071,8 @@ function renderSpDead(){
 function spKeyAction(url, fp, msg){
   api(url, {method:"POST", headers:{"Content-Type":"application/json"},
             body: JSON.stringify({fp: fp})})
-    .then(r=>r.json()).then(d=>{ applySpInfo(d); toast(msg); })
-    .catch(()=> toast("Could not reach the server."));
+    .then(r=>r.json()).then(d=>{ applySpInfo(d); say(msg); })
+    .catch(()=> say("Could not reach the server."));
 }
 function renderSpKeys(){
   const st = $("#spKeyState"), err = $("#spKeyErr"), line = $("#spState");
@@ -9058,7 +9125,7 @@ function setSpAccent(acc){
       if(ST.engine === "speechify" && list.length &&
          !list.some(v=>v.id===ST.voice)){ setVoice(list[0].id); }
       persist();
-    }).catch(()=> toast("Could not reach Speechify."));
+    }).catch(()=> say("Could not reach Speechify."));
 }
 
 /* ---------- Markdown, phase 1: detect, parse once, sanitise ----------
@@ -9908,6 +9975,7 @@ function clipFailed(i){
 }
 function reportClipFailure(i){
   const why = clipErr.get(warmKey(i)) || {};
+  KEYLINE.trying = "";        /* it did not speak: the trial is over too */
   stopGenerating();
   busyHide();
   ST.playing = false; setPlayIcon(false);
@@ -9921,15 +9989,15 @@ function reportClipFailure(i){
     setStatus("Stopped at sentence " + (i+1) + ". " + why.error +
               " It comes back in " + when + ".");
     /* The line keeps it. The toast is the glance; this is the record. */
-    KEYLINE.err = "s" + (i+1) + " every key spent today";
-    toast("Voice budget used up \u2014 back in " + when);
+    KEYLINE.err = "s" + (i+1) + " refused \u2014 press > for the next key";
+    say("Voice budget used up \u2014 back in " + when);
   } else {
     setStatus("Stopped at sentence " + (i+1) + ". " +
               (why.error || "That sentence could not be made.") +
               " Press play to try again.");
     KEYLINE.err = "s" + (i+1) + " " +
-                  String(why.error || "could not be made").slice(0, 40);
-    toast("Could not make sentence " + (i+1));
+                  String(why.error || "could not be made").slice(0, 34);
+    say("Could not make sentence " + (i+1));
   }
   renderKeyLine();
   pollBudget(true);
@@ -10234,9 +10302,9 @@ function applyHiColors(){
 }
 /* tap the number itself to come back to the resting value */
 function resetTune(kind){
-  if(kind==="speed"){ ST.speed = 1.0; applySpeed(); toast("Speed 1.00"); }
-  else if(kind==="gap"){ ST.gap = 0.0; applyGap(); toast("Sentence pause 0.00"); }
-  else if(kind==="lag"){ ST.lag = 0.0; applyLag(); toast("Jumps at once"); }
+  if(kind==="speed"){ ST.speed = 1.0; applySpeed(); say("Speed 1.00"); }
+  else if(kind==="gap"){ ST.gap = 0.0; applyGap(); say("Sentence pause 0.00"); }
+  else if(kind==="lag"){ ST.lag = 0.0; applyLag(); say("Jumps at once"); }
 
   else return;
   persist();
@@ -10330,8 +10398,8 @@ function busyHide(){
    browser, which is already standing in the right timezone — so it reads
    09:00 in Croatia without this app having to know where Croatia is, and it
    stays correct on a plane. */
-const KEYLINE = {key:"", made:null, spent:null, all:null,
-                 resetAt:0, err:""};
+const KEYLINE = {key:"", kidx:0, made:null, spent:null, all:null,
+                 resetAt:0, err:"", trying:""};
 function resetClock(){
   if(!KEYLINE.resetAt) return "--:--";
   try{
@@ -10352,14 +10420,20 @@ function renderKeyLine(){
      counted each one as we asked for it — and how many keys the PROVIDER has
      refused today is a fact too. Neither can contradict the audio playing. */
   const made = (KEYLINE.made === null) ? "--" : (KEYLINE.made + " made");
-  const keys = (KEYLINE.spent === null) ? ""
-             : (KEYLINE.spent + "/" + KEYLINE.all + " spent" + dot);
+  /* THE KEY IS ALWAYS NAMED, whether it has spoken yet or not. It is the one
+     that will be asked, and knowing which one that is before it is asked is
+     the whole reason it is pinned. k4/18 so its place in the ring is visible
+     too: stepping is a walk along a list, and a walk needs a position. */
+  const who = KEYLINE.key
+    ? ((KEYLINE.kidx ? "k" + KEYLINE.kidx + "/" + KEYLINE.all + " " : "") + KEYLINE.key)
+    : "no keys";
   let txt;
-  if(KEYLINE.err){
-    txt = "! " + KEYLINE.err + dot + made + dot + keys + "back " + resetClock();
+  if(KEYLINE.trying){
+    txt = who + dot + "trying\u2026" + dot + made + dot + "back " + resetClock();
+  } else if(KEYLINE.err){
+    txt = "! " + who + dot + KEYLINE.err + dot + made + dot + "back " + resetClock();
   } else {
-    txt = (KEYLINE.key || "idle") + dot + made + dot + keys +
-          "back " + resetClock();
+    txt = who + dot + made + dot + "back " + resetClock();
   }
   el.textContent = txt;
   el.classList.toggle("bad", !!KEYLINE.err);
@@ -10374,24 +10448,28 @@ function renderKeyLine(){
    ring walks itself and stops at the first key that answers, which is the
    only way to find out who has anything left — a free tier does not publish a
    balance, and the only honest probe is the work itself. */
-function rescanKeys(){
+/* ONE STEP ALONG THE RING.
+   Not a scan. The name changes the instant it is pressed, and the test is the
+   next sentence — if it speaks, that key works and you have the sentence too;
+   if it does not, press again. Eighteen presses is eighteen deliberate acts;
+   one press that quietly tries eighteen keys is a minute of nothing. */
+function nextKey(){
   const b = $("#rescanBtn");
   if(b && b.classList.contains("busy")) return;
   if(b) b.classList.add("busy");
-  KEYLINE.err = "";
-  KEYLINE.key = "scanning the ring\u2026";
-  renderKeyLine();
-  api("/api/rescan", {method:"POST"}).then(r=>r.json()).then(d=>{
-    spentSaid = {};                       /* say it again if one runs out */
-    KEYLINE.key = "";
+  api("/api/nextkey", {method:"POST"}).then(r=>r.json()).then(d=>{
+    if(!d.ok) throw new Error(d.error || "no keys");
+    spentSaid = {};
+    KEYLINE.key = d.key; KEYLINE.kidx = d.index; KEYLINE.all = d.total;
+    KEYLINE.err = ""; KEYLINE.trying = d.key;
+    renderKeyLine();
+    /* the sentence IS the test */
+    if(ST.tid) startAt(ST.idx);
+    else { KEYLINE.trying = ""; renderKeyLine(); }
     pollBudget(true);
     try{ renderKeyBars(); }catch(e){}
-    toast(d.cleared ? ("Trying " + d.keys_ok + " keys again")
-                    : "Nothing was being skipped");
-    /* If the reading stopped on a failed sentence, this is the moment it was
-       pressed for: pick it up where it fell over. */
-    if(ST.tid && !ST.playing) startAt(ST.idx);
   }).catch(()=>{
+    KEYLINE.trying = "";
     KEYLINE.err = "could not reach the server";
     renderKeyLine();
   }).then(()=>{ if(b) b.classList.remove("busy"); });
@@ -10406,6 +10484,8 @@ function pollBudget(force){
     KEYLINE.made = (typeof d.made === "number") ? d.made : null;
     KEYLINE.spent = (typeof d.keys_spent === "number") ? d.keys_spent : null;
     KEYLINE.all = d.keys_total;
+    /* the pinned key, so the line names it before it has spoken a word */
+    if(!KEYLINE.trying){ KEYLINE.key = d.key || KEYLINE.key; KEYLINE.kidx = d.key_index || 0; }
     KEYLINE.resetAt = Date.now() + (d.resets_in || 0) * 1000;
     renderKeyLine();
   }).catch(()=>{});
@@ -10427,6 +10507,7 @@ function noteSpeakingKey(r){
     /* A sentence arrived, so whatever was wrong is not wrong any more. */
     KEYLINE.key = label;
     KEYLINE.err = "";
+    KEYLINE.trying = "";        /* it spoke, so it works: the trial is over */
 
     renderKeyLine();
     pollBudget(label !== lastKey);          /* a new key is worth a fresh count */
@@ -10503,7 +10584,7 @@ function doneReset(){
   $("#pasteBox").value=""; updatePasteHint();
   showHome();
   $("#pasteBox").focus();
-  toast("Ready for a new text.");
+  say("Ready for a new text.");
 }
 
 /* ---------- open / prepare ---------- */
@@ -10538,15 +10619,15 @@ function openPayload(p, autoplay){
 }
 function readPasted(){
   const text = $("#pasteBox").value;
-  if(!text.trim()){ toast("Paste some text first."); return; }
+  if(!text.trim()){ say("Paste some text first."); return; }
   setStatus("Preparing...");
   api("/api/prepare", {method:"POST", headers:{"Content-Type":"application/json"},
        body: prepareBody(text)})
     .then(r=>r.json().then(j=>({ok:r.ok,j})))
     .then(({ok,j})=>{
-      if(!ok){ toast(j.error||"Could not prepare."); return; }
+      if(!ok){ say(j.error||"Could not prepare."); return; }
       $("#pasteBox").value=""; updatePasteHint(); openPayload(j, ST.autoplay);
-    }).catch(()=>toast("Server error."));
+    }).catch(()=>say("Server error."));
 }
 
 /* ---------- library ---------- */
@@ -10613,22 +10694,22 @@ function libSelectAll(){
   list.forEach(m=> allSel?LIB_SEL.delete(m.id):LIB_SEL.add(m.id)); renderLibrary();
 }
 function libDeleteSelected(){
-  const ids=[...LIB_SEL]; if(!ids.length){ toast("Nothing selected."); return; }
+  const ids=[...LIB_SEL]; if(!ids.length){ say("Nothing selected."); return; }
   if(!confirm("Delete "+ids.length+" text"+(ids.length>1?"s":"")+"?")) return;
   api("/api/library/delete_bulk",{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({ids})}).then(r=>r.json()).then(j=>{
     if(ids.includes(ST.tid)){ stop(); ST.tid=""; }
     LIB_SEL.clear(); LIB_SELECTING=false; loadLibrary();
-    toast("Deleted "+(j.deleted||ids.length)+".");
-  }).catch(()=>toast("Could not delete."));
+    say("Deleted "+(j.deleted||ids.length)+".");
+  }).catch(()=>say("Could not delete."));
 }
 function libDeleteAll(){
-  const n=LIB_CACHE.length; if(!n){ toast("Archive is empty."); return; }
+  const n=LIB_CACHE.length; if(!n){ say("Archive is empty."); return; }
   if(!confirm("Delete ALL "+n+" saved text"+(n>1?"s":"")+"? This cannot be undone.")) return;
   api("/api/library/delete_all",{method:"POST"}).then(r=>r.json()).then(j=>{
     stop(); ST.tid=""; LIB_SEL.clear(); LIB_SELECTING=false; loadLibrary();
-    toast("Deleted all "+(j.deleted||n)+".");
-  }).catch(()=>toast("Could not delete."));
+    say("Deleted all "+(j.deleted||n)+".");
+  }).catch(()=>say("Could not delete."));
 }
 function loadLibrary(){
   LIB_SELECTING=false; LIB_SEL.clear();
@@ -10637,15 +10718,15 @@ function loadLibrary(){
   });
 }
 function enrichText(tid){
-  toast("Summarising...");
+  say("Summarising...");
   api("/api/library/"+tid+"/enrich",{method:"POST"})
     .then(r=>r.json().then(j=>({ok:r.ok,j})))
     .then(({ok,j})=>{
-      if(!ok){ toast(j.error||"Could not summarise this."); return; }
+      if(!ok){ say(j.error||"Could not summarise this."); return; }
       const m = LIB_CACHE.find(x=>x.id===tid);
       if(m){ m.title=j.title||m.title; m.summary=j.summary||""; }
-      renderLibrary(); toast("Updated.");
-    }).catch(()=>toast("That request failed."));
+      renderLibrary(); say("Updated.");
+    }).catch(()=>say("That request failed."));
 }
 function mkBtn(txt,cls,fn){ const b=document.createElement("button");
   b.className=cls; b.textContent=txt; b.onclick=fn; return b; }
@@ -10654,20 +10735,20 @@ function openText(tid){ api("/api/library/"+tid).then(r=>r.json())
 function delText(tid,title){
   if(!confirm('Delete "'+(title||"this text")+'" ?')) return;
   api("/api/library/"+tid+"/delete",{method:"POST"}).then(()=>{
-    if(tid===ST.tid){ stop(); ST.tid=""; } loadLibrary(); toast("Deleted.");
+    if(tid===ST.tid){ stop(); ST.tid=""; } loadLibrary(); say("Deleted.");
   });
 }
 function exportText(tid){
   const vn = (anyVoice(ST.voice)||{}).name||"";
-  toast("Exporting sentence clips, text and timing in "+vn+"...");
+  say("Exporting sentence clips, text and timing in "+vn+"...");
   api("/api/export",{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({tid, vkey:ST.vkey, meta:!!ST.aimeta})})
     .then(r=>r.json().then(j=>({ok:r.ok,j})))
     .then(({ok,j})=>{
-      if(!ok){ toast(j.error||"Export failed."); return; }
-      if(j.already){ toast("Already exported in "+(j.voice||vn)+"."); return; }
-      toast("Saved to MA Reader Audio"+(j.timing_source==="pcm"?" (waveform timing)":""));
-    }).catch(()=>toast("Export failed."));
+      if(!ok){ say(j.error||"Export failed."); return; }
+      if(j.already){ say("Already exported in "+(j.voice||vn)+"."); return; }
+      say("Saved to MA Reader Audio"+(j.timing_source==="pcm"?" (waveform timing)":""));
+    }).catch(()=>say("Export failed."));
 }
 
 function updatePasteHint(){
@@ -10818,7 +10899,7 @@ function bind(){
 
   /* Pressing the time clears the session and puts it back to zero. Nothing is
      lost by it: every text that was read is already in the Archive below. */
-  { const clearIt = ()=>{ doneReset(); toast("Cleared. The text is in your Archive."); };
+  { const clearIt = ()=>{ doneReset(); say("Cleared. The text is in your Archive."); };
     const a=$("#counter"), b=$("#offCounter");
     if(a) a.onclick = clearIt;
     if(b) b.onclick = clearIt;
@@ -10841,7 +10922,7 @@ function bind(){
   { const b=$("#nextBtn"); if(b) b.onclick = ()=>next(); }
   /* the text is scrolled, not swiped */
   $("#loopBtn").onclick = ()=>{ ST.loop=!ST.loop; refreshToggles(); persist();
-      toast("Loop "+(ST.loop?"on":"off")); };
+      say("Loop "+(ST.loop?"on":"off")); };
 
   /* every stepper repeats while held down, so a long way is one press, not
      twenty, while a single tap stays a single fine nudge */
@@ -10893,7 +10974,7 @@ function bind(){
         .then(r=>r.json()).then(d=>{
           if(d.error){ if(err) err.textContent = d.error; return; }
           applySpInfo(d);
-          toast(d.ready ? "Speechify ready" : "Keys saved, none answered");
+          say(d.ready ? "Speechify ready" : "Keys saved, none answered");
 
         }).catch(()=>{ if(err) err.textContent = "Could not save the keys."; });
     };
@@ -10908,7 +10989,7 @@ function bind(){
       api("/api/speechify/refresh", {method:"POST"})
         .then(r=>r.json()).then(d=>{ applySpInfo(d);
           const t = d.tested || {};
-          toast(d.ready ? ((t.WORKING||0) + " good, " + (t.REJECTED||0) + " dead")
+          say(d.ready ? ((t.WORKING||0) + " good, " + (t.REJECTED||0) + " dead")
                         : "No key answered"); })
         .catch(()=>{ if(err) err.textContent = "Could not reach Speechify."; });
     };
@@ -10918,7 +10999,7 @@ function bind(){
       api("/api/speechify/forget", {method:"POST"})
         .then(r=>r.json()).then(d=>{ applySpInfo(d);
 
-          toast("Speechify keys forgotten"); })
+          say("Speechify keys forgotten"); })
         .catch(()=>{});
     };
   }
@@ -10935,7 +11016,7 @@ function bind(){
     if(b) b.onclick = ()=>{
       ST.voiceBar = !ST.voiceBar;
       refreshToggles(); renderVoices(); persist();
-      toast(ST.voiceBar ? "Voice buttons back on top"
+      say(ST.voiceBar ? "Voice buttons back on top"
                         : "Voice buttons off. Choose the voice here.");
     };
   }
@@ -10947,9 +11028,9 @@ function bind(){
           body: JSON.stringify({mode: mode})})
         .then(r=>r.json()).then(d=>{
           ST.browser = d.mode || mode; refreshToggles();
-          toast(ST.browser === "chrome" ? "Chrome from now on"
+          say(ST.browser === "chrome" ? "Chrome from now on"
                                         : "Whatever the phone prefers");
-        }).catch(()=> toast("Could not save that."));
+        }).catch(()=> say("Could not save that."));
     };
   }
   /* The ADB switch is gone with the app-switch floater it existed for: it
@@ -10971,10 +11052,10 @@ function bind(){
     if(b) b.onclick = ()=>{
       ST.hideTabs = !ST.hideTabs;
       refreshToggles(); persist();
-      toast(ST.hideTabs ? "Tabs hidden, the gear stays" : "Tabs back");
+      say(ST.hideTabs ? "Tabs hidden, the gear stays" : "Tabs back");
     };
   }
-  { const b=$("#rescanBtn"); if(b) b.onclick = rescanKeys; }
+  { const b=$("#rescanBtn"); if(b) b.onclick = nextKey; }
   { const b=$("#barTog");
     if(b) b.onclick = ()=>{
       ST.hideBar = !ST.hideBar;
@@ -10983,10 +11064,10 @@ function bind(){
         /* this press IS a gesture, so the bar can go now rather than on the
            next load */
         try{ reqFull(); }catch(e){}
-        toast("The browser bar goes on the first touch");
+        say("The browser bar goes on the first touch");
       } else {
         try{ leaveFull(); }catch(e){}
-        toast("The browser bar stays");
+        say("The browser bar stays");
       }
     };
   }
@@ -10994,7 +11075,7 @@ function bind(){
     if(b) b.onclick = ()=>{
       ST.fullOnPaste = !ST.fullOnPaste;
       refreshToggles(); persist();
-      toast(ST.fullOnPaste ? "A paste goes full screen"
+      say(ST.fullOnPaste ? "A paste goes full screen"
                            : "A paste stays in the normal view");
     };
   }
@@ -11031,7 +11112,7 @@ function bind(){
   { const ta=$("#textAuto"); if(ta) ta.onclick = ()=>{ ST.rgbText=null; applyHiColors(); persist(); }; }
   { const sa=$("#sentAuto");
     if(sa) sa.onclick = ()=>{ ST.rgbSent=null; applyHiColors(); persist();
-      toast("The theme decides the highlight"); }; }
+      say("The theme decides the highlight"); }; }
   /* The sync slider nudged the word marker earlier or later per voice. With
      no word marker there is nothing to nudge: a sentence is lit when its clip
      starts, which is not a thing that can drift. */
@@ -11100,7 +11181,7 @@ function jumpToPlayer(){
   }
   if((ST.sentences||[]).length){ showReader(); return; }
   if(OFF.man){ showOfflineReader(); return; }
-  toast("Nothing is loaded yet.");
+  say("Nothing is loaded yet.");
 }
 /* ---------- fullscreen reading ---------- */
 /* ---------- read, text, edit ----------
@@ -11379,7 +11460,7 @@ function wireCenterTaps(scrollSel, isOffline){
    straight away, so pasting is the whole gesture. Reachable three ways: the
    Paste button, the P key from anywhere, and Read for text typed by hand. */
 function readTextNow(text){
-  if(!text || !text.trim()){ toast("Nothing to read."); return; }
+  if(!text || !text.trim()){ say("Nothing to read."); return; }
   autoDetect(text);              /* a new text is the moment to ask */
   setStatus("Preparing...");
   busyShow("Preparing the text");
@@ -11387,10 +11468,10 @@ function readTextNow(text){
        body: prepareBody(text)})
     .then(r=>r.json().then(j=>({ok:r.ok,j})))
     .then(({ok,j})=>{
-      if(!ok){ toast(j.error||"Could not prepare."); return; }
+      if(!ok){ say(j.error||"Could not prepare."); return; }
       $("#pasteBox").value=""; updatePasteHint();
       openPayload(j, true);          /* always play: that is the point */
-    }).catch(()=>toast("Server error."));
+    }).catch(()=>say("Server error."));
 }
 /* Whatever arrives, from whichever route, ends the same way: it REPLACES
    what was loaded and starts speaking from the beginning. */
@@ -11415,7 +11496,7 @@ function unwindFull(){
    Opened whenever the quick way is refused. */
 function openCatcher(){
   const w=$("#catchWrap"), b=$("#catchBox");
-  if(!w || !b) { toast("Paste into the box on the Read tab."); return; }
+  if(!w || !b) { say("Paste into the box on the Read tab."); return; }
   b.value = "";
   w.classList.add("on");
   setTimeout(()=>{ try{ b.focus(); }catch(e){} }, 40);
@@ -11428,7 +11509,7 @@ function closeCatcher(){
 function catcherTake(){
   const b=$("#catchBox"); if(!b) return;
   const t=b.value;
-  if(!t || !t.trim()){ toast("Nothing there yet."); return; }
+  if(!t || !t.trim()){ say("Nothing there yet."); return; }
   closeCatcher(); acceptPaste(t);
 }
 
@@ -11635,11 +11716,11 @@ function wireFloat(){
 /* ================= v3 helpers ================= */
 function makeOffline(){
   const text=($("#pasteBox").value||"").trim();
-  if(!text){ toast("Paste some text first."); return; }
+  if(!text){ say("Paste some text first."); return; }
   const vn=(anyVoice(ST.voice)||{}).name||"";
   const btn=$("#saveOfflineBtn"); const old=btn.textContent;
   btn.disabled=true; btn.textContent="Working...";
-  toast("Saving to Offline in "+vn+"...");
+  say("Saving to Offline in "+vn+"...");
   api("/api/prepare",{method:"POST",headers:{"Content-Type":"application/json"},
       body:(function(){ const b = prepareBody(text); MD.pending = null; return b; })()})
     .then(r=>r.json())
@@ -11649,13 +11730,13 @@ function makeOffline(){
         .then(r=>r.json().then(j=>({ok:r.ok,j}))))
     .then(({ok,j})=>{
       btn.disabled=false; btn.textContent=old;
-      if(!ok){ toast(j.error||"Could not build offline files."); return; }
+      if(!ok){ say(j.error||"Could not build offline files."); return; }
       $("#pasteBox").value=""; if(typeof updatePasteHint==="function") updatePasteHint();
-      if(j.already){ toast("Already in Offline ("+(j.voice||vn)+")."); }
-      else { toast("Saved to Offline"+(j.timing_source==="pcm"?" (waveform timing)":"")); }
+      if(j.already){ say("Already in Offline ("+(j.voice||vn)+")."); }
+      else { say("Saved to Offline"+(j.timing_source==="pcm"?" (waveform timing)":"")); }
       showOfflineList();
     }).catch(()=>{ btn.disabled=false; btn.textContent=old;
-      toast("Could not build offline files."); });
+      say("Could not build offline files."); });
 }
 
 function saveOffPos(){
@@ -11775,25 +11856,25 @@ function offSelectAll(){
 function offDelOne(name,title){
   if(!confirm('Delete "'+(title||name)+'" ?')) return;
   api("/api/offline/delete",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({name})}).then(()=>{ loadOffline(); toast("Deleted."); })
-      .catch(()=>toast("Could not delete."));
+      body:JSON.stringify({name})}).then(()=>{ loadOffline(); say("Deleted."); })
+      .catch(()=>say("Could not delete."));
 }
 function offDeleteSelected(){
-  const names=[...OFF_SEL]; if(!names.length){ toast("Nothing selected."); return; }
+  const names=[...OFF_SEL]; if(!names.length){ say("Nothing selected."); return; }
   if(!confirm("Delete "+names.length+" export"+(names.length>1?"s":"")+"?")) return;
   api("/api/offline/delete_bulk",{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({names})}).then(r=>r.json()).then(j=>{
     OFF_SEL.clear(); OFF_SELECTING=false; loadOffline();
-    toast("Deleted "+(j.deleted||names.length)+".");
-  }).catch(()=>toast("Could not delete."));
+    say("Deleted "+(j.deleted||names.length)+".");
+  }).catch(()=>say("Could not delete."));
 }
 function offDeleteAll(){
-  const n=OFF_CACHE.length; if(!n){ toast("Nothing exported yet."); return; }
+  const n=OFF_CACHE.length; if(!n){ say("Nothing exported yet."); return; }
   if(!confirm("Delete ALL "+n+" export"+(n>1?"s":"")+"? This removes their clips too.")) return;
   api("/api/offline/delete_all",{method:"POST"}).then(r=>r.json()).then(j=>{
     OFF_SEL.clear(); OFF_SELECTING=false; loadOffline();
-    toast("Deleted all "+(j.deleted||n)+".");
-  }).catch(()=>toast("Could not delete."));
+    say("Deleted all "+(j.deleted||n)+".");
+  }).catch(()=>say("Could not delete."));
 }
 
 function openOffline(name){
@@ -11802,9 +11883,9 @@ function openOffline(name){
   api("/api/offline/open/"+encodeURIComponent(name))
     .then(r=>r.json().then(j=>({ok:r.ok,j})))
     .then(({ok,j})=>{
-      if(!ok || !j.sentences){ toast(j.error||"Could not open that text."); return; }
+      if(!ok || !j.sentences){ say(j.error||"Could not open that text."); return; }
       if(j.schema && j.schema.indexOf("/3")<0){
-        toast("This text was exported in the old format. Export it again."); return; }
+        say("This text was exported in the old format. Export it again."); return; }
       OFF.name = name; OFF.man = j; OFF.sents = j.sentences||[];
       markSession();
       OFF.dur = j.duration || 0;
@@ -11825,7 +11906,7 @@ function openOffline(name){
             if(i>=OFF.sents.length-0.5 || i<0) i=0; startAtIdx(i); })
           .catch(()=>startAtIdx(0));
       } else { startAtIdx(0); }
-    }).catch(()=>toast("Could not open that text."));
+    }).catch(()=>say("Could not open that text."));
 }
 function clampOff(i){ return Math.max(0, Math.min(i, OFF.sents.length-1)); }
 function offSetSeek(){

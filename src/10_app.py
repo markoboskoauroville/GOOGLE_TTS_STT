@@ -41,7 +41,7 @@ try:
 except Exception:
     PACIFIC = timezone(timedelta(hours=-8))
 
-VERSION = 27
+VERSION = 28
 PORT = int(os.environ.get("GTTS_PORT", "7311"))
 KEYFILE = os.environ.get("GEMINI_KEYS", os.path.expanduser("~/.gemini_keys"))
 HOME = os.path.expanduser("~/.google_tts_stt")
@@ -552,10 +552,27 @@ def candidates(chain):
     return [(l, k, m) for _, l, k, m in fresh + overdrawn]
 
 
-def with_fallback(chain, build_payload, verb="generateContent", tries=40):
-    """Walks the ring. A 429 costs nothing but a retry, and teaches the ledger."""
+def with_fallback(chain, build_payload, verb="generateContent", tries=40,
+                  only=None):
+    """Walks the ring. A 429 costs nothing but a retry, and teaches the ledger.
+
+    `only` pins it to ONE key. The reader uses that: walking eighteen keys to
+    find a live one spends eighteen round trips and leaves nobody able to say
+    which key is speaking. Pinned, the answer is always one name, and moving
+    to the next key is something a person does on purpose. Everything else —
+    the classifier, the wall, the learned limit — is unchanged, because a
+    refusal means the same thing whoever it came from.
+    """
     log = []
-    for label, key, model in candidates(chain)[:tries]:
+    cands = candidates(chain)
+    if only:
+        cands = [c for c in cands if c[0] == only]
+        if not cands:
+            # the pin names a key the ledger would skip; ask it anyway, which
+            # is the entire point of having pinned it
+            cands = [(l, k, m) for l, k in load_ring() if l == only
+                     for m in chain]
+    for label, key, model in cands[:tries]:
         code, body = post(model, verb, build_payload(model), key)
         if code == 200:
             spend(label, model)
