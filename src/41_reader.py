@@ -450,7 +450,9 @@ _DEFAULT_STATE = {
     "voice": "Charon", "emotion": "Neutral", "pace": "normal",
     "lang": "eng", "speed": 1.0, "volume": 100, "gap": 0.0, "lag": 0.0,
     "wgap": 0.0, "loop": False, "autoplay": False, "size": 13, "focus": False,
-    "theme": "night", "font": "sans", "lineheight": 3, "mode": "read",
+    # Gold: black and amber, the look the rest of this phone already wears.
+    # Every scheme is dark; there is no light one.
+    "theme": "gold", "font": "sans", "lineheight": 3, "mode": "read",
     "wordhl": True, "hideTabs": True, "pane": "app",
     "floatPaste": True, "floatFull": True, "floatSwap": True,
     "swapIsPlay": True, "fpX": 0.82, "fpY": 0.72, "ffX": 0.82, "ffY": 0.58,
@@ -461,9 +463,10 @@ _DEFAULT_STATE = {
     "hideBar": True,
     # where each of the two voice wheels was left standing
     "vscrollM": 0, "vscrollF": 0,
-    # Red: the band is the only highlight there is now, so it carries the
-    # whole job of saying where you are.
-    "rgbSent": [214, 45, 56], "rgbWord": [226, 59, 78],
+    # None means the THEME decides the band. Each scheme names its own, and a
+    # colour here would win over all of them, so switching scheme would leave
+    # the highlight behind wearing the old one.
+    "rgbSent": None, "rgbWord": [226, 59, 78],
     "rgbFont": [255, 255, 255], "rgbText": None,
     "starred": [],
 }

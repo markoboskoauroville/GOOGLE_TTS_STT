@@ -23,27 +23,55 @@
 <style>
 
 
-/* ---------- themes (Night is the default house look) ---------- */
+/* ---------- THE PALETTES, AND ALL OF THEM ARE DARK ----------
+
+   This app is read in the evening, at arm's length, often in the dark, and
+   there is no light theme any more: a white page at night is a torch pointed
+   at the face, and every one of these is meant to be looked at for an hour.
+
+   GOLD IS THE HOUSE LOOK and it is the one the rest of this phone already
+   wears — the same black and amber as Maha Transcribe and as this app's own
+   studio screen. Warm text on near-black, which is easier to sit with than
+   the blue-grey that dark themes default to.
+
+   THE BAND IS PART OF THE PALETTE. Each theme names its own --sent, a dark
+   orange or red deep enough to carry white text, because the highlight has to
+   belong to the scheme rather than sit on top of it looking borrowed. A
+   colour picked by hand in Settings overrides it; picking none means the
+   theme decides, which is why --sent is not written into the body style
+   unless somebody has actually chosen one. */
+
+/* Black and gold. The default. */
+body[data-theme="gold"]{
+  --bg:#0b0d10; --bg2:#0d1117; --panel:#141a21; --line:#23303d;
+  --text:#f2ddb4; --dim:#a08a63; --faint:#6f6450;
+  --page:#0b0d10; --page-text:#f2ddb4;
+  --sent:#b4530e; --sent-fg:#fff6ea; --sent-soft:rgba(180,83,14,.34);
+  --wordbg:#d97706; --wordfg:#ffffff;
+}
+/* Warmer and lower: brown-black, for a room with the lamp off. */
+body[data-theme="ember"]{
+  --bg:#100c09; --bg2:#15100c; --panel:#1c1611; --line:#2f2519;
+  --text:#ecd9bd; --dim:#9c8a6b; --faint:#6b5b45;
+  --page:#100c09; --page-text:#ecd9bd;
+  --sent:#9c3d10; --sent-fg:#fff3e6; --sent-soft:rgba(156,61,16,.36);
+  --wordbg:#c2410c; --wordfg:#ffffff;
+}
+/* True black, for an OLED screen: the background costs no light at all. */
+body[data-theme="ink"]{
+  --bg:#000000; --bg2:#060606; --panel:#0e0e0e; --line:#1f1f1f;
+  --text:#e6d5ae; --dim:#97876a; --faint:#6a5f4b;
+  --page:#000000; --page-text:#e6d5ae;
+  --sent:#a8500f; --sent-fg:#fff6ea; --sent-soft:rgba(168,80,15,.36);
+  --wordbg:#b45309; --wordfg:#ffffff;
+}
+/* The cool one, kept: grey-blue rather than warm, with a red band. */
 body[data-theme="night"]{
   --bg:#080a10; --bg2:#0b0e15; --panel:#11141d; --line:#1d2230;
   --text:#cdd0d6; --dim:#7c8294; --faint:#565d6e;
   --page:#080a10; --page-text:#cdd0d6;
   --sent:#d62d38; --sent-fg:#f4f6ee; --sent-soft:rgba(214,45,56,.34);
-  --wordbg:#e23b4e; --wordfg:#ffffff;     /* the word being read, in red */
-}
-body[data-theme="sepia"]{
-  --bg:#efe3cc; --bg2:#ece0c6; --panel:#e6d9bd; --line:#d6c5a1;
-  --text:#4a3f2e; --dim:#8a7a5c; --faint:#a99a78;
-  --page:#f4ead4; --page-text:#43392a;
-  --sent:#c62834; --sent-fg:#f6f2f2; --sent-soft:rgba(198,40,52,.40);
-  --wordbg:#c0392b; --wordfg:#ffffff;
-}
-body[data-theme="day"]{
-  --bg:#f6f7fa; --bg2:#eef0f5; --panel:#ffffff; --line:#e1e4ea;
-  --text:#1c2026; --dim:#5a616e; --faint:#9aa0ac;
-  --page:#ffffff; --page-text:#1b1f25;
-  --sent:#d62d38; --sent-fg:#f4f6ee; --sent-soft:rgba(214,45,56,.30);
-  --wordbg:#d62828; --wordfg:#ffffff;
+  --wordbg:#e23b4e; --wordfg:#ffffff;
 }
 :root{
   --screen:#4696e6; --play:#37c878; --tune:#ebcd2d;
@@ -444,8 +472,11 @@ body.mode-edit .doc.mdhidden{display:none}
 .sheet .group .gem-usage,
 .sheet .group .chip{background:var(--bg2)}
 .sheet .group .chip.on{background:rgba(70,150,230,.16)}
-.sheet .group .chip.theme-day{background:#ffffff}
-.sheet .group .chip.theme-sepia{background:#f4ead4}
+/* Each chip wears its own scheme, so the row is the answer rather than a
+   list of words you have to try one at a time. */
+.sheet .group .chip.theme-gold{background:#0b0d10}
+.sheet .group .chip.theme-ember{background:#100c09}
+.sheet .group .chip.theme-ink{background:#000000}
 .sheet .group .chip.theme-night{background:#0c0f16}
 .sheet .group > .wsub:first-of-type{margin-top:0}
 .chips{display:flex; gap:8px; flex-wrap:wrap}
@@ -483,10 +514,11 @@ body.mode-edit .doc.mdhidden{display:none}
 .chip.f-sans{font-family:system-ui,sans-serif}
 .chip.f-book{font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif}
 .chip.f-mono{font-family:ui-monospace,"DejaVu Sans Mono",Menlo,Consolas,monospace}
-.chip.theme-day{background:#ffffff;color:#1c2026;border-color:#d8dbe2}
-.chip.theme-sepia{background:#f4ead4;color:#43392a;border-color:#d6c5a1}
+.chip.theme-gold{background:#0b0d10;color:#f2ddb4;border-color:#23303d}
+.chip.theme-ember{background:#100c09;color:#ecd9bd;border-color:#2f2519}
+.chip.theme-ink{background:#000000;color:#e6d5ae;border-color:#1f1f1f}
 .chip.theme-night{background:#0c0f16;color:#cdd0d6;border-color:#272d3b}
-.chip.theme-day.on,.chip.theme-sepia.on,.chip.theme-night.on{
+.chip.theme-gold.on,.chip.theme-ember.on,.chip.theme-ink.on,.chip.theme-night.on{
   outline:2px solid var(--screen); outline-offset:1px}
 /* ---------- v9: multi-select + delete-all toolbar for the lists ---------- */
 .listbar{display:flex; gap:8px; align-items:center; margin:0 0 10px;
@@ -1023,7 +1055,7 @@ body.fullread .reader-scroll{position:fixed; inset:0; max-height:none;
           calc(28px + env(safe-area-inset-bottom))}
 </style>
 </head>
-<body data-theme="night">
+<body data-theme="gold">
 <header>
   <button class="gear-corner" id="gearCorner" title="Settings">&#9881;</button>
   <div class="voices" id="voices"></div>
@@ -1386,7 +1418,6 @@ body.fullread .reader-scroll{position:fixed; inset:0; max-height:none;
       <button class="chip" id="resumeTog">Remember position</button>
       <button class="chip" id="focusTog">Focus mode</button>
       <button class="chip" id="loopBtn">Loop</button>
-      <button class="chip" id="adbTog">ADB mode on start</button>
     </div>
     <div class="langhint"><b>Floating paste button.</b> Drag it anywhere. Press: paste, full screen, read. In full screen it is the way out.</div>
     <div class="langhint"><b>Floating play/pause.</b> Drag it anywhere. It is the only transport control that survives immersive, and since a tap on the text now means next sentence, it is where pause lives. It used to switch Android apps; that job is gone.</div>
@@ -1397,16 +1428,28 @@ body.fullread .reader-scroll{position:fixed; inset:0; max-height:none;
     <h3>Colour</h3>
     <div class="wsub">Page theme</div>
     <div class="chips" id="themeChips">
-      <button class="chip theme-day"   data-theme="day">Day</button>
-      <button class="chip theme-sepia" data-theme="sepia">Sepia</button>
+      <button class="chip theme-gold"  data-theme="gold">Gold</button>
+      <button class="chip theme-ember" data-theme="ember">Ember</button>
+      <button class="chip theme-ink"   data-theme="ink">Ink</button>
       <button class="chip theme-night" data-theme="night">Night</button>
     </div>
-    <div class="wsub">Word highlight</div>
-    <!-- The word-highlight card stood here: a switch, a colour, an
-         intensity and a sync slider, all for a marker that no longer exists.
-         The sentence is the unit that is lit now. -->
-  <!-- The word-timing card went with the word highlight. Nothing is measured
-       any more: a clip starts and its sentence lights up. -->
+    <div class="langhint">Every scheme is dark. A white page at night is a
+      torch pointed at the face, and these are meant to be read for an hour.
+      Each one brings its own highlight colour.</div>
+
+    <div class="wsub">The highlight</div>
+    <div class="langhint">The band behind the sentence being read. Left alone
+      it follows the scheme; set it here to overrule that.</div>
+    <div class="chips" style="margin:6px 0">
+      <button class="chip" id="sentAuto">Let the scheme decide</button>
+    </div>
+    <div class="rgbrow">
+      <span class="sw" id="swSent"></span>
+      <label>R<input type="number" min="0" max="255" data-rgb="sent" data-i="0"></label>
+      <label>G<input type="number" min="0" max="255" data-rgb="sent" data-i="1"></label>
+      <label>B<input type="number" min="0" max="255" data-rgb="sent" data-i="2"></label>
+    </div>
+  </div>
 
   <div class="group g-adv" data-eng="app">
     <h3>Advanced</h3>
@@ -1422,13 +1465,13 @@ body.fullread .reader-scroll{position:fixed; inset:0; max-height:none;
       <button class="chip" id="chromeTog">Open in Chrome</button>
     </div>
     <div class="langhint">Ask for Chrome by name instead of the phone default.</div>
-    <div class="wsub">Word timing</div>
-    <div class="timing-help">Timing is measured from the audio itself: after a
-      sentence is spoken, the app listens to the finished clip, finds where
-      speech really starts, ends, and rises after each pause, and pins every
-      word to that waveform. It is automatic, free, and works offline. If the
-      red word still feels early or late on a particular voice, nudge it with
-      the Sync slider in the player settings.</div>
+    <div class="wsub">How it reads aloud</div>
+    <div class="timing-help">Each sentence is synthesised into its own clip the
+      first time it is reached, and three are kept ready ahead of the one
+      playing, so after the first few there is no wait between them. The
+      sentence being spoken is lit and brought to the top of the view. There is
+      no word-by-word marker: it needed a second service to measure where each
+      word fell, and the sentence is the unit a reader actually follows.</div>
   </div>
 </div>
 
@@ -1560,7 +1603,7 @@ const LAG_MIN = 0.00, LAG_MAX = 3.00, LAG_STEP = 0.05;
    take half an hour, and anything shorter was indistinguishable from nothing.
    The silence map it rode on is still measured, because the word highlight
    and the reading time estimate both use it for other purposes. */
-const THEMES = ["day","sepia","night"];
+const THEMES = ["gold","ember","ink","night"];
 
 /* ---------- app state ---------- */
 const ST = {
@@ -1592,14 +1635,16 @@ const ST = {
   idx: 0, playing: false,
   speed: 1.0, volume: 100, gap: 0.0, lag: 0.0, wgap: 0.0, loop: false,
   size: 4, autoplay: false, focus: false,
-  theme: "night", font: "serif", lineheight: 3, wordhl: true,
+  theme: "gold", font: "sans", lineheight: 3, wordhl: true,
   /* RED, because that is what a teleprompter line is. The band is the only
      highlight left now that the word marker is gone, so it carries the whole
      job of saying where you are, and it should be unmistakable. --sent-fg is
      not set alongside it: applyHiColors picks black or white from the
      luminance of whatever colour is chosen, so a red band gets white text
      without anyone having to remember to change a second setting. */
-  rgbSent: [214,45,56], rgbWord: [226,59,78], rgbFont: [255,255,255],
+  /* null, not a colour: the theme decides the band unless one is picked by
+     hand in Settings. See applyHiColors. */
+  rgbSent: null, rgbWord: [226,59,78], rgbFont: [255,255,255],
   rgbText: null,
   wordoffsets: {}, aimeta:false, resume:true,
 };
@@ -2119,16 +2164,7 @@ function setVoice(id, quiet){
    voice had to be crammed into whichever engine happened to be selected.
    Picking Edge or Speechify still switches the engine, because that is what
    those two panes are for; picking Settings changes nothing about the voice. */
-function applyEngineCards(){
-  try{ renderLangBtn(); }catch(e){}
-  const pane = ST.pane || ST.engine || "edge";
-  document.querySelectorAll("#engTabs .engtab").forEach(b=>
-    b.classList.toggle("on", b.dataset.pane === pane));
-  renderLangBtn();
-  document.querySelectorAll("#sheet .group[data-eng]").forEach(g=>{
-    g.style.display = (g.dataset.eng === pane) ? "" : "none";
-  });
-}
+
 /* Changing the language must leave a usable voice behind. If the one in hand
    cannot speak the new language, the first that can is taken. */
 /* ---------- a setting that changes the SOUND takes effect at once ----------
@@ -2258,57 +2294,25 @@ function nextLang(){
   return l === "eng" ? "hr" : l === "hr" ? "auto" : "eng";
 }
 function setPane(p){
-  if(p !== "edge" && p !== "speechify" && p !== "app") p = "edge";
+  if(p !== "edge" && p !== "app") p = "edge";
   ST.pane = p;
+  applyPane();                 /* WITHOUT THIS THE TAB DOES NOTHING. */
+  persist();
+}
+/* Show the cards belonging to the open tab and mark that tab.
+   This is what setPane stopped calling when the engine code came out, and the
+   symptom was exact: pressing Settings changed ST.pane, wrote it to disk, and
+   left the screen showing the Voice cards. Nothing errored. The state was
+   right and the screen never heard about it. */
+function applyPane(){
+  const pane = ST.pane || "edge";
+  document.querySelectorAll("#engTabs .engtab").forEach(b=>
+    b.classList.toggle("on", b.dataset.pane === pane));
+  document.querySelectorAll("#sheet .group[data-eng]").forEach(g=>{
+    g.style.display = (g.dataset.eng === pane) ? "" : "none";
+  });
+}
 
-  persist();
-}
-function setEngine(e, quiet){
-  if(e !== "edge" && e !== "speechify") return;
-  const changed = (e !== ST.engine);
-  ST.engine = e;
-  applyEngineCards();
-  /* An engine change must land on a voice that BELONGS to the new engine.
-     voiceIsCurrent knows about seats; comparing ids does not, so a seat was
-     never recognised as current and the first one was chosen again, through
-     the branch that forgot to move the key. */
-  /* THE KEY MUST FOLLOW THE ENGINE, even when the voice list is not loaded.
-     shownVoices() is empty until /api/cro_voices has answered, and an engine
-     change that happens first used to leave ST.vkey on an Edge voice: the
-     engine said Speechify and every request still went to Edge. The key is
-     therefore set from the ENGINE, which is known immediately, and the list
-     only refines WHICH voice within it. */
-  if(e === "speechify"){
-    ST.vkey = "sp_seat";
-  } else if(String(ST.vkey || "").indexOf("sp_") === 0){
-    /* Coming back to Edge. topEdge() is empty until the voices have loaded,
-       so a remembered Edge key is used, then any Edge voice, and only then
-       the list. Without this the return leg silently kept the Speechify key
-       and going back to Edge did nothing, which is the same bug in reverse. */
-    const back = topEdge()[0] || (ST.voices || []).find(v => v.lang === langCode())
-                 || (ST.voices || [])[0];
-    if(back){ ST.voice = back.id; ST.vkey = back.vkey; }
-    else if(ST.edgeVkey){ ST.vkey = ST.edgeVkey; }
-    else { ST.vkey = (langCode() === "hr") ? "hrF" : "ukF"; }
-  }
-  if(e === "edge" && String(ST.vkey || "").indexOf("sp_") !== 0) ST.edgeVkey = ST.vkey;
-  
-  try{ clearWarm(); }catch(err){}
-  const list = shownVoices();
-  if(list.length && !list.some(v=>voiceIsCurrent(v))){
-    /* remember which Speechify voice was last used, so switching back and
-       forth does not keep resetting to the first of the four */
-    const want = (e === "speechify" && ST.spVkey)
-      ? list.find(v=>v.vkey === ST.spVkey) : null;
-    setVoice((want || list[0]).id);
-  } else {
-    renderVoices();
-  }
-  persist();
-  if(changed && !quiet){
-    toast(e === "speechify" ? "Speechify" : "Edge");
-  }
-}
 
 /* ---------- Speechify: accents, its four voices, and the key ring ---------- */
 function renderSpAccents(){ /* the accent row is gone: two radio lists replaced it */ }
@@ -3551,9 +3555,16 @@ function hexToRgb(h){
 function themeTextRgb(){
   return hexToRgb(getComputedStyle(document.body).getPropertyValue("--page-text")) || [205,208,214];
 }
+// and the band colour it would use, the same way
+function themeSentRgb(){
+  return hexToRgb(getComputedStyle(document.body).getPropertyValue("--sent")) || [180,83,14];
+}
 function syncRgbInputs(){
   const textVals = Array.isArray(ST.rgbText) ? ST.rgbText : themeTextRgb();
-  [["sent",ST.rgbSent,"swSent"],["word",ST.rgbWord,"swWord"],
+  /* null means the theme decides, so the fields show what the theme is
+     actually doing rather than three empty boxes */
+  const sentVals = Array.isArray(ST.rgbSent) ? ST.rgbSent : themeSentRgb();
+  [["sent",sentVals,"swSent"],["word",ST.rgbWord,"swWord"],
    ["font",ST.rgbFont,"swFont"],["text",textVals,"swText"]]
   .forEach(([k,a,sw])=>{
     document.querySelectorAll('input[data-rgb="'+k+'"]').forEach(inp=>{
@@ -3570,11 +3581,24 @@ function applyHiColors(){
   // default reading text: explicit override, or leave it to the theme
   if(Array.isArray(ST.rgbText)) b.setProperty("--page-text", rgbStr(ST.rgbText));
   else b.removeProperty("--page-text");
-  b.setProperty("--sent", rgbStr(s));
-  b.setProperty("--sent-soft", rgbaStr(s,.34));
-  b.setProperty("--sent-fg", relLum(s)>0.55 ? "#14160c" : "#f4f6ee");
-  b.setProperty("--wordbg", rgbStr(w));
-  b.setProperty("--wordfg", rgbStr(f));
+  /* THE BAND BELONGS TO THE THEME UNTIL SOMEBODY OVERRULES IT.
+     Every palette names its own --sent, chosen to sit inside that scheme.
+     Writing a colour into the body style here would win over all of them, so
+     switching theme would change the page and leave the highlight behind,
+     still wearing the colour of a scheme nobody is looking at. null means "no
+     opinion", which is the default, and the moment a colour is picked in
+     Settings it becomes an opinion and is honoured. */
+  if(Array.isArray(s)){
+    b.setProperty("--sent", rgbStr(s));
+    b.setProperty("--sent-soft", rgbaStr(s,.34));
+    b.setProperty("--sent-fg", relLum(s)>0.55 ? "#14160c" : "#f4f6ee");
+  } else {
+    b.removeProperty("--sent");
+    b.removeProperty("--sent-soft");
+    b.removeProperty("--sent-fg");
+  }
+  if(Array.isArray(w)) b.setProperty("--wordbg", rgbStr(w));
+  if(Array.isArray(f)) b.setProperty("--wordfg", rgbStr(f));
   syncRgbInputs();
 }
 /* tap the number itself to come back to the resting value */
@@ -4183,17 +4207,8 @@ function bind(){
         }).catch(()=> toast("Could not save that."));
     };
   }
-  { const b=$("#adbTog");
-    if(b) b.onclick = ()=>{
-      ST.adbMode = !ST.adbMode;
-      refreshToggles(); persistNow();
-      /* persistNow, not persist: this is read by the LAUNCHER on the next
-         run, out of the settings file, so it has to be on disk before the
-         app is closed rather than a quarter second later. */
-      toast(ST.adbMode ? "ADB comes up on the next start"
-                       : "ADB will be left alone on the next start");
-    };
-  }
+  /* The ADB switch is gone with the app-switch floater it existed for: it
+     armed a privileged shell that nothing here asks for. */
   { const c=$("#catchGo"), x=$("#catchCancel"), b=$("#catchBox");
     if(c) c.onclick = catcherTake;
     if(x) x.onclick = closeCatcher;
@@ -4249,7 +4264,14 @@ function bind(){
   /* The word-highlight switch is gone with the thing it switched. */
   document.querySelectorAll('.rgbrow input[data-rgb]').forEach(inp=>{
     const key=inp.dataset.rgb, i=+inp.dataset.i;
-    const ensure = ()=>{ if(key==="text" && !Array.isArray(ST.rgbText)) ST.rgbText = themeTextRgb().slice(); };
+    /* Both of these start as null, meaning "the theme decides". Touching the
+       field is the moment that stops being true, so the value is seeded from
+       whatever the theme is showing and becomes a choice from there on.
+       Without this, writing into a null throws and the picker is dead. */
+    const ensure = ()=>{
+      if(key==="text" && !Array.isArray(ST.rgbText)) ST.rgbText = themeTextRgb().slice();
+      if(key==="sent" && !Array.isArray(ST.rgbSent)) ST.rgbSent = themeSentRgb().slice();
+    };
     inp.oninput = ()=>{
       if(inp.value==="") return;            // let the field be empty mid-typing
       ensure(); rgbArr(key)[i] = clamp255(inp.value);
@@ -4261,6 +4283,9 @@ function bind(){
     };
   });
   { const ta=$("#textAuto"); if(ta) ta.onclick = ()=>{ ST.rgbText=null; applyHiColors(); persist(); }; }
+  { const sa=$("#sentAuto");
+    if(sa) sa.onclick = ()=>{ ST.rgbSent=null; applyHiColors(); persist();
+      toast("The theme decides the highlight"); }; }
   /* The sync slider nudged the word marker earlier or later per voice. With
      no word marker there is nothing to nudge: a sentence is lit when its clip
      starts, which is not a thing that can drift. */
@@ -5433,7 +5458,10 @@ function boot(){
     ST.lineheight = st.lineheight || 3;
     ST.wordhl = st.wordhl!==false;
     const okRgb = (v,d)=> (Array.isArray(v)&&v.length===3) ? v.map(clamp255) : d.slice();
-    ST.rgbSent = okRgb(st.rgbSent, [255,217,59]);
+    /* a saved colour is a decision and is kept; anything else means the theme
+       decides, so it stays null rather than being given a default */
+    ST.rgbSent = (Array.isArray(st.rgbSent) && st.rgbSent.length===3)
+                   ? st.rgbSent.map(clamp255) : null;
     ST.rgbWord = okRgb(st.rgbWord, [226,59,78]);
     ST.rgbFont = okRgb(st.rgbFont, [255,255,255]);
     ST.rgbText = (Array.isArray(st.rgbText) && st.rgbText.length===3) ? st.rgbText.map(clamp255) : null;
@@ -5446,7 +5474,7 @@ function boot(){
       const first = _vis[0];
       if(first){ ST.voice = first.id; ST.vkey = first.vkey; }
     }
-    applyEngineCards(); renderSpAccents(); renderSpGrid(); renderSpKeys();
+    applyPane(); renderSpAccents(); renderSpGrid(); renderSpKeys();
     renderEdgeGrid(); renderSpKeyList(); renderSpDead(); loadCroVoices();
     renderGroq(); wireGroq(); renderKeyList(); wireKeys();
     loadDirection(); armBarHide();
