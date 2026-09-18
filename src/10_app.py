@@ -41,7 +41,7 @@ try:
 except Exception:
     PACIFIC = timezone(timedelta(hours=-8))
 
-VERSION = 22
+VERSION = 23
 PORT = int(os.environ.get("GTTS_PORT", "7311"))
 KEYFILE = os.environ.get("GEMINI_KEYS", os.path.expanduser("~/.gemini_keys"))
 HOME = os.path.expanduser("~/.google_tts_stt")
@@ -1841,7 +1841,8 @@ GUARD_HEADER = "X-Gtt-Local"
 GUARD_HEADERS = ("X-Gtt-Local", "X-Maha-Local")
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "[::1]", "::1"}
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
-OPEN_ENDPOINTS = {"index", "out", "favicon_ico", "transcribe_page", "preview_file"}
+OPEN_ENDPOINTS = {"index", "out", "favicon_ico", "transcribe_page", "preview_file",
+                  "studio", "webmanifest", "reader_page", "reader_static"}
 _SELF_MARKER = b"GOOGLE TTS AND STT"
 
 
@@ -2058,8 +2059,56 @@ def serve():
 
     @app.get("/")
     def index():
+        """THE FRONT DOOR IS THE READER.
+
+        This app opened on a script editor for two speakers, with tags to
+        insert, a direction to pick per line and a SPEAK button at the bottom.
+        That is a tool for making an actor read something, and it is not what
+        this is for any more: the thing wanted on arriving is a text read
+        aloud, in a chosen voice, with the words lit as they are spoken. So
+        the first screen is the paste box and the voice rows, and everything
+        that generates is reachable without scrolling.
+
+        The old page is not deleted, because it still does something no other
+        screen does — two speakers in one call, tagged line by line. It moved
+        to /studio and is linked from the reader's Settings.
+        """
+        f = os.path.join(HOME, "static", "reader.html")
+        if os.path.exists(f):
+            return send_from_directory(os.path.join(HOME, "static"),
+                                       "reader.html")
         return (PAGE.replace("@@ASSUMED@@", str(RPD_UNKNOWN_ASSUMED))
                 .replace("@@VERSION@@", "v%d" % VERSION))
+
+    @app.get("/studio")
+    def studio():
+        """The script editor, whole and unchanged. Two speakers, tags,
+        directions per line."""
+        return (PAGE.replace("@@ASSUMED@@", str(RPD_UNKNOWN_ASSUMED))
+                .replace("@@VERSION@@", "v%d" % VERSION))
+
+    @app.get("/manifest.webmanifest")
+    def webmanifest():
+        return (jsonify({
+            "name": "Gemini Reader", "short_name": "Reader",
+            "start_url": "/", "display": "standalone",
+            "background_color": "#0b0d10", "theme_color": "#0b0d10",
+            "icons": [{"src": "/static/icon.svg", "sizes": "any",
+                       "type": "image/svg+xml"}]}),
+            200, {"Content-Type": "application/manifest+json"})
+
+    # ---- the reader ----
+    # GTT reads now, and it reads with the interface MA Reader Web proved.
+    # Mounted rather than merged: every route it owns lives under /reader, so
+    # nothing here had to move and nothing it asks for can collide with Speak,
+    # Listen or Keys.
+    try:
+        import reader as _reader
+        _reader.mount(sys.modules[__name__], app)
+    except Exception as _e:
+        # A reader that will not load must not take the rest of the app with
+        # it. Speak and Listen are the older promise and they keep working.
+        print("  reader not mounted: %s" % _e)
 
     @app.get("/transcribe")
     def transcribe_page():

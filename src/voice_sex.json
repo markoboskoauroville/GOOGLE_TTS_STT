@@ -1,0 +1,242 @@
+{
+ "Achernar": {
+  "borderline": false,
+  "by": "measured",
+  "f0": 186.0,
+  "frames": 45,
+  "free": true,
+  "sex": "F"
+ },
+ "Achird": {
+  "borderline": false,
+  "by": "measured",
+  "f0": 136.8,
+  "frames": 46,
+  "free": true,
+  "sex": "M"
+ },
+ "Algenib": {
+  "borderline": false,
+  "by": "measured",
+  "f0": 105.3,
+  "frames": 46,
+  "free": true,
+  "sex": "M"
+ },
+ "Algieba": {
+  "borderline": false,
+  "by": "measured",
+  "f0": 104.6,
+  "frames": 43,
+  "free": true,
+  "sex": "M"
+ },
+ "Alnilam": {
+  "borderline": false,
+  "by": "measured",
+  "f0": 103.2,
+  "frames": 51,
+  "free": true,
+  "sex": "M"
+ },
+ "Aoede": {
+  "borderline": false,
+  "by": "measured",
+  "f0": 188.2,
+  "frames": 50,
+  "free": true,
+  "sex": "F"
+ },
+ "Autonoe": {
+  "borderline": false,
+  "by": "measured",
+  "f0": 262.3,
+  "frames": 50,
+  "free": true,
+  "sex": "F"
+ },
+ "Callirrhoe": {
+  "borderline": false,
+  "by": "measured",
+  "f0": 228.6,
+  "frames": 60,
+  "free": true,
+  "sex": "F"
+ },
+ "Charon": {
+  "borderline": false,
+  "by": "measured",
+  "f0": 92.5,
+  "frames": 21,
+  "free": true,
+  "sex": "M"
+ },
+ "Despina": {
+  "borderline": false,
+  "by": "measured",
+  "f0": 246.2,
+  "frames": 50,
+  "free": true,
+  "sex": "F"
+ },
+ "Enceladus": {
+  "borderline": false,
+  "by": "measured",
+  "f0": 87.0,
+  "frames": 38,
+  "free": true,
+  "sex": "M"
+ },
+ "Erinome": {
+  "borderline": false,
+  "by": "measured",
+  "f0": 238.8,
+  "frames": 56,
+  "free": true,
+  "sex": "F"
+ },
+ "Fenrir": {
+  "borderline": false,
+  "by": "measured",
+  "f0": 111.9,
+  "frames": 52,
+  "free": false,
+  "sex": "M"
+ },
+ "Gacrux": {
+  "borderline": false,
+  "by": "measured",
+  "f0": 135.6,
+  "frames": 47,
+  "free": false,
+  "sex": "M"
+ },
+ "Iapetus": {
+  "borderline": true,
+  "by": "hand",
+  "f0": 155.3,
+  "frames": 49,
+  "free": false,
+  "sex": "M"
+ },
+ "Kore": {
+  "borderline": false,
+  "by": "measured",
+  "f0": 213.3,
+  "frames": 39,
+  "free": false,
+  "sex": "F"
+ },
+ "Laomedeia": {
+  "borderline": false,
+  "by": "measured",
+  "f0": 195.1,
+  "frames": 72,
+  "free": false,
+  "sex": "F"
+ },
+ "Leda": {
+  "borderline": false,
+  "by": "measured",
+  "f0": 213.3,
+  "frames": 45,
+  "free": true,
+  "sex": "F"
+ },
+ "Orus": {
+  "borderline": false,
+  "by": "measured",
+  "f0": 135.6,
+  "frames": 49,
+  "free": false,
+  "sex": "M"
+ },
+ "Puck": {
+  "borderline": false,
+  "by": "measured",
+  "f0": 127.0,
+  "frames": 40,
+  "free": true,
+  "sex": "M"
+ },
+ "Pulcherrima": {
+  "borderline": false,
+  "by": "measured",
+  "f0": 126.0,
+  "frames": 68,
+  "free": false,
+  "sex": "M"
+ },
+ "Rasalgethi": {
+  "borderline": false,
+  "by": "measured",
+  "f0": 139.1,
+  "frames": 58,
+  "free": false,
+  "sex": "M"
+ },
+ "Sadachbia": {
+  "borderline": false,
+  "by": "measured",
+  "f0": 119.4,
+  "frames": 57,
+  "free": false,
+  "sex": "M"
+ },
+ "Sadaltager": {
+  "borderline": false,
+  "by": "measured",
+  "f0": 133.3,
+  "frames": 58,
+  "free": false,
+  "sex": "M"
+ },
+ "Schedar": {
+  "borderline": false,
+  "by": "measured",
+  "f0": 129.0,
+  "frames": 47,
+  "free": false,
+  "sex": "M"
+ },
+ "Sulafat": {
+  "borderline": false,
+  "by": "measured",
+  "f0": 205.1,
+  "frames": 53,
+  "free": false,
+  "sex": "F"
+ },
+ "Umbriel": {
+  "borderline": false,
+  "by": "measured",
+  "f0": 106.0,
+  "frames": 56,
+  "free": false,
+  "sex": "M"
+ },
+ "Vindemiatrix": {
+  "borderline": false,
+  "by": "measured",
+  "f0": 183.9,
+  "frames": 89,
+  "free": false,
+  "sex": "F"
+ },
+ "Zephyr": {
+  "borderline": false,
+  "by": "measured",
+  "f0": 175.8,
+  "frames": 41,
+  "free": false,
+  "sex": "F"
+ },
+ "Zubenelgenubi": {
+  "borderline": true,
+  "by": "measured",
+  "f0": 160.0,
+  "frames": 67,
+  "free": false,
+  "sex": "F"
+ }
+}

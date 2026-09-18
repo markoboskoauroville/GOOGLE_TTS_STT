@@ -32,6 +32,24 @@ printf "TEST 4 — the upgrade, over what is already there\n"
 [ -z "$INSTALLER" ] && { printf "   no installer built, run tools/build_installer.py\n"; exit 1; }
 
 export HOME="$SANDBOX"
+# PREFIX TOO, AND THIS IS NOT BELT AND BRACES.
+#
+# The installer picks where the commands go from the PLATFORM, not from HOME:
+# on Termux it is "${PREFIX:-/data/data/com.termux/files/usr}/bin" and HOME
+# does not come into it. So a sandbox that sets only HOME installs the app
+# into the sandbox and the COMMANDS over the real ones — on the actual phone,
+# pointing gtt at a mktemp directory that is deleted when the test ends.
+#
+# That is what happened, on the phone, in the middle of a release: the gate
+# was run, it passed the app checks, and afterwards `gtt` ran a throwaway copy
+# in /tmp with no keys in it. The test also checked "$HOME/bin/gtt", which on
+# Termux is a path the installer never writes, so those checks could not pass
+# no matter what was in them — the suite was simultaneously destructive and
+# unable to see what it had done.
+#
+# Setting PREFIX closes both: BIN becomes "$SANDBOX/bin", the checks look
+# where the file now is, and nothing outside the sandbox is touched.
+export PREFIX="$SANDBOX"
 unset GEMINI_KEYS        # the sandbox has its own ring; the real one is not it
 mkdir -p "$HOME"
 APPHOME="$HOME/.google_tts_stt"
@@ -162,7 +180,7 @@ cmp -s "$SANDBOX/l1" "$SANDBOX/l2" && ok "installing a third time changes nothin
 # grep -c prints 0 and exits 1, so `|| echo 0` made the count "0\n0", the
 # numeric test errored, and the installer ran the gate against no keys at all.
 EMPTY="$(mktemp -d)"
-HOME="$EMPTY" bash "$INSTALLER" > "$EMPTY/out.txt" 2>&1
+HOME="$EMPTY" PREFIX="$EMPTY" bash "$INSTALLER" > "$EMPTY/out.txt" 2>&1
 grep -q "No keys yet" "$EMPTY/out.txt" \
   && ok "an install with no keys says so" || bad "an install with no keys says so"
 grep -q "of 4 green" "$EMPTY/out.txt" \
@@ -202,7 +220,7 @@ grep -q 'r|R|1)' "$EMPTY/bin/gtt" \
   && ok "but the old numbers still work for fingers that learned them" \
   || bad "but the old numbers still work for fingers that learned them"
 if [ -x "$EMPTY/bin/gtts" ]; then
-  HOME="$EMPTY" "$EMPTY/bin/gtts" out >/dev/null 2>&1 \
+  HOME="$EMPTY" PREFIX="$EMPTY" "$EMPTY/bin/gtts" out >/dev/null 2>&1 \
     && ok "gtts runs the same thing as gtt" || bad "gtts runs the same thing as gtt"
 fi
 HOME="$EMPTY" "$PY" "$EMPTY/.google_tts_stt/app.py" test > "$EMPTY/t.txt" 2>&1
@@ -224,7 +242,7 @@ rm -rf "$EMPTY"
 # quietly takes some of them has decided something on the person's behalf.
 SPEND="$(mktemp -d)"
 printf 'a key\nAQ.Ab8RN6SPENDCHECKSPENDCHECKSPE\n' > "$SPEND/.gemini_keys"
-HOME="$SPEND" bash "$INSTALLER" > "$SPEND/out.txt" 2>&1
+HOME="$SPEND" PREFIX="$SPEND" bash "$INSTALLER" > "$SPEND/out.txt" 2>&1
 grep -q "of 4 green" "$SPEND/out.txt" \
   && bad "an install with keys in the ring must still not test them" \
   || ok "an install with keys in the ring does not test them"
@@ -233,7 +251,7 @@ grep -qi "no mocks" "$SPEND/out.txt" \
 [ -f "$SPEND/.google_tts_stt/ledger.json" ] \
   && bad "and writes no ledger, because it spent nothing" \
   || ok "and writes no ledger, because it spent nothing"
-HOME="$SPEND" bash "$INSTALLER" --test > "$SPEND/out2.txt" 2>&1
+HOME="$SPEND" PREFIX="$SPEND" bash "$INSTALLER" --test > "$SPEND/out2.txt" 2>&1
 grep -q "because you asked" "$SPEND/out2.txt" \
   && ok "--test still runs them, because asking is different" \
   || bad "--test still runs them, because asking is different"

@@ -215,6 +215,50 @@ Named rather than left to silence.
   writing yesterday's date into the ledger, which is not the same as being
   inside a request when the clock turns over.
 
+## v23 — the reader, and the app stops being a script editor
+
+The front door is no longer the script editor. `/` is a reading interface
+ported from MA Reader Web: paste a text, it is split into sentences, each one
+is synthesised into its own clip, and the sentence being spoken is lit. The
+editor is intact at `/studio` and linked from Settings, because two speakers in
+one tagged call is still a thing only it does.
+
+**Thirty voices in two rows, male above and female below, each scrolling on its
+own and each remembering where it was left.** Google publishes no gender — one
+adjective per voice and nothing else — so it was MEASURED, from the median pitch
+of each voice's own audio. Fourteen voices were free from the preview cache;
+sixteen cost one short synthesis each, once. `voice_sex.json` ships with the
+result and is never overwritten on upgrade, because it is also where a voice
+moved by hand is recorded. Iapetus at 155 Hz and Zubenelgenubi at 160 Hz are
+flagged `borderline`: the line is a convention, not a discovery.
+
+**The direction is in Settings.** Thirty-eight of them in seven groups, plus
+pace, served from this app's own table rather than a second copy. The cache key
+is voice + emotion + pace, because the same sentence read weary and read excited
+is different audio and keying on the voice alone would serve the wrong mood.
+
+### What was taken out, on purpose
+
+- **The word highlight, entirely.** It lit the exact word being spoken. Gemini
+  reports no word times, so a recogniser was used as a measuring instrument and
+  the result aligned onto the visible text. It worked, at between 80 and 300 ms
+  depending which instrument was reachable, and it cost a second network call
+  per sentence and a dependency on a provider that is not Google. The sentence
+  is the unit a reader follows; it needs no measurement and cannot be late.
+  `wordtime.py` is deleted and removed on upgrade.
+- **Edge and Speechify.** The engine chip, the engine panes, the key card for
+  them, the engine switching. None of it was ever this app's.
+- **Offline export.** The tab, the button and the archive's Export all posted to
+  endpoints this app does not have.
+
+### Fixed while here
+
+`tests/test4_upgrade.sh` set only `HOME` for its sandboxes. On Termux the
+installer takes the command directory from `PREFIX`, not `HOME`, so the gate
+installed over the **real** `gtt` and pointed it at a `mktemp` directory that
+was then deleted — while checking a path under `$HOME/bin` that the installer
+never writes, so it could not see what it had done. It now sets `PREFIX` too.
+
 ## Known and accepted
 
 The ledger counts only what this app spends. Another tool on the same ring is

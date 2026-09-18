@@ -12,6 +12,70 @@ mv -f "$APPHOME/transcribe.html.new" "$APPHOME/transcribe.html"
 chmod 644 "$APPHOME/transcribe.html"
 done_
 
+# ------------------------------------------------------------------ reader
+# The reading interface and the three modules behind it. Written beside the
+# app rather than inside it: reader.py imports wordtime and voicesex by name,
+# and a page of a quarter of a megabyte has no business being a Python string.
+step "reader"
+mkdir -p "$APPHOME/static"
+
+# wordtime.py is not written any more and is removed if an older version of
+# this app left one behind: it measured where each word fell, and nothing asks
+# any more. Its only dependency was a provider that is not Google.
+rm -f "$APPHOME/wordtime.py"
+
+cat > "$APPHOME/voicesex.py.new" <<'GTT_VOICESEX_EOF'
+@@VOICESEX_PY@@
+GTT_VOICESEX_EOF
+mv -f "$APPHOME/voicesex.py.new" "$APPHOME/voicesex.py"
+chmod 644 "$APPHOME/voicesex.py"
+
+cat > "$APPHOME/reader.py.new" <<'GTT_READER_PY_EOF'
+@@READER_PY@@
+GTT_READER_PY_EOF
+mv -f "$APPHOME/reader.py.new" "$APPHOME/reader.py"
+chmod 644 "$APPHOME/reader.py"
+
+cat > "$APPHOME/static/reader.html.new" <<'GTT_READER_HTML_EOF'
+@@READER_HTML@@
+GTT_READER_HTML_EOF
+mv -f "$APPHOME/static/reader.html.new" "$APPHOME/static/reader.html"
+chmod 644 "$APPHOME/static/reader.html"
+
+cat > "$APPHOME/static/marked.umd.js.new" <<'GTT_MARKED_EOF'
+@@MARKED_JS@@
+GTT_MARKED_EOF
+mv -f "$APPHOME/static/marked.umd.js.new" "$APPHOME/static/marked.umd.js"
+chmod 644 "$APPHOME/static/marked.umd.js"
+
+cat > "$APPHOME/static/icon.svg.new" <<'GTT_ICON_EOF'
+@@ICON_SVG@@
+GTT_ICON_EOF
+mv -f "$APPHOME/static/icon.svg.new" "$APPHOME/static/icon.svg"
+chmod 644 "$APPHOME/static/icon.svg"
+done_
+
+# ------------------------------------------------------- which voice is which
+# NEVER OVERWRITTEN. Google publishes no gender for the thirty voices, so this
+# table was MEASURED — the median pitch of each voice's own audio — and it is
+# shipped so that a new install has the two voice rows without spending
+# sixteen syntheses out of a ten-a-day budget to find out what they are.
+#
+# But it is also where a voice moved by hand is recorded, and that is somebody
+# deciding something the measurement could not. So an existing file is left
+# exactly alone: shipped as a starting point, never as a correction.
+step "voice rows"
+if [ -f "$APPHOME/voice_sex.json" ]; then
+  printf "kept yours\n"
+else
+  cat > "$APPHOME/voice_sex.json.new" <<'GTT_VOICESEX_JSON_EOF'
+@@VOICE_SEX_JSON@@
+GTT_VOICESEX_JSON_EOF
+  mv -f "$APPHOME/voice_sex.json.new" "$APPHOME/voice_sex.json"
+  chmod 644 "$APPHOME/voice_sex.json"
+  printf "30 measured\n"
+fi
+
 # ------------------------------------------------------------ preview cache
 # A preview is the same request every time, so the first press does not have to
 # cost anything either. These were made once and shipped; the rest fill in as

@@ -28,6 +28,21 @@ PAGE = os.path.join(ROOT, "src", "15_page.html")
 APP = os.path.join(ROOT, "src", "10_app.py")
 TAIL = os.path.join(ROOT, "src", "20_tail.sh")
 
+# The reader ships as files beside the app, not as strings inside it. Each one
+# goes into the installer through its own heredoc, and each heredoc has its own
+# marker — so each one needs checking for that marker in its own content, or a
+# file containing it would end its heredoc early and the rest of the installer
+# would be read as shell. That failure produces a file truncated at a plausible
+# place and a pile of command-not-found, which is a bad afternoon.
+READER_PARTS = [
+    ("@@READER_PY@@",       "41_reader.py",     "GTT_READER_PY_EOF"),
+    ("@@VOICESEX_PY@@",     "42_voicesex.py",   "GTT_VOICESEX_EOF"),
+    ("@@READER_HTML@@",     "45_reader.html",   "GTT_READER_HTML_EOF"),
+    ("@@MARKED_JS@@",       "46_marked.umd.js", "GTT_MARKED_EOF"),
+    ("@@ICON_SVG@@",        "47_icon.svg",      "GTT_ICON_EOF"),
+    ("@@VOICE_SEX_JSON@@",  "voice_sex.json",   "GTT_VOICESEX_JSON_EOF"),
+]
+
 
 def version():
     m = re.search(r"^VERSION\s*=\s*(\d+)", open(APP).read(), re.M)
@@ -107,7 +122,8 @@ def build():
         "#   src/10_app.py    %s" % sha(APP),
         "#   src/15_page.html %s" % sha(PAGE),
         "#   src/20_tail.sh   %s" % sha(TAIL),
-    ])
+    ] + ["#   src/%-16s %s" % (f, sha(os.path.join(ROOT, "src", f)))
+         for _t, f, _m in READER_PARTS])
     text = (open(HEAD).read()
             .replace("@@HEADER@@", header.split("\n", 1)[0].lstrip("# "))
             + "")
@@ -124,6 +140,17 @@ def build():
     if "GTT_TRANSCRIBE_EOF" in page:
         sys.exit("the vendored page contains the heredoc marker")
     tail = tail.replace("@@TRANSCRIBE_HTML@@", page)
+    for token, fname, marker in READER_PARTS:
+        path = os.path.join(ROOT, "src", fname)
+        if not os.path.exists(path):
+            sys.exit("missing src/%s, which the installer writes" % fname)
+        body = open(path, encoding="utf-8").read()
+        if marker in body:
+            sys.exit("src/%s contains its own heredoc marker %s, which would "
+                     "end it early" % (fname, marker))
+        if token not in tail:
+            sys.exit("src/20_tail.sh no longer has %s to fill" % token)
+        tail = tail.replace(token, body.rstrip("\n"))
     seed = seed_block()
     tail = tail.replace("@@SEED_CACHE@@", seed)
     return name, head + app + tail

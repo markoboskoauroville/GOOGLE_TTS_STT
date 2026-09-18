@@ -5,9 +5,15 @@
 #   src/00_head.sh   9b27f46ee8bc
 #   src/30_transcribe.html   67e73826805d   vendored, engine swapped at build
 #   src/seed/                 47 cached previews
-#   src/10_app.py    e7c9a6a44c2f
+#   src/10_app.py    b4895e4cbdab
 #   src/15_page.html 8968972cd977
-#   src/20_tail.sh   36640551ba37
+#   src/20_tail.sh   86ccf82463ee
+#   src/41_reader.py     c738a9b8dcbf
+#   src/42_voicesex.py   693670981a6d
+#   src/45_reader.html   fb541dba708a
+#   src/46_marked.umd.js eaccee2fb9fb
+#   src/47_icon.svg      231dd5038e47
+#   src/voice_sex.json   35dcb92926b5
 #
 # GOOGLE TTS AND STT, one roof over the two halves of the same job.
 #
@@ -21,10 +27,10 @@
 # ledgers, and two ledgers that each think they own the daily budget are both
 # wrong by dinner time.
 #
-#   bash 22-google-tts-stt-v22.sh                 install
-#   bash 22-google-tts-stt-v22.sh --keys FILE     install, and take the keys out of FILE
-#   bash 22-google-tts-stt-v22.sh --test          install, then run the four tests
-#   bash 22-google-tts-stt-v22.sh --verify        check this file is whole, change nothing
+#   bash 23-google-tts-stt-v23.sh                 install
+#   bash 23-google-tts-stt-v23.sh --keys FILE     install, and take the keys out of FILE
+#   bash 23-google-tts-stt-v23.sh --test          install, then run the four tests
+#   bash 23-google-tts-stt-v23.sh --verify        check this file is whole, change nothing
 #
 # INSTALLING SPENDS NOTHING. The four tests make real calls against a real
 # ring, and a TTS account has ten requests a day, so they run when you ask for
@@ -47,8 +53,8 @@
 
 set -u
 
-GTT_VERSION="v22"
-GTT_FILE="22-google-tts-stt-v22.sh"
+GTT_VERSION="v23"
+GTT_FILE="23-google-tts-stt-v23.sh"
 GTT_REPO="markoboskoauroville/GOOGLE_TTS_STT"
 
 # --- the platform layer, and nothing below this block knows the platform ---
@@ -248,7 +254,7 @@ try:
 except Exception:
     PACIFIC = timezone(timedelta(hours=-8))
 
-VERSION = 22
+VERSION = 23
 PORT = int(os.environ.get("GTTS_PORT", "7311"))
 KEYFILE = os.environ.get("GEMINI_KEYS", os.path.expanduser("~/.gemini_keys"))
 HOME = os.path.expanduser("~/.google_tts_stt")
@@ -2048,7 +2054,8 @@ GUARD_HEADER = "X-Gtt-Local"
 GUARD_HEADERS = ("X-Gtt-Local", "X-Maha-Local")
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "[::1]", "::1"}
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
-OPEN_ENDPOINTS = {"index", "out", "favicon_ico", "transcribe_page", "preview_file"}
+OPEN_ENDPOINTS = {"index", "out", "favicon_ico", "transcribe_page", "preview_file",
+                  "studio", "webmanifest", "reader_page", "reader_static"}
 _SELF_MARKER = b"GOOGLE TTS AND STT"
 
 
@@ -2265,8 +2272,56 @@ def serve():
 
     @app.get("/")
     def index():
+        """THE FRONT DOOR IS THE READER.
+
+        This app opened on a script editor for two speakers, with tags to
+        insert, a direction to pick per line and a SPEAK button at the bottom.
+        That is a tool for making an actor read something, and it is not what
+        this is for any more: the thing wanted on arriving is a text read
+        aloud, in a chosen voice, with the words lit as they are spoken. So
+        the first screen is the paste box and the voice rows, and everything
+        that generates is reachable without scrolling.
+
+        The old page is not deleted, because it still does something no other
+        screen does — two speakers in one call, tagged line by line. It moved
+        to /studio and is linked from the reader's Settings.
+        """
+        f = os.path.join(HOME, "static", "reader.html")
+        if os.path.exists(f):
+            return send_from_directory(os.path.join(HOME, "static"),
+                                       "reader.html")
         return (PAGE.replace("@@ASSUMED@@", str(RPD_UNKNOWN_ASSUMED))
                 .replace("@@VERSION@@", "v%d" % VERSION))
+
+    @app.get("/studio")
+    def studio():
+        """The script editor, whole and unchanged. Two speakers, tags,
+        directions per line."""
+        return (PAGE.replace("@@ASSUMED@@", str(RPD_UNKNOWN_ASSUMED))
+                .replace("@@VERSION@@", "v%d" % VERSION))
+
+    @app.get("/manifest.webmanifest")
+    def webmanifest():
+        return (jsonify({
+            "name": "Gemini Reader", "short_name": "Reader",
+            "start_url": "/", "display": "standalone",
+            "background_color": "#0b0d10", "theme_color": "#0b0d10",
+            "icons": [{"src": "/static/icon.svg", "sizes": "any",
+                       "type": "image/svg+xml"}]}),
+            200, {"Content-Type": "application/manifest+json"})
+
+    # ---- the reader ----
+    # GTT reads now, and it reads with the interface MA Reader Web proved.
+    # Mounted rather than merged: every route it owns lives under /reader, so
+    # nothing here had to move and nothing it asks for can collide with Speak,
+    # Listen or Keys.
+    try:
+        import reader as _reader
+        _reader.mount(sys.modules[__name__], app)
+    except Exception as _e:
+        # A reader that will not load must not take the rest of the app with
+        # it. Speak and Listen are the older promise and they keep working.
+        print("  reader not mounted: %s" % _e)
 
     @app.get("/transcribe")
     def transcribe_page():
@@ -5059,6 +5114,6643 @@ GTT_TRANSCRIBE_EOF
 mv -f "$APPHOME/transcribe.html.new" "$APPHOME/transcribe.html"
 chmod 644 "$APPHOME/transcribe.html"
 done_
+
+# ------------------------------------------------------------------ reader
+# The reading interface and the three modules behind it. Written beside the
+# app rather than inside it: reader.py imports wordtime and voicesex by name,
+# and a page of a quarter of a megabyte has no business being a Python string.
+step "reader"
+mkdir -p "$APPHOME/static"
+
+# wordtime.py is not written any more and is removed if an older version of
+# this app left one behind: it measured where each word fell, and nothing asks
+# any more. Its only dependency was a provider that is not Google.
+rm -f "$APPHOME/wordtime.py"
+
+cat > "$APPHOME/voicesex.py.new" <<'GTT_VOICESEX_EOF'
+"""Which voices are male and which are female, measured rather than guessed.
+
+Google publishes ONE adjective per voice — "informative", "breathy", "firm" —
+and nothing else. No gender, no age, no accent. The rule this project already
+follows is that A BLANK IS A FACT AND A GUESS IS NOT, which is why `sex` was
+empty everywhere else in this app and why no table of names was ever written
+down: "Charon sounds male" is a thing somebody believed, not a thing anybody
+checked.
+
+Two rows of voices, male above and female below, needs the fact. So it is
+measured, from the audio, which is not a guess: the median fundamental
+frequency of a voice is the pitch it actually speaks at.
+
+MEASURED HERE, 18.9.2026, all thirty. Fourteen were free — they already had a
+cached preview — and sixteen cost one short synthesis each, once, forever.
+
+    MALE, 17                          FEMALE, 13
+     87 Enceladus  breathy            160 Zubenelgenubi casual      <-- on the line
+     92 Charon     informative        176 Zephyr        bright
+    103 Alnilam    firm               184 Vindemiatrix  gentle
+    105 Algieba    smooth             186 Achernar      soft
+    105 Algenib    gravelly           188 Aoede         breezy
+    106 Umbriel    easy going         195 Laomedeia     upbeat
+    112 Fenrir     excitable          205 Sulafat       warm
+    119 Sadachbia  lively             213 Kore          firm
+    126 Pulcherrima forward           213 Leda          youthful
+    127 Puck       upbeat             229 Callirrhoe    easy going
+    129 Schedar    even               239 Erinome       clear
+    133 Sadaltager knowledgeable      246 Despina       smooth
+    136 Orus       firm               262 Autonoe       bright
+    136 Gacrux     mature
+    137 Achird     friendly
+    139 Rasalgethi informative
+    155 Iapetus    clear              <-- on the line
+
+AND HERE IS THE HONEST PART, because the first version of this comment was
+written after measuring only the fourteen free ones and said something nicer.
+
+On those fourteen the two clusters were separated by FORTY-NINE HERTZ with
+nothing whatsoever inside the gap, and it was tempting to write that down as
+the finding. With all thirty in, the gap is gone: Rasalgethi at 139, Iapetus
+at 155, Zubenelgenubi at 160, Zephyr at 176. The distribution is continuous
+straight through the middle, and the two voices either side of the line are
+five hertz apart.
+
+So the line is a CONVENTION, not a discovery. It is still in the right place —
+it is where adult speech separates, and twenty-eight of the thirty sit clear
+of it by a comfortable margin — but Iapetus and Zubenelgenubi are a coin toss
+that pitch alone cannot settle, and anything within twelve hertz of the line
+is flagged `borderline` so the interface can say so rather than present a
+coin toss as a measurement.
+
+The measurement is made once per voice and written down. It costs one short
+synthesis for a voice with no cached preview, nothing at all for one that has
+it, and never anything again.
+
+AND IT CAN BE OVERRULED. A measurement is a fact about pitch, not a ruling
+about a voice, and a low woman or a high man is an ordinary thing. Anything
+set by hand is recorded as set by hand and is never re-measured.
+"""
+
+import array
+import json
+import math
+import os
+import subprocess
+
+HOME = os.path.expanduser("~/.google_tts_stt")
+SEX_FILE = os.path.join(HOME, "voice_sex.json")
+
+SR = 16000
+# The middle of the gap that was actually observed (137 -> 186), not a number
+# taken from a table. If a future voice lands near it, that is worth knowing
+# and worth showing, rather than worth rounding away.
+SPLIT_HZ = 160.0
+F0_MIN, F0_MAX = 60.0, 400.0
+
+
+# ---------------------------------------------------------------- measuring
+
+def _decode(path):
+    """One channel of 16 kHz signed 16-bit, whatever the file was."""
+    try:
+        out = subprocess.run(
+            ["ffmpeg", "-v", "quiet", "-i", path, "-ac", "1", "-ar", str(SR),
+             "-f", "s16le", "-"],
+            capture_output=True, timeout=120).stdout
+    except Exception:
+        return None
+    if not out:
+        return None
+    a = array.array("h")
+    a.frombytes(out[:len(out) // 2 * 2])
+    return a
+
+
+def median_f0(pcm):
+    """Median fundamental frequency over the voiced frames, or None.
+
+    Autocorrelation, and deliberately only over the LOUDER frames: the quiet
+    ones are breath, room tone and the tails of consonants, and they produce
+    confident nonsense. A frame also has to correlate with itself well enough
+    to be periodic at all, which is what separates a vowel from a hiss.
+    """
+    if not pcm:
+        return None, 0
+    win, hop = int(SR * 0.040), int(SR * 0.020)
+    lo, hi = int(SR / F0_MAX), int(SR / F0_MIN)
+    frames, energies = [], []
+    for i in range(0, len(pcm) - win, hop):
+        f = pcm[i:i + win]
+        energies.append(math.sqrt(sum(float(v) * v for v in f) / win))
+        frames.append(f)
+    if not energies:
+        return None, 0
+    thr = sorted(energies)[int(len(energies) * 0.6)]      # the louder 40%
+    vals = []
+    for f, e in zip(frames, energies):
+        if e < thr or e < 200:
+            continue
+        m = sum(f) / len(f)
+        x = [float(v) - m for v in f]
+        r0 = sum(v * v for v in x)
+        if r0 <= 0:
+            continue
+        best, bestlag = 0.0, 0
+        for lag in range(lo, hi):
+            s = 0.0
+            # stride two: at 16 kHz a pitch period is 40 to 270 samples, so
+            # every other sample is still ample, and it halves the work on a
+            # phone
+            for k in range(0, len(x) - lag, 2):
+                s += x[k] * x[k + lag]
+            s /= (r0 * 0.5)
+            if s > best:
+                best, bestlag = s, lag
+        if bestlag and best > 0.30:
+            vals.append(SR / float(bestlag))
+    if not vals:
+        return None, 0
+    vals.sort()
+    return vals[len(vals) // 2], len(vals)
+
+
+def classify(f0):
+    if not f0:
+        return ""
+    return "M" if f0 < SPLIT_HZ else "F"
+
+
+# ------------------------------------------------------------------- the table
+
+def table():
+    try:
+        d = json.load(open(SEX_FILE, encoding="utf-8"))
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def _write(d):
+    try:
+        tmp = SEX_FILE + ".part"
+        json.dump(d, open(tmp, "w", encoding="utf-8"),
+                  ensure_ascii=False, indent=1, sort_keys=True)
+        os.replace(tmp, SEX_FILE)
+    except Exception:
+        pass
+
+
+def set_by_hand(voice, sex):
+    """Move a voice to the other row and keep it there.
+
+    Recorded as `hand` so the measurer never argues with it afterwards. This
+    is not a correction to the pitch — the pitch was right — it is a different
+    question being answered by the only one who can.
+    """
+    sex = "M" if str(sex).upper().startswith("M") else "F"
+    d = table()
+    rec = d.get(voice) or {}
+    rec["sex"] = sex
+    rec["by"] = "hand"
+    d[voice] = rec
+    _write(d)
+    return d
+
+
+def _sample_for(app, voice):
+    """A file to measure: a cached preview if there is one, else a new one.
+
+    Goes through the app's own preview path rather than synthesising on the
+    side, so the clip lands in the preview cache, is reused by the Voice
+    screen, and is counted against the ledger like every other request.
+    """
+    for _group, lab, _glyph, _text, _spoken in app.EMOTIONS:
+        h, _p = app.preview_key(voice, lab)
+        hit = app.preview_path(h)
+        if hit:
+            return hit, True
+    r = app.preview(voice, "Neutral")
+    if not r.get("ok"):
+        return None, False
+    p = os.path.join(app.PREVIEWS, r["file"])
+    return (p if os.path.exists(p) else None), bool(r.get("cached"))
+
+
+def measure_one(app, voice, force=False):
+    """Measure one voice and remember it. Returns its record."""
+    d = table()
+    rec = d.get(voice) or {}
+    if not force and rec.get("by") == "hand":
+        return rec
+    if not force and rec.get("f0"):
+        return rec
+    path, was_cached = _sample_for(app, voice)
+    if not path:
+        return rec
+    f0, n = median_f0(_decode(path))
+    if not f0:
+        return rec
+    rec = {"f0": round(f0, 1), "frames": n, "sex": classify(f0),
+           "by": "measured", "free": bool(was_cached),
+           # near enough to the line that pitch alone is not an answer
+           "borderline": abs(f0 - SPLIT_HZ) <= 12.0}
+    d[voice] = rec
+    _write(d)
+    return rec
+
+
+def ensure_all(app, voices=None, budget=None):
+    """Measure whatever has no answer yet.
+
+    `budget` caps how many NEW syntheses may be spent in one go, because this
+    shares its daily allowance with the reading and the reading is the point.
+    Voices with a cached preview are free and are never counted against it.
+    """
+    spent = 0
+    for v in (voices or app.VOICES):
+        d = table()
+        rec = d.get(v) or {}
+        if rec.get("sex"):
+            continue
+        _path, was_cached = None, False
+        for _g, lab, _gl, _t, _s in app.EMOTIONS:
+            h, _p = app.preview_key(v, lab)
+            if app.preview_path(h):
+                was_cached = True
+                break
+        if not was_cached:
+            if budget is not None and spent >= budget:
+                continue
+            spent += 1
+        measure_one(app, v)
+    return table(), spent
+
+
+def rows(app):
+    """The two rows, each in the app's own voice order.
+
+    A voice with no answer yet is in NEITHER row rather than dropped into one
+    of them: an unmeasured voice put among the men is a guess wearing a
+    measurement's clothes, which is the thing this file exists to avoid.
+    """
+    d = table()
+    male, female, unknown = [], [], []
+    for v in app.VOICES:
+        s = (d.get(v) or {}).get("sex", "")
+        (male if s == "M" else female if s == "F" else unknown).append(v)
+    return {"male": male, "female": female, "unknown": unknown}
+GTT_VOICESEX_EOF
+mv -f "$APPHOME/voicesex.py.new" "$APPHOME/voicesex.py"
+chmod 644 "$APPHOME/voicesex.py"
+
+cat > "$APPHOME/reader.py.new" <<'GTT_READER_PY_EOF'
+"""MA-style reading, spoken by Gemini.
+
+The reader from MA Reader Web, with that app's two engines taken out and this
+app's one put in. Same page, same gestures, same library; a different voice
+behind it and two things it did not have — a direction the voice acts on, and
+a word highlight that has to be measured because the engine will not say.
+
+WHAT IS DIFFERENT FROM MA READER WEB, AND WHY
+
+  * The unit key is voice + emotion + pace, not voice. Edge's voice is the
+    whole instruction, so its cache key is the voice. Gemini is told how to
+    say the line in prose, and the same words read "weary" and read "excited"
+    are different audio. Keying on the voice alone would serve a cached calm
+    reading of a sentence to somebody who just asked for it furious, once,
+    silently, and only for sentences that happened to be cached.
+
+  * THE HIGHLIGHT IS THE SENTENCE, AND ONLY THE SENTENCE. There was a whole
+    apparatus here for lighting the individual word being spoken. Gemini
+    reports no word times, so each finished clip was sent to a recogniser
+    purely as a measuring instrument, and the result aligned onto the visible
+    text with Needleman-Wunsch, with a proportional spread underneath for when
+    that failed. It worked. It is gone, on purpose.
+
+    It cost a second network call per sentence, a dependency on a provider
+    that is not Google, and an answer between 80 and 300 milliseconds out
+    depending which instrument happened to be reachable. It bought a marker
+    moving inside a sentence that was already lit. The sentence is the unit a
+    reader follows, it needs no measurement at all — a clip starts and its
+    sentence lights up — and it cannot be out by any milliseconds.
+
+  * No offline export and no second reader yet. Deliberately: the reading has
+    to be right before it is worth writing to disk in bulk.
+"""
+
+import json
+import os
+import re
+import threading
+import time
+
+import voicesex as VSX
+
+HOME = os.path.expanduser("~/.google_tts_stt")
+READ_DIR = os.path.join(HOME, "reader")
+LIB_DIR = os.path.join(READ_DIR, "library")
+STATE_FILE = os.path.join(READ_DIR, "state.json")
+STATIC_DIR = os.path.join(HOME, "static")
+
+UNIT_CAP = 320
+
+_locks = {}
+_locks_guard = threading.Lock()
+
+
+def _lock_for(key):
+    with _locks_guard:
+        if key not in _locks:
+            _locks[key] = threading.Lock()
+        return _locks[key]
+
+
+# ---------------------------------------------------------------------------
+# text: what gets read, and where one sentence stops
+# ---------------------------------------------------------------------------
+# Ported unchanged from MA Reader Web. It is proven on months of pasted
+# articles and every regex in it is a thing that was once read aloud wrongly.
+
+_SENT_RE = re.compile(r"(?<=[.!?…])\s+")
+_BLOCK_RE = re.compile(r"\n{2,}")
+
+
+# AN ORDINAL IS NOT THE END OF A SENTENCE.
+#
+# "Danas je 8. mjesec" is one sentence, and the plain full-stop rule makes it
+# two: "Danas je 8." and "mjesec". Read aloud that is a stop in the middle of
+# a date, and it is not rare — it is how every Croatian date is written, and
+# how numbered lists and section references are written in English.
+#
+# The tell is reliable: a full stop after a DIGIT, followed by something that
+# does not start a sentence — a lower-case letter, or another digit. A real
+# sentence end after a number ("...in 1998. The next year...") is followed by
+# a capital, and is left alone.
+_ORDINAL_JOIN = re.compile(r"[0-9]\.$")
+_STARTS_LOWER = re.compile(r"^[^\W\d_]", re.UNICODE)
+
+
+def _joins_back(text, left, right):
+    if not _ORDINAL_JOIN.search(text[left[0]:left[1]].rstrip()):
+        return False
+    head = text[right[0]:right[1]].lstrip()[:1]
+    if not head:
+        return False
+    if head.isdigit():
+        return True
+    return bool(_STARTS_LOWER.match(head)) and head.islower()
+
+
+def split_sentences(text, lo=0, hi=None):
+    if hi is None:
+        hi = len(text)
+    spans, start = [], lo
+    for m in _SENT_RE.finditer(text, lo, hi):
+        spans.append((start, m.start()))
+        start = m.end()
+    if start < hi:
+        spans.append((start, hi))
+    spans = [(a, b) for a, b in spans if text[a:b].strip()]
+    merged = []
+    for sp in spans:
+        if merged and _joins_back(text, merged[-1], sp):
+            merged[-1] = (merged[-1][0], sp[1])
+        else:
+            merged.append(sp)
+    return merged
+
+
+def split_units(text, cap=UNIT_CAP, blocks=False):
+    """Sentences, with anything longer than `cap` broken at a space.
+
+    The cap is not cosmetic. One unit is one synthesis and one clip, and a
+    sentence of two thousand characters is a long wait before any sound, a
+    large object to hold, and a single clip the highlight has to cross with
+    one measurement. Breaking at a space keeps a word whole.
+    """
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    if blocks:
+        ranges, start = [], 0
+        for m in _BLOCK_RE.finditer(text):
+            ranges.append((start, m.start()))
+            start = m.end()
+        ranges.append((start, len(text)))
+        ranges = [(a, b) for a, b in ranges if text[a:b].strip()]
+    else:
+        ranges = [(0, len(text))]
+    units = []
+    for ra, rb in ranges:
+        for a, b in split_sentences(text, ra, rb):
+            s = a
+            while b - s > cap:
+                cut = text.rfind(" ", s, s + cap)
+                if cut <= s:
+                    cut = s + cap
+                if text[s:cut].strip():
+                    units.append((s, cut))
+                s = cut
+                while s < b and text[s] in " \n\t":
+                    s += 1
+            if b > s and text[s:b].strip():
+                units.append((s, b))
+    return units
+
+
+_FENCE_RE = re.compile(r"^\s*(?:```+|~~~+).*$", re.M)
+_IMG_RE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
+_AUTOLINK_RE = re.compile(r"<((?:https?|ftp|mailto):[^>\s]+)>", re.I)
+_LINK_RE = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+_REFLINK_RE = re.compile(r"\[([^\]]+)\]\[[^\]]*\]")
+_REFDEF_RE = re.compile(r"^\s{0,3}\[[^\]]+\]:\s+\S.*$", re.M)
+_URL_RE = re.compile(r"(?:(?:https?|ftp)://|www\.)[^\s<>)\]}\"']+", re.I)
+_MAILTO_RE = re.compile(r"\bmailto:[^\s<>)\]}\"']+", re.I)
+_HTML_RE = re.compile(r"</?[A-Za-z][^>]*>")
+_CODE_RE = re.compile(r"`+([^`]*)`+")
+_EMPH_AST_RE = re.compile(r"(\*\*|\*|~~)(?=\S)(.+?)(?<=\S)\1", re.S)
+_EMPH_US_RE = re.compile(r"(?<![\w])(__|_)(?=\S)(.+?)(?<=\S)\1(?![\w])", re.S)
+_HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s*")
+_QUOTE_RE = re.compile(r"^\s{0,3}>+\s?")
+_BULLET_RE = re.compile(r"^(\s*)(?:[-*+]|\d+[.)])\s+")
+_RULE_RE = re.compile(r"^\s{0,3}(?:(?:[-*_]\s*){3,}|=+)\s*$")
+
+
+def clean_text(text):
+    """Only the words. A URL read aloud is a minute of nothing."""
+    if not text:
+        return ""
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = _FENCE_RE.sub("", text)
+    text = _IMG_RE.sub("", text)
+    text = _AUTOLINK_RE.sub("", text)
+    text = _LINK_RE.sub(r"\1", text)
+    text = _REFLINK_RE.sub(r"\1", text)
+    text = _REFDEF_RE.sub("", text)
+    text = _URL_RE.sub("", text)
+    text = _MAILTO_RE.sub("", text)
+    text = _HTML_RE.sub("", text)
+    text = _CODE_RE.sub(r"\1", text)
+    for _ in range(3):
+        new = _EMPH_AST_RE.sub(r"\2", text)
+        new = _EMPH_US_RE.sub(r"\2", new)
+        if new == text:
+            break
+        text = new
+    out = []
+    for ln in text.split("\n"):
+        if _RULE_RE.match(ln):
+            continue
+        ln = _HEADING_RE.sub("", ln)
+        ln = _QUOTE_RE.sub("", ln)
+        ln = _BULLET_RE.sub(r"\1", ln)
+        if "|" in ln:
+            stripped = ln.strip()
+            if stripped and set(stripped) <= set("|:- "):
+                continue
+            ln = ln.replace("|", " ")
+        out.append(ln)
+    text = "\n".join(out)
+    text = re.sub(r"\(\s*\)", "", text)
+    text = re.sub(r"\[\s*\]", "", text)
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\s+([.,;:!?])", r"\1", text)
+    text = re.sub(r" *\n", "\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
+# ---------------------------------------------------------------------------
+# the library
+# ---------------------------------------------------------------------------
+
+def _slug(title):
+    s = "".join(c if c.isalnum() else "-" for c in (title or "").lower())
+    s = re.sub(r"-+", "-", s).strip("-")[:40] or "text"
+    return "%s-%d" % (s, int(time.time()))
+
+
+def lib_save(raw):
+    text = clean_text(raw)
+    title = (text.strip().splitlines() or ["Untitled"])[0][:64]
+    tid = _slug(title)
+    d = os.path.join(LIB_DIR, tid)
+    os.makedirs(d, exist_ok=True)
+    open(os.path.join(d, "text.txt"), "w", encoding="utf-8").write(raw)
+    json.dump({"title": title, "created": int(time.time())},
+              open(os.path.join(d, "meta.json"), "w", encoding="utf-8"),
+              ensure_ascii=False)
+    return tid
+
+
+def lib_text(tid):
+    try:
+        return open(os.path.join(LIB_DIR, tid, "text.txt"),
+                    encoding="utf-8").read()
+    except Exception:
+        return ""
+
+
+def lib_meta(tid):
+    try:
+        return json.load(open(os.path.join(LIB_DIR, tid, "meta.json"),
+                              encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def lib_list():
+    out = []
+    if not os.path.isdir(LIB_DIR):
+        return out
+    for tid in os.listdir(LIB_DIR):
+        if not os.path.isdir(os.path.join(LIB_DIR, tid)):
+            continue
+        m = lib_meta(tid)
+        txt = lib_text(tid)
+        out.append({"id": tid, "title": m.get("title", tid),
+                    "created": m.get("created", 0),
+                    "chars": len(txt),
+                    "units": len(split_units(clean_text(txt)))})
+    out.sort(key=lambda r: r.get("created", 0), reverse=True)
+    return out
+
+
+def lib_delete(tid):
+    import shutil
+    d = os.path.join(LIB_DIR, tid)
+    if os.path.isdir(d):
+        shutil.rmtree(d, ignore_errors=True)
+        return True
+    return False
+
+
+def text_payload(tid):
+    """Everything the page needs to render and play a text."""
+    text = clean_text(lib_text(tid))
+    units = split_units(text)
+    m = lib_meta(tid)
+    return {"id": tid, "title": m.get("title", "") or
+            ((text.strip().splitlines() or ["Untitled"])[0][:64]),
+            "sentences": [text[a:b].strip() for a, b in units],
+            "count": len(units), "source": lib_text(tid),
+            "spoken": text, "spans": [[a, b] for a, b in units]}
+
+
+# ---------------------------------------------------------------------------
+# the voice, the direction, and the key they cache under
+# ---------------------------------------------------------------------------
+
+_SAFE = re.compile(r"[^A-Za-z0-9]+")
+
+
+def vkey_for(voice, emotion, pace):
+    """One cache key for one way of speaking.
+
+    Voice AND direction AND pace, because all three change the audio. Get this
+    wrong in the cheap direction — key on the voice only — and the bug is
+    invisible: the right words in the wrong mood, for the sentences that
+    happened to be cached already, and never for the ones synthesised fresh.
+    """
+    return "%s__%s__%s" % (_SAFE.sub("", voice or "Charon") or "Charon",
+                           _SAFE.sub("", emotion or "Neutral") or "Neutral",
+                           _SAFE.sub("", pace or "normal") or "normal")
+
+
+def unit_paths(tid, vkey, idx):
+    d = os.path.join(LIB_DIR, tid, "audio", vkey)
+    os.makedirs(d, exist_ok=True)
+    base = os.path.join(d, "s%04d" % idx)
+    return base + ".wav", base + ".tok.json"
+
+
+def _direction(app, emotion, pace):
+    """The prose Gemini is given instead of a parameter.
+
+    Gemini has no emotion field. It has one prose instruction for the whole
+    call, so the choice made in Settings is compiled into a sentence, using
+    this app's own table rather than a fresh set of words — the table is
+    already tuned and already in the Speak tab, and two vocabularies for one
+    idea is how the two drift apart.
+    """
+    bits = []
+    d = app.emotion_by_label(emotion) if emotion else ""
+    if d:
+        bits.append(d)
+    p = dict(app.PACES).get((pace or "").lower(), "")
+    if p:
+        bits.append(p)
+    return ", ".join(bits)
+
+
+def synth(app, sentence, voice, emotion, pace, wav_path):
+    """One sentence into one clip. Returns (seconds, error).
+
+    Deliberately NOT app.speak(). That names its file by the wall clock to the
+    second and drops it in the out folder; the reader synthesises three
+    sentences ahead, so two clips in the same second would collide and one
+    reader would hear the other's sentence. This writes straight to the unit
+    path, which is unique by construction.
+    """
+    direction = _direction(app, emotion, pace)
+    head = "Read the following aloud."
+    timbre = app.VOICE_TIMBRE.get(voice, "clear")
+    head += " The voice is %s." % timbre
+    if direction:
+        head += (" Read it in this manner: %s."
+                 " Do not read this instruction aloud." % direction)
+    prompt = head + "\n\n" + sentence
+
+    def payload(_model):
+        return {"contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {
+                    "responseModalities": ["AUDIO"],
+                    "speechConfig": {"voiceConfig": {
+                        "prebuiltVoiceConfig": {"voiceName": voice}}}}}
+
+    r = app.with_fallback(app.TTS_CHAIN, payload)
+    if not r.get("ok"):
+        return 0.0, (r.get("error") or "the voice did not answer")
+    import base64
+    pcm = None
+    for c in r["data"].get("candidates", []):
+        for p in c.get("content", {}).get("parts", []):
+            if "inlineData" in p:
+                pcm = base64.b64decode(p["inlineData"]["data"])
+    if not pcm:
+        return 0.0, "no audio in the reply"
+    tmp = wav_path + ".part"
+    secs = app.pcm_to_wav(tmp, pcm)
+    os.replace(tmp, wav_path)
+    try:
+        app.spend(r["label"], r["model"], n=0, audio_out=secs)
+    except Exception:
+        pass
+    return secs, ""
+
+
+def ensure_unit(app, tid, vkey, idx, voice, emotion, pace):
+    """Clip + timing for one sentence, made once and kept."""
+    wav, js = unit_paths(tid, vkey, idx)
+    if os.path.isfile(wav) and os.path.isfile(js):
+        return wav, js, ""
+    with _lock_for((tid, vkey, idx)):
+        if os.path.isfile(wav) and os.path.isfile(js):
+            return wav, js, ""
+        payload = text_payload(tid)
+        if idx < 0 or idx >= payload["count"]:
+            return None, None, "out of range"
+        sentence = payload["sentences"][idx]
+        secs, err = synth(app, sentence, voice, emotion, pace, wav)
+        if err:
+            return None, None, err
+        json.dump({"total": round(secs, 3), "sentence": sentence},
+                  open(js + ".part", "w", encoding="utf-8"), ensure_ascii=False)
+        os.replace(js + ".part", js)
+        return wav, js, ""
+
+
+# ---------------------------------------------------------------------------
+# state
+# ---------------------------------------------------------------------------
+
+_DEFAULT_STATE = {
+    "voice": "Charon", "emotion": "Neutral", "pace": "normal",
+    "lang": "eng", "speed": 1.0, "volume": 100, "gap": 0.0, "lag": 0.0,
+    "wgap": 0.0, "loop": False, "autoplay": False, "size": 13, "focus": False,
+    "theme": "night", "font": "sans", "lineheight": 3, "mode": "read",
+    "wordhl": True, "hideTabs": True, "pane": "app",
+    "floatPaste": True, "floatFull": True, "floatSwap": True,
+    "swapIsPlay": True, "fpX": 0.82, "fpY": 0.72, "ffX": 0.82, "ffY": 0.58,
+    "fsX": 0.82, "fsY": 0.44, "fullOnPaste": False, "voiceBar": True,
+    # where each of the two voice wheels was left standing
+    "vscrollM": 0, "vscrollF": 0,
+    "rgbSent": [255, 217, 59], "rgbWord": [226, 59, 78],
+    "rgbFont": [255, 255, 255], "rgbText": None,
+    "starred": [],
+}
+
+
+def load_state():
+    st = dict(_DEFAULT_STATE)
+    for path in (STATE_FILE, STATE_FILE + ".bak"):
+        try:
+            data = json.load(open(path, encoding="utf-8"))
+            if isinstance(data, dict):
+                st.update(data)
+                break
+        except Exception:
+            continue
+    return st
+
+
+def save_state(d):
+    os.makedirs(READ_DIR, exist_ok=True)
+    st = load_state()
+    if isinstance(d, dict):
+        st.update(d)
+    try:
+        if os.path.exists(STATE_FILE):
+            import shutil
+            shutil.copyfile(STATE_FILE, STATE_FILE + ".bak")
+    except Exception:
+        pass
+    tmp = STATE_FILE + ".part"
+    json.dump(st, open(tmp, "w", encoding="utf-8"), ensure_ascii=False)
+    os.replace(tmp, STATE_FILE)
+    return st
+
+
+# ---------------------------------------------------------------------------
+# the routes
+# ---------------------------------------------------------------------------
+
+def mount(app_module, flask_app):
+    """Hang the reader off an existing Flask app under /reader.
+
+    Everything lives under one prefix so nothing can collide with the routes
+    the Speak and Listen tabs already own, and so the page needs one line
+    changed rather than thirty.
+    """
+    from flask import request, jsonify, send_from_directory, send_file
+
+    os.makedirs(LIB_DIR, exist_ok=True)
+
+    @flask_app.get("/reader")
+    @flask_app.get("/read")
+    def reader_page():
+        f = os.path.join(STATIC_DIR, "reader.html")
+        if not os.path.exists(f):
+            return ("reader.html is not installed in static/", 404)
+        return send_file(f)
+
+    @flask_app.get("/reader/static/<path:fn>")
+    def reader_static(fn):
+        return send_from_directory(STATIC_DIR, fn)
+
+    # ---- what can speak, and how ----
+
+    @flask_app.get("/reader/api/voices")
+    def r_voices():
+        """The thirty, in the shape the page already understands.
+
+        Deliberately the SAME object MA Reader Web's page was built around —
+        id, vkey, name, lang, sex, engine, label — rather than a new one. The
+        page's voice grid, its remembering, its "which one is current" test
+        and its voice bar all read that shape, and adapting thirty rows of
+        data is a smaller and far safer change than rewriting the machinery
+        that displays them.
+
+        `sex` is MEASURED, not guessed. Google publishes no gender, so the
+        alternative to measuring it was writing down what the names sound
+        like, which is somebody's belief with a table around it. voicesex.py
+        takes the median pitch of each voice's own audio; `borderline` marks
+        the two that sit near the line, where pitch alone does not settle it.
+        """
+        st = load_state()
+        emo, pace = st.get("emotion", "Neutral"), st.get("pace", "normal")
+        sx = VSX.table()
+        out = []
+        for n in app_module.VOICES:
+            rec = sx.get(n) or {}
+            out.append({"id": n, "vkey": vkey_for(n, emo, pace), "name": n,
+                        "lang": "gem", "sex": rec.get("sex", ""),
+                        "f0": rec.get("f0"), "by": rec.get("by", ""),
+                        "borderline": bool(rec.get("borderline")),
+                        "engine": "edge",
+                        "label": app_module.VOICE_TIMBRE.get(n, "clear")})
+        return jsonify(out)
+
+    @flask_app.post("/reader/api/voicesex")
+    def r_voicesex():
+        """Move a voice to the other row, by hand, for good."""
+        j = request.get_json(force=True, silent=True) or {}
+        v, sex = j.get("voice"), j.get("sex")
+        if v not in app_module.VOICE_TIMBRE:
+            return jsonify({"ok": False, "error": "no voice called %r" % v}), 400
+        VSX.set_by_hand(v, sex)
+        return jsonify({"ok": True, "rows": VSX.rows(app_module)})
+
+    @flask_app.post("/reader/api/voicesex/measure")
+    def r_voicesex_measure():
+        """Measure whatever has no answer yet. Costs one short synthesis per
+        voice with no cached preview, and nothing for the rest."""
+        j = request.get_json(force=True, silent=True) or {}
+        _t, spent = VSX.ensure_all(app_module, budget=int(j.get("budget", 30)))
+        return jsonify({"ok": True, "spent": spent,
+                        "rows": VSX.rows(app_module)})
+
+    # ---- endpoints the page asks for at boot, answered honestly ----
+    # The page was built against an app with two engines, a language
+    # catalogue and a Speechify account. It asks about all of them before it
+    # will draw anything. Answering "none of that here" is three lines each
+    # and leaves the boot path untouched; editing the boot path instead would
+    # mean changing the one piece of the page that must not break.
+
+    @flask_app.get("/reader/api/langs")
+    def r_langs():
+        return jsonify({"langs": [{"key": "gem", "name": "Gemini",
+                                   "label": "Gemini voices"}]})
+
+    @flask_app.get("/reader/api/cro_voices")
+    def r_cro_voices():
+        return jsonify({"cro": [], "eng": []})
+
+    @flask_app.get("/reader/api/speechify/status")
+    def r_sp_status():
+        return jsonify({"ok": False, "voices": [], "keys": [], "failed": [],
+                        "accent": "uk", "current": "", "reason": "no Speechify here"})
+
+    @flask_app.get("/reader/api/browser")
+    @flask_app.post("/reader/api/browser")
+    def r_browser():
+        return jsonify({"mode": "chrome"})
+
+    @flask_app.get("/reader/api/keys")
+    def r_keys():
+        return jsonify({"keys": [], "note": "Gemini keys live in the Keys tab"})
+
+    @flask_app.get("/reader/api/groq/status")
+    def r_groq_status():
+        return jsonify({"ok": False, "count": 0,
+                        "reason": "nothing here but Google"})
+
+    @flask_app.post("/reader/api/lang/detect")
+    def r_lang_detect():
+        return jsonify({"lang": load_state().get("lang", "eng")})
+
+    @flask_app.get("/reader/api/emotions")
+    def r_emotions():
+        groups = []
+        for group, lab, glyph, text, spoken in app_module.EMOTIONS:
+            if not groups or groups[-1]["group"] != group:
+                groups.append({"group": group, "items": []})
+            groups[-1]["items"].append({"label": lab, "glyph": glyph,
+                                        "direction": text, "spoken": spoken})
+        return jsonify({"groups": groups,
+                        "paces": [p[0] for p in app_module.PACES]})
+
+    # ---- state ----
+
+    @flask_app.get("/reader/api/state")
+    def r_state_get():
+        return jsonify(load_state())
+
+    @flask_app.post("/reader/api/state")
+    def r_state_post():
+        return jsonify(save_state(request.get_json(force=True, silent=True) or {}))
+
+    # ---- the library ----
+
+    @flask_app.post("/reader/api/prepare")
+    def r_prepare():
+        j = request.get_json(force=True, silent=True) or {}
+        raw = (j.get("text") or "").strip()
+        if not raw:
+            return jsonify({"error": "nothing to read"}), 400
+        return jsonify(text_payload(lib_save(raw)))
+
+    @flask_app.get("/reader/api/library")
+    def r_library():
+        return jsonify(lib_list())
+
+    @flask_app.get("/reader/api/library/<tid>")
+    def r_library_open(tid):
+        if not os.path.isdir(os.path.join(LIB_DIR, tid)):
+            return jsonify({"error": "no such text"}), 404
+        return jsonify(text_payload(tid))
+
+    @flask_app.post("/reader/api/library/<tid>/delete")
+    def r_library_delete(tid):
+        return jsonify({"ok": lib_delete(tid)})
+
+    @flask_app.post("/reader/api/library/delete_bulk")
+    def r_library_delete_bulk():
+        j = request.get_json(force=True, silent=True) or {}
+        n = sum(1 for t in (j.get("ids") or []) if lib_delete(t))
+        return jsonify({"ok": True, "deleted": n})
+
+    @flask_app.post("/reader/api/library/delete_all")
+    def r_library_delete_all():
+        n = sum(1 for r in lib_list() if lib_delete(r["id"]))
+        return jsonify({"ok": True, "deleted": n})
+
+    # ---- one sentence, one clip ----
+
+    def _unit(tid, vkey, idx):
+        st = load_state()
+        parts = (vkey or "").split("__")
+        voice = parts[0] if parts and parts[0] else st.get("voice", "Charon")
+        emotion = parts[1] if len(parts) > 1 else st.get("emotion", "Neutral")
+        pace = parts[2] if len(parts) > 2 else st.get("pace", "normal")
+        if voice not in app_module.VOICE_TIMBRE:
+            return None, None, "no voice called %r" % voice
+        return ensure_unit(app_module, tid, vkey, idx, voice, emotion, pace)
+
+    @flask_app.get("/reader/api/audio/<tid>/<vkey>/<int:idx>.wav")
+    def r_audio(tid, vkey, idx):
+        wav, _js, err = _unit(tid, vkey, idx)
+        if err:
+            return jsonify({"error": err}), 400
+        return send_file(wav, mimetype="audio/wav", conditional=True)
+
+    # No bounds endpoint: it served the word times, and the only timing
+    # left is the clip's own length, which the audio element already knows.
+
+    return flask_app
+GTT_READER_PY_EOF
+mv -f "$APPHOME/reader.py.new" "$APPHOME/reader.py"
+chmod 644 "$APPHOME/reader.py"
+
+cat > "$APPHOME/static/reader.html.new" <<'GTT_READER_HTML_EOF'
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#080a10">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="icon" type="image/svg+xml" href="/static/icon.svg">
+<link rel="mask-icon" href="/static/icon.svg" color="#ebcd2d">
+<link rel="apple-touch-icon" href="/static/icon.svg">
+<title>GTT</title>
+<style>
+
+
+/* ---------- themes (Night is the default house look) ---------- */
+body[data-theme="night"]{
+  --bg:#080a10; --bg2:#0b0e15; --panel:#11141d; --line:#1d2230;
+  --text:#cdd0d6; --dim:#7c8294; --faint:#565d6e;
+  --page:#080a10; --page-text:#cdd0d6;
+  --sent:#ffd93b; --sent-fg:#10120a; --sent-soft:rgba(255,217,59,.34);
+  --wordbg:#e23b4e; --wordfg:#ffffff;     /* the word being read, in red */
+}
+body[data-theme="sepia"]{
+  --bg:#efe3cc; --bg2:#ece0c6; --panel:#e6d9bd; --line:#d6c5a1;
+  --text:#4a3f2e; --dim:#8a7a5c; --faint:#a99a78;
+  --page:#f4ead4; --page-text:#43392a;
+  --sent:#e7b53f; --sent-fg:#2a2113; --sent-soft:rgba(231,181,63,.40);
+  --wordbg:#c0392b; --wordfg:#ffffff;
+}
+body[data-theme="day"]{
+  --bg:#f6f7fa; --bg2:#eef0f5; --panel:#ffffff; --line:#e1e4ea;
+  --text:#1c2026; --dim:#5a616e; --faint:#9aa0ac;
+  --page:#ffffff; --page-text:#1b1f25;
+  --sent:#ffd93b; --sent-fg:#10120a; --sent-soft:rgba(245,196,0,.30);
+  --wordbg:#d62828; --wordfg:#ffffff;
+}
+:root{
+  --screen:#4696e6; --play:#37c878; --tune:#ebcd2d;
+  --mode:#be82eb; --act:#f09646; --exit:#e15f5f; --teal:#3fb9c8;
+  --read:21px; --col:680px; --read-lh:1.72;
+  --read-font:Georgia,"Times New Roman",serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{
+  background:var(--bg); color:var(--text);
+  font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  -webkit-text-size-adjust:100%;
+  display:flex; flex-direction:column; min-height:100%;
+  transition:background .25s,color .25s;
+}
+button{font-family:inherit; cursor:pointer; color:inherit}
+.hidden{display:none !important}
+
+/* ---------- top bar ---------- */
+header{
+  position:sticky; top:0; z-index:20;
+  background:var(--bg2); border-bottom:1px solid var(--line);
+  padding:calc(10px + env(safe-area-inset-top)) 12px 10px 12px;
+}
+.appver{position:absolute; top:calc(6px + env(safe-area-inset-top)); right:10px;
+  font-size:10px; color:var(--faint); letter-spacing:.04em; opacity:.7}
+.brand{display:flex; align-items:center; gap:10px; margin-bottom:8px}
+.brand .dot{width:10px;height:10px;border-radius:50%;
+  background:var(--play); box-shadow:0 0 10px var(--play)}
+.brand b{font-size:15px; letter-spacing:.18em; font-weight:700;
+  color:var(--text); text-transform:uppercase}
+.brand .sub{font-size:11px; color:var(--faint); letter-spacing:.04em;
+  margin-left:auto}
+
+/* the picker is a horizontal strip: one tidy row you swipe through, so any
+   number of enabled languages stays out of the way. The right padding keeps
+   the last chip clear of the gear button in the corner. */
+.voices{display:flex; gap:6px; margin-bottom:8px; flex-wrap:nowrap;
+  overflow-x:auto; overflow-y:hidden; padding:1px 46px 3px 1px;
+  -webkit-overflow-scrolling:touch; scrollbar-width:none}
+.voices::-webkit-scrollbar{display:none}
+/* Both engines at once. The strip becomes a column of two strips, each one
+   scrolling on its own, so Speechify on top and Edge underneath never fight
+   over the same sideways swipe. */
+.voices.dual{flex-direction:column; gap:5px; overflow-x:hidden;
+  padding-right:1px}
+.vrow{display:flex; gap:6px; flex-wrap:nowrap; overflow-x:auto;
+  overflow-y:hidden; padding:1px 46px 2px 1px;
+  -webkit-overflow-scrolling:touch; scrollbar-width:none}
+.vrow::-webkit-scrollbar{display:none}
+/* NO EDGE MARKER ON THE ROWS. There was a coloured bar down the left of each
+   strip saying which row was which. It was redundant — every chip in the row
+   already carries that colour on its own border — and because the rows
+   scroll, the bar sat still while the voices moved past it, which reads as a
+   thing stuck to the screen rather than a label belonging to the row. */
+.voice{flex:0 0 auto; min-width:96px; padding:7px 10px; border-radius:9px;
+  border:1px solid var(--line); background:var(--panel);
+  color:var(--dim); font-size:12px; line-height:1.15; text-align:center}
+.voice b{display:block; color:var(--text); font-size:12.5px; white-space:nowrap}
+.voice small{font-size:10px; color:var(--faint); white-space:nowrap}
+.voice.on{border-color:var(--screen); background:rgba(70,150,230,.16);
+  color:var(--text)}
+.voice.on b{color:var(--text)}
+.voices-empty{flex:0 0 auto; color:var(--faint); font-size:12px;
+  padding:9px 4px; white-space:nowrap}
+
+/* ---------- Languages panel (Settings) ---------- */
+.langhint{font-size:11.5px; color:var(--faint); line-height:1.5; margin:2px 0 10px}
+.emogroups{display:flex; flex-direction:column; gap:9px; margin-bottom:4px}
+.emogrp > b{display:block; font-size:10.5px; letter-spacing:.07em;
+  text-transform:uppercase; color:var(--faint); margin:0 0 5px 2px}
+.emorow{display:flex; flex-wrap:wrap; gap:6px}
+.emo{display:flex; align-items:center; gap:6px; border:1px solid var(--line);
+  background:transparent; color:var(--dim); border-radius:999px;
+  padding:7px 11px; font-size:12.5px; line-height:1}
+.emo i{font-style:normal; font-size:13px; opacity:.85}
+.emo.on{color:var(--text); border-color:var(--tune)}
+.lang-tools{display:flex; gap:8px; margin-bottom:10px}
+.lang-tools button{border:1px solid var(--line); background:var(--bg2);
+  color:var(--dim); border-radius:9px; padding:6px 12px; font-size:12.5px}
+.langlist{display:flex; flex-direction:column; gap:7px}
+.langrow{display:flex; align-items:flex-start; gap:11px; padding:10px 12px;
+  border:1px solid var(--line); border-radius:11px; background:var(--panel);
+  text-align:left; width:100%; color:inherit}
+.langrow .box{flex:0 0 auto; width:22px; height:22px; margin-top:1px;
+  border-radius:6px; border:1.5px solid var(--faint); background:transparent;
+  display:flex; align-items:center; justify-content:center;
+  font-size:14px; color:transparent; line-height:1}
+.langrow.on{border-color:var(--screen); background:rgba(70,150,230,.12)}
+.langrow.on .box{border-color:var(--screen); background:var(--screen);
+  color:#fff}
+.langrow .meta{flex:1 1 auto; min-width:0}
+.langrow .name{font-size:14px; color:var(--text); font-weight:600}
+.langrow .name em{font-style:normal; color:var(--dim); font-weight:400;
+  font-size:12.5px; margin-left:6px}
+.langrow .vv{font-size:11.5px; color:var(--faint); margin-top:2px}
+.langrow .usetxt{font-size:11.5px; color:var(--dim); line-height:1.45;
+  margin-top:5px}
+.langrow .usetxt::before{content:""}
+
+/* ---------- views ---------- */
+main{flex:1; display:flex; flex-direction:column; min-height:0}
+.view{flex:1; display:flex; flex-direction:column; min-height:0}
+
+/* ---------- home ---------- */
+.home{padding:14px 12px 22px}
+.home h2{font-size:12px; letter-spacing:.14em; text-transform:uppercase;
+  color:var(--faint); margin:2px 0 8px; font-weight:600}
+textarea{width:100%; min-height:148px; resize:vertical;
+  background:var(--panel); color:var(--text);
+  border:1px solid var(--line); border-radius:12px; padding:12px 13px;
+  font-size:15px; line-height:1.5; font-family:inherit}
+textarea::placeholder{color:var(--faint)}
+.home-actions{display:flex; gap:8px; margin-top:10px; align-items:center}
+.btn{border:1px solid var(--line); background:var(--panel); color:var(--text);
+  padding:11px 16px; border-radius:11px; font-size:14px; font-weight:600}
+.btn:active{transform:translateY(1px)}
+.btn.primary{border-color:var(--play); background:rgba(55,200,120,.18);
+  color:var(--text)}
+.btn.ghost{background:transparent; color:var(--dim)}
+.hint{font-size:12px; color:var(--faint); margin-left:auto; text-align:right}
+
+.lib{margin-top:22px}
+.lib-row{display:flex; align-items:center; gap:10px; padding:11px 12px;
+  border:1px solid var(--line); border-radius:11px; background:var(--panel);
+  margin-bottom:8px}
+.lib-row .meta{flex:1; min-width:0}
+.lib-row .meta b{display:block; font-size:14px; color:var(--text);
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.lib-row .meta small{font-size:11px; color:var(--faint)}
+.iconbtn{border:1px solid var(--line); background:var(--bg2); border-radius:9px;
+  padding:7px 10px; font-size:12px; color:var(--dim); font-weight:600}
+.iconbtn.open{color:var(--screen); border-color:rgba(70,150,230,.4)}
+.iconbtn.exp{color:var(--act); border-color:rgba(240,150,70,.4)}
+.iconbtn.del{color:var(--exit); border-color:rgba(225,95,95,.4)}
+.empty{color:var(--faint); font-size:13px; padding:14px 2px}
+
+/* ---------- reader (the page follows the chosen theme) ---------- */
+.reader-scroll{flex:1; overflow-y:auto; padding:18px 16px 24px;
+  background:var(--page); -webkit-overflow-scrolling:touch;
+  transition:background .25s}
+.reader-title{font-size:12px; letter-spacing:.08em; color:var(--faint);
+  text-transform:uppercase; margin:0 0 14px}
+.doc{font-family:var(--read-font); font-size:var(--read);
+  line-height:var(--read-lh); color:var(--page-text);
+  max-width:var(--col); margin:0 auto;
+  /* Room after the last word, so the LAST sentence can also travel to the
+     top. Without it the document runs out, the scroll clamps, and the
+     reading line drifts down the screen for the final few sentences, which
+     is precisely the wandering the teleprompter rule exists to stop. The
+     space is blank page, not content, and only ever seen at the very end. */
+  padding-bottom:78vh}
+.sent{padding:1px 2px; border-radius:5px; transition:background .12s,color .12s}
+.sent.active{background:var(--sent); color:var(--sent-fg); font-weight:600;
+  box-shadow:0 0 0 3px var(--sent)}
+.sent.paused{background:var(--sent-soft); color:var(--page-text);
+  box-shadow:0 0 0 3px var(--sent-soft)}
+.sent .w{border-radius:4px}
+/* the single word being read right now, highlighted in red */
+body.wordhl .sent.active .w.now,
+body.wordhl .sent.paused .w.now{
+  background:var(--wordbg); color:var(--wordfg);
+  padding:0 2px; margin:0 -2px;
+  -webkit-box-decoration-break:clone; box-decoration-break:clone}
+.sent:hover{cursor:pointer}
+.focus .reader-title{display:none}
+.focus .sent:not(.active):not(.paused){opacity:.45}
+
+/* ---------- Markdown in the reader ----------
+   Every size is an em, so the reader's own font-size setting still governs
+   the page and a heading stays a RATIO of the body text rather than a fixed
+   number of pixels that ignores it.
+
+   Colour is deliberately restrained. Body text stays var(--page-text) and
+   headings are told apart by size and weight, not by ink, because the
+   sentence highlight is a solid yellow block and anything coloured
+   underneath it would have to fight it. Links are blue, which is the one
+   colour on the page the highlight never uses. */
+.doc.md > :first-child{margin-top:0}
+.doc.md > :last-child{margin-bottom:0}
+.doc.md p{margin:0 0 .7em}
+.doc.md h1,.doc.md h2,.doc.md h3,
+.doc.md h4,.doc.md h5,.doc.md h6{
+  color:var(--page-text); font-weight:700; line-height:1.25;
+  margin:1.1em 0 .4em}
+.doc.md h1{font-size:1.5em}
+.doc.md h2{font-size:1.3em}
+.doc.md h3{font-size:1.15em}
+.doc.md h4,.doc.md h5,.doc.md h6{font-size:1em; letter-spacing:.03em}
+.doc.md strong{font-weight:700}
+.doc.md em{font-style:italic}
+.doc.md del{opacity:.6}
+.doc.md a{color:var(--screen); text-decoration:underline;
+  text-underline-offset:.15em}
+.doc.md ul,.doc.md ol{margin:0 0 .7em; padding-left:1.4em}
+.doc.md li{margin:.15em 0}
+.doc.md li > ul,.doc.md li > ol{margin:.15em 0}
+.doc.md blockquote{margin:.7em 0; padding:.1em 0 .1em .9em;
+  border-left:3px solid var(--line); color:var(--dim)}
+.doc.md hr{border:0; border-top:1px solid var(--line); margin:1.1em 0}
+.doc.md code{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  font-size:.88em; background:var(--panel); border:1px solid var(--line);
+  border-radius:4px; padding:.05em .3em}
+/* A fenced block scrolls sideways rather than forcing the whole page wide. */
+.doc.md pre{margin:.7em 0; padding:.7em .8em; background:var(--panel);
+  border:1px solid var(--line); border-radius:8px;
+  overflow-x:auto; -webkit-overflow-scrolling:touch}
+.doc.md pre code{background:none; border:0; padding:0; font-size:.85em;
+  white-space:pre}
+.doc.md img{max-width:100%; height:auto; border-radius:6px}
+.doc.md table{border-collapse:collapse; margin:.7em 0; display:block;
+  overflow-x:auto; font-size:.92em}
+.doc.md th,.doc.md td{border:1px solid var(--line); padding:.3em .55em;
+  text-align:left}
+.doc.md th{font-weight:700}
+
+/* ---------- the highlight, over the formatting ----------
+   A sentence is a RANGE of spans, not one box, so the band is painted on the
+   words AND on the spaces between them. Without the gaps lit the sentence
+   would read as a row of separate yellow blocks with pale stripes between. */
+.doc.md .w,.doc.md .g{padding:1px 0; border-radius:0;
+  transition:background .12s,color .12s}
+.doc.md .w.lit,.doc.md .g.lit{background:var(--sent); color:var(--sent-fg)}
+.doc.md .w.litp,.doc.md .g.litp{background:var(--sent-soft); color:var(--page-text)}
+/* Round only the two ends of the band, which are the first and last thing lit
+   on each line, so it reads as one ribbon rather than many tiles. */
+.doc.md .lit:not(.g) + .g.lit{border-radius:0}
+.doc.md .w.lit:first-child,.doc.md .w.litp:first-child{
+  border-top-left-radius:5px; border-bottom-left-radius:5px; padding-left:2px}
+.doc.md .w.lit:last-child,.doc.md .w.litp:last-child{
+  border-top-right-radius:5px; border-bottom-right-radius:5px; padding-right:2px}
+/* the single word being spoken, same red as everywhere else */
+body.wordhl .doc.md .w.lit.now,
+body.wordhl .doc.md .w.litp.now{
+  background:var(--wordbg); color:var(--wordfg);
+  padding:0 2px; margin:0 -2px;
+  -webkit-box-decoration-break:clone; box-decoration-break:clone}
+/* THE COLOURS MUST NOT FIGHT THE FORMATTING. A link is blue and the band is
+   yellow, and blue on yellow is unreadable, so a lit word takes the band's
+   ink whatever its element wanted. The underline is moved onto the word span
+   itself so it follows that colour instead of staying blue underneath. */
+.doc.md a{text-decoration:none}
+.doc.md a .w{text-decoration:underline; text-underline-offset:.15em}
+/* An inline code chip has its own background and border; under the band they
+   would box the highlight in. :has is a nicety - where it is missing the
+   chip simply keeps its frame, which is untidy but perfectly readable. */
+.doc.md code:has(.w.lit),.doc.md code:has(.w.litp){
+  background:none; border-color:transparent}
+.doc.md pre:has(.w.lit),.doc.md pre:has(.w.litp){border-color:var(--sent)}
+/* Focus mode dims what is not being read, the same as it does for plain text */
+.focus .doc.md .w:not(.lit):not(.litp),
+.focus .doc.md .g:not(.lit):not(.litp){opacity:.45}
+
+/* ---------- TEXT mode: plain white, no formatting at all ----------
+   Not "formatting with the colours off": every heading back to body size,
+   every chip, border, rule and underline gone, one ink. */
+body.mode-text .doc.md,
+body.mode-text .doc.md *{background:none !important; color:#fff !important;
+  border-color:transparent !important; box-shadow:none !important;
+  font-size:inherit !important; font-weight:400 !important;
+  font-style:normal !important; text-decoration:none !important;
+  opacity:1 !important}
+body.mode-text .doc.md hr{border-top:1px solid #444 !important}
+body.mode-text .doc.md img{display:none}
+
+/* ---------- EDIT mode edits the MARKDOWN SOURCE ----------
+   Not the rendered HTML. Editing the rendering would silently throw the
+   formatting away the moment it was committed, because what came back out of
+   the page would be flat text with the markers already consumed. */
+.md-edit{display:none; width:100%; min-height:60vh; box-sizing:border-box;
+  background:var(--page); color:var(--page-text); border:1px solid var(--line);
+  border-radius:8px; padding:10px 12px; resize:none; outline:none;
+  font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  font-size:calc(var(--read) * .8); line-height:1.55;
+  caret-color:var(--tune); -webkit-text-size-adjust:100%}
+body.mode-edit .md-edit.on{display:block}
+body.mode-edit .md-edit.on ~ .doc,
+body.mode-edit .doc.mdhidden{display:none}
+
+/* ---------- transport / controls ---------- */
+.controls{border-top:1px solid var(--line); background:var(--bg2);
+  padding:10px 12px calc(10px + env(safe-area-inset-bottom))}
+.progress{display:flex; align-items:center; gap:10px; margin-bottom:9px}
+.bar{flex:1; height:5px; border-radius:3px; background:var(--line); overflow:hidden}
+.bar > i{display:block; height:100%; width:0;
+  background:linear-gradient(90deg,var(--teal),var(--play))}
+/* The counter is a button now. It says how far in you are and how long is
+   left, and pressing it clears the session and puts the time back to zero.
+   That is what replaced the small cross in the corner: a wide target that
+   says what it does, instead of a tiny one that looked like danger. */
+.counter{font-size:12px; color:var(--dim); min-width:108px; text-align:right;
+  font-variant-numeric:tabular-nums; border:1px solid transparent;
+  background:transparent; border-radius:9px; padding:5px 8px; line-height:1.2}
+.counter b{color:var(--text); font-weight:600; margin-left:5px}
+.counter:active{border-color:var(--line); color:var(--text)}
+
+/* An empty paste box is a paste button the size of the screen. When there is
+   text in it, it goes back to being an ordinary box. */
+#pasteBox.port{border-style:dashed; border-color:var(--tune);
+  background:color-mix(in srgb, var(--tune) 6%, var(--panel)); cursor:copy}
+
+.transport{display:flex; align-items:center; justify-content:center; gap:7px}
+.tbtn{border:1px solid var(--line); background:var(--panel); border-radius:12px;
+  width:48px; height:46px; font-size:17px; display:flex; align-items:center;
+  justify-content:center; color:var(--text)}
+.tbtn.play{width:70px; border-color:var(--play); background:rgba(55,200,120,.18);
+  font-size:20px}
+.tbtn.on{border-color:var(--play); background:rgba(55,200,120,.18)}
+.tbtn.aa{font-family:Georgia,serif; font-weight:700; font-size:18px}
+.tbtn:active{transform:translateY(1px)}
+
+.tune{display:flex; gap:8px; margin-top:9px; flex-wrap:wrap; justify-content:center}
+.stepper{display:flex; align-items:center; gap:2px; border:1px solid var(--line);
+  border-radius:10px; background:var(--panel); padding:2px; flex:1 1 132px;
+  min-width:118px}
+.stepper > span{flex:1; text-align:center; font-size:12px; color:var(--dim);
+  font-variant-numeric:tabular-nums}
+.stepper > span b{color:var(--text); font-weight:600}
+.stepper button{width:34px; height:32px; border:none; background:transparent;
+  color:var(--tune); font-size:16px; border-radius:8px; font-weight:700}
+.stepper button:active{background:var(--line)}
+.stepper.size button{color:var(--act)}
+.stepper.size .a-sm{font-size:12px} .stepper.size .a-lg{font-size:18px}
+.volwrap{flex:1 1 100%; display:flex; align-items:center; gap:9px;
+  border:1px solid var(--line); border-radius:10px; background:var(--panel);
+  padding:7px 11px}
+.volwrap label{font-size:12px; color:var(--dim); min-width:46px}
+.volwrap input[type=range]{flex:1; accent-color:var(--tune)}
+.volwrap .pct{font-size:12px; color:var(--text); min-width:40px; text-align:right;
+  font-variant-numeric:tabular-nums}
+
+.toggles{display:flex; gap:8px; margin-top:9px; justify-content:center}
+.toggle{flex:1; border:1px solid var(--line); background:var(--panel);
+  border-radius:10px; padding:8px 6px; font-size:12px; color:var(--dim);
+  text-align:center; font-weight:600}
+.toggle.on{border-color:var(--mode); background:rgba(190,130,235,.16);
+  color:var(--text)}
+
+.status{display:none}
+
+/* ---------- reading-settings sheet (the "Aa" panel) ---------- */
+.backdrop{position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:40;
+  opacity:0; pointer-events:none; transition:opacity .2s}
+.backdrop.show{opacity:1; pointer-events:auto}
+.sheet{position:fixed; left:0; right:0; bottom:0; z-index:45;
+  background:var(--bg2); border-top:1px solid var(--line);
+  border-radius:18px 18px 0 0; padding:14px 16px calc(18px + env(safe-area-inset-bottom));
+  transform:translateY(110%); transition:transform .26s cubic-bezier(.2,.7,.2,1);
+  box-shadow:0 -10px 40px rgba(0,0,0,.45); max-height:82vh; overflow-y:auto}
+.sheet.show{transform:translateY(0)}
+.sheet .grab{width:38px; height:4px; border-radius:2px; background:var(--line);
+  margin:2px auto 14px}
+/* Every group is a card with its own tint and a coloured edge, so scrolling
+   the sheet you find the block you want by colour before you have read a word
+   of it. The tint is a flat wash laid over the panel colour rather than a
+   blend function, so it behaves the same on old Android webviews and in all
+   three themes. */
+.sheet .group{margin-bottom:14px; padding:13px 13px 15px;
+  border:1px solid var(--line); border-left:3px solid var(--gc,var(--line));
+  border-radius:14px; background:var(--panel)}
+.sheet h3{margin:0 0 11px; font-size:11px; letter-spacing:.14em;
+  text-transform:uppercase; color:var(--gc,var(--faint)); font-weight:700;
+  display:flex; align-items:center; gap:9px}
+.sheet h3::after{content:""; flex:1; height:1px; background:var(--line)}
+.group.g-play{--gc:var(--play);
+  background:linear-gradient(rgba(55,200,120,.07),rgba(55,200,120,.07)),var(--panel)}
+.group.g-text{--gc:var(--act);
+  background:linear-gradient(rgba(240,150,70,.07),rgba(240,150,70,.07)),var(--panel)}
+.group.g-colour{--gc:var(--mode);
+  background:linear-gradient(rgba(190,130,235,.07),rgba(190,130,235,.07)),var(--panel)}
+.group.g-voice{--gc:var(--screen);
+  background:linear-gradient(rgba(70,150,230,.07),rgba(70,150,230,.07)),var(--panel)}
+.group.g-groq{--gc:#e879f9}
+.group.g-keys{--gc:#fbbf24}
+.keylist{display:flex; flex-direction:column; gap:6px; margin-top:4px}
+.keyrow{display:flex; align-items:center; gap:8px; padding:8px 10px;
+  border:1px solid var(--line); border-radius:10px; background:var(--panel)}
+.keyrow .kp{flex:0 0 auto; font-size:9px; letter-spacing:.08em;
+  text-transform:uppercase; color:var(--faint); min-width:62px}
+.keyrow .km{flex:0 0 auto; font-family:ui-monospace,monospace; font-size:11px;
+  color:var(--text)}
+.keyrow .kl{flex:1; min-width:0; font-size:11px; color:var(--faint);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.keyrow .ks{flex:0 0 auto; font-size:9px; letter-spacing:.06em;
+  text-transform:uppercase; color:var(--good)}
+.keyrow.dead{opacity:.55}
+.keyrow.dead .ks{color:var(--bad)}
+.keyrow .kn{flex:0 0 auto; font-size:10px; color:var(--faint); min-width:16px}
+.group.g-adv{--gc:var(--teal);
+  background:linear-gradient(rgba(63,185,200,.06),rgba(63,185,200,.06)),var(--panel)}
+/* inside a card the rows sit on the sheet colour, one step back from the card,
+   so a row still reads as a row and not as part of the tint */
+.sheet .group .rowctl,
+.sheet .group .langrow,
+.sheet .group .exp,
+.sheet .group .keybox,
+.sheet .group .gem-usage,
+.sheet .group .chip{background:var(--bg2)}
+.sheet .group .chip.on{background:rgba(70,150,230,.16)}
+.sheet .group .chip.theme-day{background:#ffffff}
+.sheet .group .chip.theme-sepia{background:#f4ead4}
+.sheet .group .chip.theme-night{background:#0c0f16}
+.sheet .group > .wsub:first-of-type{margin-top:0}
+.chips{display:flex; gap:8px; flex-wrap:wrap}
+/* word highlight colour + intensity pickers */
+.wcolor{margin-top:12px}
+.wsub{font-size:11px; color:var(--dim); letter-spacing:.06em;
+  text-transform:uppercase; margin:12px 0 7px}
+.wsub:first-child{margin-top:0}
+.rgbrow{display:flex; align-items:center; gap:10px}
+.rgbsw{flex:0 0 auto; width:30px; height:30px; border-radius:7px;
+  border:1px solid var(--line)}
+.rgbrow label{display:flex; align-items:center; gap:5px; font-size:12px;
+  color:var(--dim)}
+.rgbrow input{width:58px; padding:8px 6px; border-radius:8px;
+  border:1px solid var(--line); background:var(--bg2); color:var(--text);
+  font-size:15px; text-align:center; -moz-appearance:textfield}
+.rgbrow input::-webkit-outer-spin-button,
+.rgbrow input::-webkit-inner-spin-button{-webkit-appearance:none; margin:0}
+.rgbauto{margin-left:2px; border:1px solid var(--line); background:var(--bg2);
+  color:var(--dim); border-radius:8px; padding:7px 12px; font-size:12.5px}
+.rgbauto.on{color:var(--text); border-color:var(--screen)}
+.wprev{margin-top:16px; font-size:13px; color:var(--dim)}
+.docprev{display:block; margin-top:6px; font-size:15px; color:var(--page-text)}
+.sentprev{background:var(--sent); color:var(--sent-fg); padding:2px 6px;
+  border-radius:6px}
+.wprevword{background:var(--wordbg); color:var(--wordfg); padding:1px 4px;
+  border-radius:4px; -webkit-box-decoration-break:clone;
+  box-decoration-break:clone}
+.chip{flex:1 1 0; min-width:64px; border:1px solid var(--line);
+  background:var(--panel); color:var(--dim); border-radius:11px;
+  padding:11px 8px; font-size:13px; font-weight:600; text-align:center}
+.chip.on{border-color:var(--screen); background:rgba(70,150,230,.16);
+  color:var(--text)}
+.chip.f-serif{font-family:Georgia,"Times New Roman",serif}
+.chip.f-sans{font-family:system-ui,sans-serif}
+.chip.f-book{font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif}
+.chip.f-mono{font-family:ui-monospace,"DejaVu Sans Mono",Menlo,Consolas,monospace}
+.chip.theme-day{background:#ffffff;color:#1c2026;border-color:#d8dbe2}
+.chip.theme-sepia{background:#f4ead4;color:#43392a;border-color:#d6c5a1}
+.chip.theme-night{background:#0c0f16;color:#cdd0d6;border-color:#272d3b}
+.chip.theme-day.on,.chip.theme-sepia.on,.chip.theme-night.on{
+  outline:2px solid var(--screen); outline-offset:1px}
+/* ---------- v9: multi-select + delete-all toolbar for the lists ---------- */
+.listbar{display:flex; gap:8px; align-items:center; margin:0 0 10px;
+  flex-wrap:wrap}
+.minibtn{border:1px solid var(--line); background:var(--panel); color:var(--dim);
+  padding:8px 12px; border-radius:9px; font-size:12.5px; font-weight:600}
+.minibtn:active{transform:translateY(1px)}
+.minibtn.on{color:var(--text); border-color:var(--screen);
+  background:rgba(70,150,230,.16)}
+.minibtn.danger{color:var(--exit); border-color:rgba(225,95,95,.4)}
+.minibtn.hidden{display:none !important}
+.selcount{margin-left:auto; font-size:12px; color:var(--faint);
+  font-variant-numeric:tabular-nums}
+.selbox{width:24px; height:24px; flex:0 0 auto; border-radius:7px;
+  border:2px solid var(--line); display:none; align-items:center;
+  justify-content:center; color:#fff; font-size:15px; font-weight:800}
+#libList.selecting .selbox, #offList.selecting .selbox{display:flex}
+.selbox.sel{background:var(--screen); border-color:var(--screen)}
+/* in select mode the per-row action buttons step aside; the whole row toggles */
+#libList.selecting .iconbtn, #offList.selecting .iconbtn{display:none}
+#libList.selecting .lib-row, #offList.selecting .off-row{cursor:pointer}
+.rowctl{display:flex; align-items:center; gap:10px;
+  border:1px solid var(--line); background:var(--panel); border-radius:11px;
+  padding:6px 8px}
+.rowctl .lab{flex:1; font-size:13px; color:var(--text)}
+.rowctl button{width:42px; height:38px; border:1px solid var(--line);
+  background:var(--bg2); border-radius:9px; color:var(--act); font-weight:700;
+  font-size:16px}
+.rowctl .val{min-width:30px; text-align:center; font-size:13px; color:var(--text);
+  font-variant-numeric:tabular-nums}
+.rowctl .a-sm{font-size:13px} .rowctl .a-lg{font-size:19px}
+.exp{display:flex; align-items:flex-start; gap:12px; border:1px solid var(--line);
+  background:var(--panel); border-radius:11px; padding:12px 12px}
+.exp .check{width:26px; height:26px; flex:0 0 auto; border-radius:7px;
+  border:2px solid var(--line); display:flex; align-items:center;
+  justify-content:center; color:transparent; font-size:16px; font-weight:800}
+.exp.on .check{background:var(--wordbg); border-color:var(--wordbg); color:#fff}
+.exp .txt b{display:block; font-size:13px; color:var(--text)}
+.exp .txt small{font-size:11.5px; color:var(--faint); line-height:1.4}
+.exp .tag{font-size:9.5px; letter-spacing:.1em; color:var(--act);
+  border:1px solid var(--act); border-radius:5px; padding:1px 5px; margin-left:6px;
+  vertical-align:middle; text-transform:uppercase}
+.synctop{display:flex; justify-content:space-between; align-items:center;
+  margin:14px 2px 4px; font-size:13px; color:var(--text)}
+.synctop em{font-style:normal; color:var(--faint); font-size:11px;
+  letter-spacing:.04em}
+.synctop .val{color:var(--act); font-variant-numeric:tabular-nums}
+#syncRange{width:100%; accent-color:var(--act)}
+.syncends{display:flex; justify-content:space-between; font-size:11px;
+  color:var(--faint); margin-top:2px}
+/* One X and nothing else. The version sits in the corner beside it, so it
+   costs no row of its own. */
+/* The head carries three things now: the two toggles on the left, the X in
+   the middle, and the version in the corner. The X stays centred because it
+   is the thing a thumb reaches for blind. */
+.headtogs{position:absolute; left:16px; top:50%; transform:translateY(-50%);
+  display:flex; gap:6px}
+.htog{border:1px solid var(--line); background:var(--panel);
+  color:var(--text); border-radius:11px; padding:9px 11px;
+  font-size:11px; font-weight:700; letter-spacing:.06em; line-height:1}
+.htog.sp{border-color:var(--tune);
+  background:color-mix(in srgb, var(--tune) 16%, var(--panel))}
+.htog.auto b{font-size:10px}
+.sheet-head{position:sticky; top:0; z-index:6; background:var(--bg2);
+  display:flex; align-items:center; justify-content:center;
+  margin:0 -16px 12px; padding:2px 16px 10px; border-bottom:1px solid var(--line)}
+.sheet-ver{position:absolute; right:70px; top:50%; transform:translateY(-60%);
+  font-size:11px; color:var(--faint); letter-spacing:.02em}
+/* One X, in the middle, pinned to the top of the sheet. It does not scroll
+   away and it says nothing, because there is nothing to say. */
+/* The X sat in the middle, where the dashboard now is, and the floater
+   switches covered it. It goes to the far right, which is also where a
+   thumb expects a close button, and the dashboard gets the whole left. */
+.sheet-x{position:absolute; right:14px; top:50%; transform:translateY(-50%);
+  width:46px; height:46px; margin:0; padding:0;
+  border:1px solid var(--line); background:var(--panel); color:var(--dim);
+  border-radius:50%; font-size:19px; line-height:1;
+  display:flex; align-items:center; justify-content:center}
+.sheet-x:active{color:var(--text); border-color:var(--tune)}
+
+.toast{position:fixed; left:50%; bottom:calc(18px + env(safe-area-inset-bottom));
+  transform:translateX(-50%); background:var(--panel); color:var(--text);
+  border:1px solid var(--line); border-radius:10px; padding:10px 16px;
+  font-size:13px; z-index:60; box-shadow:0 6px 24px rgba(0,0,0,.5);
+  max-width:90%; opacity:0; transition:opacity .2s; pointer-events:none}
+.toast.show{opacity:1}
+
+/* ---------- v2: tabs, offline reader, help ---------- */
+.topbar{display:flex; align-items:center; gap:6px; margin-bottom:8px}
+nav.tabs{display:flex; gap:6px; flex:1}
+.tab{border:1px solid var(--line); background:var(--panel); color:var(--dim);
+  border-radius:11px; padding:7px 13px; font-size:14px; font-weight:600}
+.tab.on{color:var(--text); border-color:var(--screen);
+  background:rgba(70,150,230,.14)}
+body:not(.inreader):not(.onhome) .voices{display:none}
+.sub{color:var(--dim); font-size:13.5px; line-height:1.5; margin:-2px 0 12px}
+.searchbox{width:100%; box-sizing:border-box; border:1px solid var(--line);
+  background:var(--panel); color:var(--text); border-radius:11px;
+  padding:11px 14px; font-size:15px; margin-bottom:12px}
+.off-row{display:flex; align-items:center; gap:10px; border:1px solid var(--line);
+  background:var(--panel); border-radius:12px; padding:12px; margin-bottom:10px}
+.off-row .ometa{flex:1; min-width:0}
+.off-row .ometa b{display:block; font-size:15px; white-space:nowrap;
+  overflow:hidden; text-overflow:ellipsis}
+.off-row .ometa small{color:var(--faint); font-size:12px}
+.off-row .osum{color:var(--dim); font-size:12.5px; margin-top:3px;
+  display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden}
+.off-row.pending{opacity:.55}
+.seek{flex:1; accent-color:var(--play)}
+.help h3{margin:18px 0 6px; font-size:16px; color:var(--text)}
+.help p{color:var(--dim); font-size:14px; line-height:1.62; margin:6px 0}
+.help code{background:var(--panel); border:1px solid var(--line);
+  border-radius:6px; padding:1px 6px; font-size:13px; color:var(--text)}
+.help .lead{color:var(--text)}
+.keybox{border:1px solid var(--line); background:var(--panel);
+  border-radius:11px; padding:12px}
+.keyhead{font-weight:600; display:flex; justify-content:space-between;
+  align-items:center; gap:8px}
+.keystate{font-size:12px; color:var(--faint)}
+.keystate.ok{color:#39d98a}
+.keybtn{display:inline-block; margin-top:10px; margin-right:8px;
+  border:1px solid var(--line); background:var(--bg2); color:var(--text);
+  border-radius:10px; padding:8px 14px; font-size:14px; cursor:pointer}
+.keybtn.ghost{color:var(--dim)}
+.keyerr{color:#ff6b6b; font-size:13px; margin-top:9px; min-height:1px}
+.lib-row .lsum{color:var(--dim); font-size:12px; margin-top:2px;
+  display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden}
+
+/* ---------- v3: bottom player, corner gear, spend readout ---------- */
+#offlineReaderView{position:relative}
+.off-gear{position:absolute; top:10px; right:12px; z-index:6; width:42px;
+  height:42px; border-radius:50%; border:1px solid var(--line);
+  background:var(--panel); color:var(--text); font-size:19px; line-height:1}
+.off-controls{padding-bottom:16px}
+/* v3: three controls, not two. The two pauses live together on the left
+   because they are the same idea at two scales - silence between words and
+   silence between sentences - and the hand learns them as a pair. Speed sits
+   alone on the right. Play stays in the middle, where it always was. */
+.yt-bar{display:flex; align-items:center; justify-content:center; gap:2px;
+  margin-top:4px}
+.ytgroup{display:flex; align-items:center; gap:2px}
+/* a hairline between the two pauses, so the pair reads as two controls and
+   not one wide smear of buttons */
+.ytgroup .ytstep + .ytstep{border-left:1px solid var(--line); padding-left:3px;
+  margin-left:1px}
+/* Named ytstep, not stepper: an older dead .stepper rule is still in this
+   sheet and would drop a panel border round these. */
+.ytstep{display:flex; align-items:center; gap:0}
+.yt-mini{width:27px; height:46px; border:none; background:transparent;
+  color:var(--dim); font-size:20px; line-height:1; padding:0}
+.yt-mini:active{color:var(--text)}
+/* the number is a button too: tap it to send that control back to its
+   resting value, 1.00 for speed and 0.00 for the word gap */
+.yt-num{min-width:39px; display:flex; flex-direction:column; align-items:center;
+  line-height:1.1; border:none; background:transparent; padding:2px 0}
+.yt-num:active b{color:var(--tune)}
+.yt-num b{font-size:13.5px; font-weight:600; color:var(--text);
+  font-variant-numeric:tabular-nums}
+.yt-num i{font-size:7.5px; font-style:normal; letter-spacing:.06em;
+  text-transform:uppercase; color:var(--faint); margin-top:3px}
+/* play/pause: brightest, flat, no circle or coloured fill */
+.yt-dl{flex:0 0 auto; width:44px; height:44px; padding:0; border-radius:50%;
+  border:1px solid var(--line); background:transparent; color:var(--dim)}
+.yt-dl svg{width:21px; height:21px; display:block; margin:0 auto}
+.yt-dl:active{border-color:var(--tune); color:var(--tune)}
+.yt-dl.busy{color:var(--tune); border-color:var(--tune); opacity:.7}
+.yt-dl[disabled]{opacity:.3}
+.yt-play{width:52px; height:52px; border:none; background:transparent;
+  color:var(--text); display:flex; align-items:center; justify-content:center;
+  padding:0; margin:0 2px}
+.yt-play svg{width:38px; height:38px; display:block}
+.yt-play:active{opacity:.55}
+/* previous/next: filled, a step softer than the play */
+.yt-skip{width:46px; height:46px; border:none; background:transparent;
+  color:var(--text); opacity:.85; display:flex; align-items:center;
+  justify-content:center; padding:0}
+.yt-skip svg{width:25px; height:25px; display:block}
+.yt-skip:active{opacity:.5}
+/* outer controls (full screen, last): dimmer, flat, like shuffle/repeat */
+.yt-side{min-width:44px; height:50px; padding:0 6px; border:none;
+  background:transparent; color:var(--dim); font-size:18px; line-height:1}
+.yt-side.fs{font-size:20px}
+.yt-side.on{color:var(--text)}
+.gem-usage{border:1px solid var(--line); background:var(--panel);
+  border-radius:11px; padding:11px; margin-top:12px; font-size:13px; color:var(--dim)}
+.gem-usage b{color:var(--text)}
+.gem-usage .note{margin-top:6px; font-size:11.5px; color:var(--faint); line-height:1.5}
+.gem-reset{margin-top:8px; border:1px solid var(--line); background:var(--bg2);
+  color:var(--dim); border-radius:9px; padding:6px 12px; font-size:12.5px}
+.timing-help{font-size:11.5px; color:var(--faint); line-height:1.5; margin-top:8px}
+
+/* ---------- v4: global gear, player jump, fullscreen, paste ---------- */
+/* gear is a plain icon now, no circle around it */
+.gear-corner{position:absolute; top:calc(6px + env(safe-area-inset-top));
+  right:10px; z-index:30; width:34px; height:34px; border:none;
+  background:transparent; color:var(--dim); font-size:22px; line-height:1;
+  padding:0}
+.gear-corner:active{color:var(--text)}
+/* the X reset: a bare icon in the tab row, no circle */
+.tab-x{border:none; background:transparent; color:var(--dim); font-size:19px;
+  line-height:1; padding:6px 8px; margin-left:2px}
+.tab-x:active{color:var(--text)}
+/* with zero languages the voice strip is gone, so the gear drops onto the tab
+   row line; reserve room on the right so tabs never slide under it */
+body.novoice nav.tabs{padding-right:40px}
+/* The tab row can go, leaving only the gear. Nothing else is lost: the reader
+   is where the app already is, and the gear brings the row back. */
+body.notabs .topbar{display:none !important}
+/* The floating P has no business sitting on top of Settings. It would cover
+   the panel and, now that a tap outside closes the sheet, a stray press of it
+   would both close Settings and paste. */
+body.sheetopen .floatp{display:none !important}
+/* The strip switched off by hand. Same result as having no voices at all,
+   so it borrows the same rule and gives the reader back that whole band. */
+body.nobar .voices{display:none !important}
+body.nobar nav.tabs{padding-right:40px}
+.tab.player{color:var(--play); border-color:var(--play); display:none}
+body.hassession .tab.player{display:block}
+.paste-top{display:flex; gap:8px; margin-bottom:8px}
+.pastebtn{border:1px solid var(--line); background:var(--panel); color:var(--text);
+  border-radius:11px; padding:9px 16px; font-size:14.5px; font-weight:600}
+.fs-btn{position:sticky; top:0; z-index:5; float:left; width:40px; height:40px;
+  margin:0 8px 4px 0; border-radius:50%; border:1px solid var(--line);
+  background:var(--panel); color:var(--text); font-size:17px; line-height:1;
+  opacity:1; transition:opacity .25s; }
+.fs-btn.faded{opacity:0; pointer-events:none}
+/* ---------- the two engines ----------
+   Settings used to be one long column with every knob in it. Two engines
+   would have made that twice as long, so instead there are two buttons at the
+   top and the cards below them are filtered: a card marked for one engine is
+   simply not there while the other is chosen. Anything unmarked - speed, the
+   pauses, the text, the colours - belongs to both and always shows. */
+.engtabs{display:flex; gap:8px; margin:2px 0 14px; align-items:stretch}
+/* The language button is an engtab like the others, but it names a state
+   rather than a destination, so it is always lit. */
+#langBtn{min-width:52px}
+#langBtn.on b{letter-spacing:.06em}
+.engtab{flex:1; border:1px solid var(--line); background:var(--panel);
+  color:var(--dim); border-radius:13px; padding:11px 8px 9px; text-align:center;
+  line-height:1.25}
+.engtab b{display:block; font-size:15px; font-weight:700}
+.engtab small{display:block; font-size:10.5px; color:var(--faint);
+  margin-top:3px; letter-spacing:.02em}
+.engtab.on{color:var(--text); border-color:var(--tune);
+  background:color-mix(in srgb, var(--tune) 12%, var(--panel))}
+.engtab.on small{color:var(--dim)}
+.group.g-sp{--gc:#7dd3fc}
+/* One row per voice: a radio, a name, a detail line, and a play button that
+   speaks the voice's own name. Nothing to page through, nothing to hunt. */
+.radios{display:flex; flex-direction:column; margin:2px 0 14px}
+.rrow{display:flex; align-items:center; gap:12px; padding:12px 4px;
+  border:none; background:none; width:100%; text-align:left;
+  border-bottom:1px solid color-mix(in srgb, var(--line) 55%, transparent)}
+.rrow:last-child{border-bottom:none}
+.rdot{flex:0 0 auto; width:22px; height:22px; border-radius:50%;
+  border:2px solid var(--faint); position:relative}
+.rrow.on .rdot{border-color:var(--tune)}
+.rrow.on .rdot::after{content:""; position:absolute; inset:4px;
+  border-radius:50%; background:var(--tune)}
+.rtxt{flex:1; min-width:0}
+.rtxt b{display:block; font-size:15px; color:var(--text); font-weight:600}
+.rtxt small{display:block; font-size:11.5px; color:var(--faint); margin-top:3px}
+.rplay{flex:0 0 auto; width:40px; height:40px; padding:0; border-radius:50%;
+  border:1px solid var(--line); background:transparent; color:var(--tune);
+  font-size:13px; line-height:1}
+.crogrid{display:flex; flex-direction:column; gap:8px; margin:2px 0 6px}
+.crorow{display:flex; align-items:center; gap:10px; padding:10px 12px;
+  border:1px solid var(--line); border-radius:12px; background:var(--panel)}
+.crorow.on{box-shadow:0 0 0 2px var(--tune);
+  background:color-mix(in srgb, var(--tune) 12%, var(--panel))}
+.crorow .cropick{flex:1; min-width:0; text-align:left; background:none;
+  border:none; padding:0; color:inherit}
+.crorow .cropick b{display:block; font-size:14px; color:var(--text);
+  font-weight:600}
+.crorow .cropick small{display:block; font-size:10.5px; color:var(--faint);
+  margin-top:2px}
+.crorow .croplay{flex:0 0 auto; width:38px; height:38px; padding:0;
+  border:1px solid var(--line); border-radius:50%; background:transparent;
+  color:var(--tune); font-size:14px; line-height:1}
+.crorow .croplay:active{border-color:var(--tune)}
+.accrow{display:flex; gap:8px; margin-bottom:12px}
+.accbtn{flex:1; border:1px solid var(--line); background:var(--panel);
+  color:var(--dim); border-radius:11px; padding:10px 8px; font-size:14px;
+  font-weight:600}
+.accbtn.on{color:var(--text); border-color:var(--tune);
+  background:color-mix(in srgb, var(--tune) 12%, var(--panel))}
+/* Sex is read by colour before a name is read at all: deep pink for the
+   women, deep blue for the men. The colour IS the frame. No stripe, no extra
+   element, nothing added to the box that was already there, because the
+   border was sitting there doing nothing anyway.
+
+   Selection is then shown by the gold tint inside plus a gold ring drawn
+   outside the frame, so the two meanings sit one within the other rather
+   than fighting over the same edge. */
+:root{--femme:#8E3358; --homme:#274C7C}
+.spgrid{display:grid; grid-template-columns:1fr 1fr; gap:7px; margin:10px 0 4px}
+.spcell{border:2px solid var(--line); background:var(--panel);
+  border-radius:11px; padding:9px 10px; text-align:left; line-height:1.3}
+.spcell.f{border-color:var(--femme)}
+.spcell.m{border-color:var(--homme)}
+.spcell b{display:block; font-size:14px; color:var(--text); font-weight:600}
+.spcell small{display:block; font-size:10.5px; color:var(--faint); margin-top:2px}
+.spcell.on{background:color-mix(in srgb, var(--tune) 12%, var(--panel));
+  box-shadow:0 0 0 2px var(--tune)}
+/* Two things in one cell, with their own hit areas: the box on the left says
+   whether this voice appears on top, the rest of the cell chooses it and
+   plays it. */
+.spcell{display:flex; align-items:center; gap:10px}
+.spbox{flex:0 0 auto; width:26px; height:26px; border-radius:7px;
+  border:2px solid var(--line); background:transparent; color:var(--tune);
+  display:flex; align-items:center; justify-content:center; font-size:16px;
+  line-height:1; padding:0}
+.spbox.ticked{border-color:var(--tune);
+  background:color-mix(in srgb, var(--tune) 18%, transparent)}
+.spname{flex:1; min-width:0; text-align:left; background:transparent;
+  border:none; padding:0; color:inherit}
+.spname b{display:block; font-size:14px; color:var(--text); font-weight:600;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.spname small{display:block; font-size:10.5px; color:var(--faint); margin-top:2px}
+/* the same frame on the four buttons at the top of the reader */
+.voice.f{border-color:var(--femme)}
+.voice.m{border-color:var(--homme)}
+.voice.on.f, .voice.on.m{box-shadow:0 0 0 2px var(--tune)}
+/* paging: two arrows with the count between them, then a row of numbers */
+.setbar{display:flex; align-items:center; gap:8px; margin:10px 0 8px}
+.setarrow{flex:0 0 auto; width:52px; height:40px; border:1px solid var(--line);
+  background:var(--panel); color:var(--text); border-radius:11px; font-size:19px;
+  line-height:1; padding:0}
+.setarrow:disabled{color:var(--faint); opacity:.4}
+.setarrow:active:not(:disabled){border-color:var(--tune)}
+.setcount{flex:1; text-align:center; font-size:13.5px; color:var(--dim);
+  font-variant-numeric:tabular-nums}
+.setcount b{color:var(--text); font-weight:600}
+.setnums{display:flex; flex-wrap:wrap; gap:6px; margin-bottom:4px}
+.setnum{min-width:34px; height:34px; border:1px solid var(--line);
+  background:var(--panel); color:var(--dim); border-radius:9px; font-size:13px;
+  padding:0 6px; font-variant-numeric:tabular-nums}
+.setnum.on{color:var(--text); border-color:var(--tune);
+  background:color-mix(in srgb, var(--tune) 14%, var(--panel))}
+.setnum:active{color:var(--text)}
+.setlegend{display:flex; gap:14px; font-size:11px; color:var(--faint);
+  margin:2px 0 10px; align-items:center}
+/* the first row: two switches and the sentence pause, sharing the width */
+.toprow{display:flex; flex-wrap:wrap; gap:8px; align-items:center}
+.toprow .chip{flex:1 1 auto}
+.setstep{flex:0 0 auto; border:1px solid var(--line); border-radius:12px;
+  padding:0 2px; background:var(--panel)}
+/* The three modes, in the space the two pauses used to take. Same small
+   uppercase lettering as the labels under the steppers, because they sit in
+   the same row and should read as the same kind of thing. */
+.modes{gap:2px}
+.modebtn{border:none; background:transparent; color:var(--faint);
+  font-size:8.5px; letter-spacing:.09em; text-transform:uppercase;
+  padding:10px 9px; line-height:1; border-radius:8px}
+.modebtn.on{color:var(--text); font-weight:700}
+.modebtn:active{color:var(--dim)}
+/* TEXT mode: nothing but the words. No sentence tinting, no word marker, no
+   colour at all, so it can simply be read with the eye. */
+body.mode-text .sent, body.mode-text .sent *{background:none !important;
+  color:#fff !important; box-shadow:none !important; border-radius:0 !important}
+body.mode-text .doc, body.mode-text #offDoc{color:#fff; padding-bottom:78vh}
+/* EDIT mode: the text becomes a real editable field. */
+body.mode-edit .reader-scroll .doc{outline:none; caret-color:var(--tune);
+  -webkit-user-select:text; user-select:text; white-space:pre-wrap}
+body.mode-edit .sent, body.mode-edit .sent *{background:none !important;
+  color:#fff !important; box-shadow:none !important}
+body.mode-edit .yt-play, body.mode-edit .yt-skip{opacity:.3; pointer-events:none}
+body.mode-text .yt-play, body.mode-text .yt-skip{opacity:.3; pointer-events:none}
+.setlegend i{display:inline-block; width:12px; height:12px; border-radius:4px;
+  margin-right:5px; vertical-align:-2px; border:2px solid; background:none}
+.spstate{font-size:12px; color:var(--faint); margin:8px 0 2px; line-height:1.5}
+.deadhead{font-size:11px; letter-spacing:.08em; text-transform:uppercase;
+  color:var(--faint); margin:14px 0 6px}
+.deadrow{display:flex; align-items:center; gap:8px; padding:8px 10px;
+  border:1px solid var(--line); border-radius:10px; margin-bottom:6px;
+  background:var(--panel)}
+.deadrow .dmeta{flex:1; min-width:0; line-height:1.3}
+.deadrow .dname{font-size:13.5px; color:var(--text); font-weight:600;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.deadrow .dsub{font-size:10.5px; color:var(--faint); font-variant-numeric:tabular-nums}
+.deadbtn{border:1px solid var(--line); background:transparent; color:var(--dim);
+  border-radius:8px; padding:6px 10px; font-size:12px; flex:0 0 auto}
+.deadbtn.warn{color:#f87171; border-color:#f8717155}
+.deadbtn:active{color:var(--text)}
+.spstate b{color:var(--text); font-weight:600}
+.spstate.bad{color:#f87171}
+/* the fullscreen pair: a button on the player strip to go in, and a faint
+   one in the corner to come back out, which is the only thing on screen once
+   everything else has gone */
+.fsbtn{flex:0 0 auto; width:38px; height:32px; border:1px solid var(--line);
+  background:var(--panel); color:var(--dim); border-radius:9px; padding:0;
+  display:flex; align-items:center; justify-content:center}
+.fsbtn svg{width:17px; height:17px; display:block}
+.fsbtn:active{color:var(--text); border-color:var(--tune)}
+/* ---------- the floating P ----------
+   Dragged anywhere, pressed to paste. It sits above everything because the
+   whole point is that it is reachable without looking for it. */
+.floatp{position:fixed; z-index:80; width:56px; height:56px; border-radius:50%;
+  border:1px solid var(--line); background:var(--panel); color:var(--text);
+  font-size:23px; font-weight:600; line-height:1; padding:0; display:none;
+  align-items:center; justify-content:center; touch-action:none;
+  box-shadow:0 3px 14px rgba(0,0,0,.45); opacity:.88}
+.floatp svg{width:24px; height:24px; display:block}
+/* in full screen it is the only control on the screen, so it earns its keep */
+body.fullread .floatp{opacity:.72; background:rgba(127,127,127,.16);
+  border-color:transparent}
+body.fullread .floatp:active{opacity:1}
+body.hasfloat .floatp{display:flex}
+.floatp:active{border-color:var(--tune); opacity:1}
+.floatp.moving{opacity:1; border-color:var(--tune); transform:scale(1.06)}
+
+/* The full-screen floater. Same size, same weight, same drag, so the two read
+   as a pair rather than as two unrelated buttons that happen to be round. */
+.floatf{position:fixed; z-index:80; width:56px; height:56px; border-radius:50%;
+  border:1px solid var(--line); background:var(--panel); padding:0; display:none;
+  align-items:center; justify-content:center; touch-action:none;
+  box-shadow:0 3px 14px rgba(0,0,0,.45); opacity:.88}
+.floatf .fdot{width:14px; height:14px; border-radius:50%; background:#fff;
+  display:block; transition:width .12s, height .12s}
+body.hasfloatf .floatf{display:flex}
+.floatf:active{border-color:var(--tune); opacity:1}
+.floatf.moving{opacity:1; border-color:var(--tune); transform:scale(1.06)}
+/* in full screen it dims with everything else, and the dot shrinks so the
+   ring reads as "you are inside it" without adding a second glyph */
+body.fullread .floatf{opacity:.72; background:rgba(127,127,127,.16);
+  border-color:transparent}
+body.fullread .floatf:active{opacity:1}
+body.fullread .floatf .fdot{width:8px; height:8px}
+body.sheetopen .floatf{display:none !important}
+
+/* Play and pause. Same size and drag as the other two. */
+.floats{position:fixed; z-index:80; width:56px; height:56px; border-radius:50%;
+  border:1px solid var(--line); background:var(--panel); color:var(--text);
+  padding:0; display:none; align-items:center; justify-content:center;
+  touch-action:none; box-shadow:0 3px 14px rgba(0,0,0,.45); opacity:.88}
+.floats svg{width:23px; height:23px; display:block}
+body.hasfloats .floats{display:flex}
+.floats:active{border-color:var(--tune); opacity:1}
+.floats.moving{opacity:1; border-color:var(--tune); transform:scale(1.06)}
+body.fullread .floats{opacity:.72; background:rgba(127,127,127,.16);
+  border-color:transparent}
+body.fullread .floats:active{opacity:1}
+body.sheetopen .floats{display:none !important}
+
+/* The catcher. Some browsers will not hand a page the clipboard at all, and
+   no amount of asking changes that. So when the quick way is refused, this
+   opens: a real text field, already focused, that the phone will happily
+   paste into by long press or by a keyboard. The moment anything lands in it
+   the reading starts, so it costs one extra press and never a typed word. */
+.catchwrap{position:fixed; inset:0; z-index:90; display:none;
+  background:rgba(0,0,0,.62); align-items:center; justify-content:center;
+  padding:18px}
+.catchwrap.on{display:flex}
+.catchbox{width:100%; max-width:520px; background:var(--panel);
+  border:1px solid var(--line); border-radius:16px; padding:15px}
+.catchbox h4{margin:0 0 4px; font-size:16px; color:var(--text)}
+.catchbox p{margin:0 0 11px; font-size:12.5px; color:var(--faint); line-height:1.5}
+.catchbox textarea{width:100%; min-height:110px; border-radius:11px;
+  border:2px dashed var(--tune); background:var(--bg); color:var(--text);
+  padding:11px; font-size:15px; line-height:1.4}
+.catchrow{display:flex; gap:8px; margin-top:10px}
+.catchrow button{flex:1; border:1px solid var(--line); background:transparent;
+  color:var(--dim); border-radius:11px; padding:11px; font-size:14px}
+.catchrow button.go{color:var(--text); border-color:var(--tune)}
+.fsout{position:fixed; z-index:60; display:none;
+  top:calc(8px + env(safe-area-inset-top)); right:10px;
+  width:44px; height:44px; border:none; border-radius:50%;
+  background:rgba(127,127,127,.13); color:var(--dim);
+  align-items:center; justify-content:center; padding:0}
+.fsout svg{width:20px; height:20px; display:block}
+.fsout:active{background:rgba(127,127,127,.26); color:var(--text)}
+body.fullread .fsout{display:none !important}
+/* ...unless the floating P has been switched off, in which case the corner
+   button is the ONLY way out and must come back. Full screen with no exit is
+   a trap, and this app promises he is never stuck in that view. */
+body.fullread:not(.hasfloat):not(.hasfloatf) > .fsout{display:flex !important}
+/* while the text is a paste target, say so with the cursor and kill the
+   text selection that a tap would otherwise start */
+/* ---------- FULL SCREEN MEANS FULL SCREEN ----------
+   The old rules named the things to hide: header, controls, gear. That is a
+   list, and a list goes stale the moment anything is added, which is exactly
+   what happened; the player and the voice strip were still sitting there.
+
+   So this is turned inside out. Hide EVERY direct child of the body, then name
+   the few that are allowed to stay. Anything added to this app in future is
+   hidden by default in full screen and has to argue its way back on, which is
+   the right way round.
+
+   What stays: the text, and the one floating button to get out. That is all.
+   The toast stays too, because a message you cannot see is worse than useless,
+   and the paste catcher stays because it only opens when it is wanted. */
+body.fullread > *{display:none !important}
+body.fullread > main{display:block !important}
+body.fullread > .floatp{display:flex !important}
+body.fullread > .floatf{display:flex !important}
+body.fullread > .floats{display:flex !important}
+body.fullread > .toast{display:block !important}
+body.fullread > .catchwrap.on{display:flex !important}
+
+/* Inside the reader, the same idea again: only the scrolling text survives.
+   The progress row, the player bar, the status line, anything else, gone. */
+body.fullread .view > *:not(.reader-scroll){display:none !important}
+
+/* and the text takes the whole screen, not the space the player left behind */
+body.fullread .reader-scroll{position:fixed; inset:0; max-height:none;
+  height:auto; overflow-y:auto; -webkit-overflow-scrolling:touch;
+  padding:calc(20px + env(safe-area-inset-top)) 17px
+          calc(28px + env(safe-area-inset-bottom))}
+</style>
+</head>
+<body data-theme="night">
+<header>
+  <button class="gear-corner" id="gearCorner" title="Settings">&#9881;</button>
+  <div class="voices" id="voices"></div>
+  <div class="topbar">
+    <nav class="tabs" id="tabs">
+      <button class="tab on" data-tab="home">Read</button>
+      <button class="tab" id="pasteTab">Paste</button>
+      <button class="tab player" id="playerJump" title="Jump to the player">Player</button>
+      <button class="tab" data-tab="help">Help</button>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <!-- HOME -->
+  <section class="view home" id="homeView">
+    <h2>Paste a text to read</h2>
+    <textarea id="pasteBox" placeholder="Tap here to paste and start reading. Or type. Links and Markdown are stripped automatically, so only the words are read."></textarea>
+    <div class="home-actions">
+      <button class="btn primary" id="readBtn">Read it</button>
+      <button class="btn ghost" id="clearBtn">Clear</button>
+      <span class="hint" id="pasteHint"></span>
+    </div>
+    <div class="lib">
+      <h2>Archive</h2>
+      <input class="searchbox" id="libSearch" placeholder="Search your archive">
+      <div class="listbar" id="libBar">
+        <button class="minibtn" id="libSelToggle">Select</button>
+        <button class="minibtn hidden" id="libSelAll">Select all</button>
+        <button class="minibtn danger hidden" id="libDelSel">Delete (0)</button>
+        <button class="minibtn danger" id="libDelAll">Delete all</button>
+        <span class="selcount hidden" id="libSelCount"></span>
+      </div>
+      <div id="libList"></div>
+    </div>
+  </section>
+
+  <!-- READER -->
+  <section class="view hidden" id="readerView">
+    <div class="reader-scroll" id="readerScroll">
+      <p class="reader-title" id="readerTitle"></p>
+      <div class="doc" id="doc"></div>
+      <!-- EDIT mode for a Markdown text edits the SOURCE, markers and all -->
+      <textarea class="md-edit" id="mdEdit" spellcheck="false"
+                autocapitalize="off" autocorrect="off"></textarea>
+    </div>
+    <div class="controls off-controls">
+      <div class="progress">
+        <button class="fsbtn" id="fsBtn" title="Full screen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3"/></svg></button>
+        <div class="bar"><i id="barFill"></i></div>
+        <button class="counter" id="counter"
+          title="How much is left. Press to clear and start again.">0 / 0</button>
+      </div>
+      <div class="yt-bar">
+        <!-- The three modes are gone. Reading is the only mode, so a row of
+             buttons that says so was three ways to leave it by accident. In
+             their place, the one thing the bar was missing: the whole text as
+             a single file. -->
+        <button class="yt-dl" id="dlBtn" title="Save the whole text as one mp3">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 3v11"/><path d="M7.5 10.5L12 15l4.5-4.5"/>
+            <path d="M4.5 19.5h15"/>
+          </svg>
+        </button>
+        <button class="yt-play" id="playBtn" title="Play / Pause"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 5.5v13a1 1 0 0 0 1.53.85l10.2-6.5a1 1 0 0 0 0-1.7L8.53 4.65A1 1 0 0 0 7 5.5z"/></svg></button>
+        <div class="ytstep">
+          <button class="yt-mini" data-step="speed" data-d="-1" title="Slower">&#8722;</button>
+          <button class="yt-num" data-reset="speed" title="Tap to reset to 1.00"><b id="spdNum">1.00</b><i>speed</i></button>
+          <button class="yt-mini" data-step="speed" data-d="1" title="Faster">+</button>
+        </div>
+        <button class="yt-skip" id="nextBtn" title="Next sentence">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M5 6A1.2 1.2 0 0 1 6.85 4.99L14.7 10.99A1.25 1.25 0 0 1 14.7 13.01L6.85 19.01A1.2 1.2 0 0 1 5 18Z"/><rect x="16.1" y="5" width="2.9" height="14" rx="1.45"/></svg>
+        </button>
+      </div>
+      <div class="status" id="status"></div>
+    </div>
+  </section>
+
+  <!-- OFFLINE LIST -->
+  <section class="view hidden" id="offlineView">
+    <h2>Offline reader</h2>
+    <p class="sub">Reads a text you already exported, one sentence at a time,
+      straight from your MA Reader Audio folder. Each sentence lights up and then
+      its own small clip plays, so there is nothing to stream and no internet
+      needed. Voice cannot be changed here because the clips are already made.</p>
+    <input class="searchbox" id="offSearch" placeholder="Search exported texts">
+    <div class="listbar" id="offBar">
+      <button class="minibtn" id="offSelToggle">Select</button>
+      <button class="minibtn hidden" id="offSelAll">Select all</button>
+      <button class="minibtn danger hidden" id="offDelSel">Delete (0)</button>
+      <button class="minibtn danger" id="offDelAll">Delete all</button>
+      <span class="selcount hidden" id="offSelCount"></span>
+    </div>
+    <div id="offList"></div>
+  </section>
+
+  <!-- OFFLINE PLAYER -->
+  <section class="view hidden" id="offlineReaderView">
+    <div class="reader-scroll" id="offReaderScroll">
+      <p class="reader-title" id="offTitle"></p>
+      <div class="doc" id="offDoc"></div>
+    </div>
+    <div class="controls off-controls">
+      <div class="progress">
+        <button class="fsbtn" id="offFsBtn" title="Full screen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3"/></svg></button>
+        <input type="range" id="offSeek" class="seek" min="0" max="1000" value="0">
+        <button class="counter" id="offCounter"
+          title="How much is left. Press to clear and start again.">0 / 0</button>
+      </div>
+      <div class="yt-bar">
+
+        <button class="yt-play" id="offPlay" title="Play / Pause"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 5.5v13a1 1 0 0 0 1.53.85l10.2-6.5a1 1 0 0 0 0-1.7L8.53 4.65A1 1 0 0 0 7 5.5z"/></svg></button>
+        <div class="ytstep">
+          <button class="yt-mini" data-step="speed" data-d="-1" title="Slower">&#8722;</button>
+          <button class="yt-num" data-reset="speed" title="Tap to reset to 1.00"><b id="spdNum2">1.00</b><i>speed</i></button>
+          <button class="yt-mini" data-step="speed" data-d="1" title="Faster">+</button>
+        </div>
+        <button class="yt-skip" id="offNextBtn" title="Next sentence">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M5 6A1.2 1.2 0 0 1 6.85 4.99L14.7 10.99A1.25 1.25 0 0 1 14.7 13.01L6.85 19.01A1.2 1.2 0 0 1 5 18Z"/><rect x="16.1" y="5" width="2.9" height="14" rx="1.45"/></svg>
+        </button>
+      </div>
+      <div class="status" id="offStatus"></div>
+    </div>
+  </section>
+
+  <!-- HELP -->
+  <section class="view hidden" id="helpView">
+    <div class="help">
+      <h2>How MA Reader works</h2>
+      <p class="sub">GTT <span id="appVer"></span></p>
+      <p class="lead">MA Reader turns any text into speech and lights up each
+        word as it is spoken. There are two ways to read.</p>
+
+      <h3>Read (online)</h3>
+      <p>Paste text and press Read it. The app speaks it sentence by sentence
+        with the voice you pick and highlights the word being read. Everything
+        you read is saved to your Archive so you can open it again.</p>
+
+      <h3>How the highlight stays on the word</h3>
+      <p>The timing does not trust the voice engine's reported clock, which is
+        what used to make the red word drift off the speech. Instead, after a
+        sentence is spoken the app decodes that very clip, measures where
+        speech truly begins and ends and where it rises after every pause, and
+        pins each word to the real waveform, the same idea caption tools like
+        DaVinci Resolve use. During playback a smoothed clock follows the clip
+        so the highlight moves with the voice, not in jumps. Clips made by
+        older versions are repaired automatically the first time they play.</p>
+
+      <h3>Offline reader</h3>
+      <p>Open a text, choose a voice, then press Export. The app speaks each
+        sentence into its own small <code>.mp3</code> clip inside a folder named
+        after the text, and writes a plain <code>.txt</code> and a
+        <code>.json</code> manifest beside it. The Offline tab reads that
+        manifest and plays the clips one sentence at a time: it lights up the
+        whole sentence, then plays that sentence's clip, then moves to the next.
+        There is no long stitched file, so the highlight always stays on the
+        sentence being read and never jumps ahead. Voices cannot be changed
+        there because the clips are already made.</p>
+
+      <h3>Where files live</h3>
+      <p>Everything offline uses one folder, created automatically the first time
+        you export: <code>MA Reader Audio</code> inside your Downloads. On
+        Android that is <code>Downloads/MA Reader Audio</code>; on a Mac it is
+        <code>~/Downloads/MA Reader Audio</code>. On Android, run
+        <code>termux-setup-storage</code> once so the app can reach Downloads.</p>
+
+      <h3>Fastest way to read something</h3>
+      <p>Copy any text, come back to this page and tap <b>Paste</b>. The
+        clipboard replaces whatever was here and starts reading immediately.
+        Tap the text to step on to the next sentence. That is the only gesture
+        on the text; otherwise you simply scroll it with a finger, and a finger
+        that moved was scrolling, so scrolling never skips anything.</p>
+
+      <h3>The player</h3>
+      <p>Either side of the play button is a small control with a minus, a
+        number and a plus. The left one is the speaking speed, the right one is
+        the gap between <b>words</b>. Both move in twentieths, so one press is a
+        small nudge rather than a jump; hold a button down and it repeats,
+        quickening after a second. Tapping the number itself puts that control
+        back where it started, 1.00 for speed and 0.00 for the word gap, so coming
+        home from a long hold costs one tap.</p>
+      <p>Past the speed, at the right-hand end of the bar, is <b>next
+        sentence</b>. It steps one sentence on and carries on reading if it
+        was reading, or simply moves the highlight if it was not. The full
+        stop, the right arrow key and a tap on the text all do the same
+        thing.</p>
+      <p>The word gap is the quiet the voice already leaves inside a sentence,
+        between one word and the next. Nothing is re-recorded and no word is
+        ever cut: below zero the player runs quickly through that quiet, above
+        zero it stops inside it and waits. It is the one you reach for while you
+        are actually listening, which is why it sits on the player.</p>
+      <p>The gap between <b>sentences</b> is a different silence and lives in
+        Settings, under Playback, because it is set once and left. It goes below
+        zero, down to minus one second, and a negative gap there is an overlap:
+        the next sentence starts that much before this one has finished, so
+        there is no seam at all between them.</p>
+
+      <h3>Tapping and scrolling</h3>
+      <p>Scroll the text with a finger, the way you would any page. A tap on it
+        &mdash; anywhere on it, on a word or in the margin beside it &mdash;
+        steps on to the <b>next sentence</b>, and carries on reading if it was
+        reading. That is the only gesture on the text, and it means the same
+        thing everywhere, so there is nowhere you have to be careful where you
+        touch.</p>
+      <p>A finger that moved was scrolling and nothing happens when you lift
+        it. Play and pause are not on the text at all: they are on the floating
+        button, which is also the only control that stays with you while you
+        are immersive.</p>
+
+      <h3>Immersive reading</h3>
+      <p>Double tap the middle of the page and everything except the text goes
+        away, like an ebook, and it starts speaking. Double tap the middle again
+        and the controls come back and it pauses, so you always stop exactly
+        where you were reading. While immersive, a single tap anywhere steps on
+        to the next sentence, exactly as it does outside; the floating button is
+        how you pause without leaving.</p>
+
+      <h3>Why it does not stutter between sentences</h3>
+      <p>Each sentence is its own small clip, so there is a join between every
+        pair of them. Three sentences ahead are always fetched and kept in
+        memory, the next one is loaded into a second player and left decoded and
+        waiting, and the changeover is made a fraction before the current clip
+        ends rather than after the browser gets round to reporting it. Nothing
+        is fetched, opened or decoded at the moment of the handover, so the
+        reading runs on without a break.</p>
+
+    </div>
+  </section>
+</main>
+
+<!-- reading settings sheet -->
+<div class="backdrop" id="backdrop"></div>
+<div class="sheet" id="sheet">
+  <div class="sheet-head">
+    <!-- The two things changed most often, so they sit above everything and
+         are reachable without scrolling: WHICH ENGINE speaks, and WHICH
+         LANGUAGE is being read. Both name the state they are in and flip on
+         a press. -->
+    <!-- The engine chip is gone: it chose between Edge and Speechify, and
+         this app has neither. The language chip went with it — the language
+         is a property of the text that was pasted, not a switch, and Gemini
+         reads whatever it is given. -->
+    <button class="sheet-x" id="sheetX" title="Close">&#10005;</button>
+    <span class="sheet-ver" id="appVerTop"></span>
+  </div>
+
+  <!-- One engine, so nothing here hides on account of which one. -->
+  <div class="chips toprow" id="bothWrap" style="margin:0 0 14px">
+    <button class="chip" id="fullPasteTog">Go full screen</button>
+    <button class="chip" id="hideTabsTog">Hide the tabs</button>
+    <div class="ytstep setstep">
+      <button class="yt-mini" data-step="gap" data-d="-1" title="Shorter pause between sentences">&#8722;</button>
+      <button class="yt-num" data-reset="gap" title="Tap to reset to 0.00"><b id="gapNum">0.00</b><i>sentences</i></button>
+      <button class="yt-mini" data-step="gap" data-d="1" title="Longer pause between sentences">+</button>
+    </div>
+    <div class="ytstep setstep">
+      <button class="yt-mini" data-step="lag" data-d="-1" title="Jump sooner">&#8722;</button>
+      <button class="yt-num" data-reset="lag" title="Tap to reset to 0.00"><b id="lagNum">0.00</b><i>scroll delay</i></button>
+      <button class="yt-mini" data-step="lag" data-d="1" title="Wait longer before jumping">+</button>
+    </div>
+    <!-- The three floating buttons, each switched on its own. They were in
+         the sheet head, where they sat on top of the version and the close
+         button; a row that already holds switches is where a switch belongs. -->
+    <button class="chip" id="flP">Floating paste</button>
+    <button class="chip" id="flF">Floating full screen</button>
+    <button class="chip" id="flS">Floating play/pause</button>
+  </div>
+  <!-- Three panes, not two engines. A person looking for the font should
+       not have to guess whether it lives under Edge or under Speechify. -->
+  <!-- One engine, so no engine buttons: the row that used to choose between
+       Edge and Speechify chose between two things that no longer exist. -->
+  <div class="engtabs" id="engTabs">
+    <button class="engtab" data-pane="edge"><b>Voice</b></button>
+    <button class="engtab" data-pane="app"><b>Settings</b></button>
+  </div>
+
+
+  <!-- Voices come first in both tabs. It is the thing reached for most and
+       the only part of Settings that differs between the two engines, so it
+       sits directly under the buttons that choose them. -->
+  <div class="group g-voice" data-eng="edge">
+    <h3>Voice</h3>
+    <div class="chips">
+      <button class="chip" id="voiceBarTog">Voice buttons on top</button>
+    </div>
+
+    <div class="wsub">Who reads</div>
+    <div class="langhint">Thirty voices. Google publishes one word about each
+      of them and nothing else &mdash; no gender, no age, no accent &mdash; so
+      that one word is all that is claimed here.</div>
+    <div class="spgrid" id="edgeVoiceGrid"></div>
+
+    <!-- THE DIRECTION. Gemini has no emotion setting: it is told in prose how
+         to read the line, and this is where that prose is chosen. A list and
+         not a text box, because a blank page in the middle of choosing a
+         voice is where somebody gives up and takes the default. -->
+    <div class="wsub">How it reads</div>
+    <div class="langhint">The voice is given this as a direction, the way an
+      actor is. It changes the audio, so a sentence already spoken one way is
+      re-spoken when you change it.</div>
+    <div class="emogroups" id="emoGroups"></div>
+
+    <div class="wsub">Pace</div>
+    <div class="chips" id="paceChips"></div>
+  </div>
+
+  <!-- The Speechify group was here. It went with the engine. -->
+  <div class="group g-text" data-eng="app">
+    <h3>Text</h3>
+    <div class="wsub">Letter size</div>
+    <div class="rowctl">
+      <span class="lab">Size of the letters</span>
+      <button class="a-sm" data-step="size" data-d="-1">A&#8722;</button>
+      <span class="val" id="sizeVal2">21</span>
+      <button class="a-lg" data-step="size" data-d="1">A+</button>
+    </div>
+    <div class="wsub">Line spacing</div>
+    <div class="rowctl">
+      <span class="lab">Space between lines</span>
+      <button data-step="lh" data-d="-1">&#8722;</button>
+      <span class="val" id="lhVal">3</span>
+      <button data-step="lh" data-d="1">+</button>
+    </div>
+    <div class="wsub">Typeface</div>
+    <div class="chips">
+      <button class="chip f-sans"  data-font="sans">Sans</button>
+      <button class="chip f-book"  data-font="book">Book</button>
+      <button class="chip f-serif" data-font="serif">Serif</button>
+      <button class="chip f-mono"  data-font="mono">Mono</button>
+    </div>
+  </div>
+
+  <!-- The keys card is gone from here. It managed Edge and Speechify keys,
+       which this app has none of; the Gemini ring has its own screen and its
+       own file picker, and two places to put a key is one too many. -->
+
+  <div class="group g-play" data-eng="app">
+    <h3>Playback</h3>
+    <div class="rowctl">
+      <span class="lab">Speed</span>
+      <button data-step="speed" data-d="-1">&#8722;</button>
+      <span class="val" id="speedVal">1.00&times;</span>
+      <button data-step="speed" data-d="1">+</button>
+    </div>
+    <div class="rowctl">
+      <span class="lab">Pause between sentences</span>
+      <button data-step="gap" data-d="-1">&#8722;</button>
+      <span class="val" id="gapVal">0.00</span>
+      <button data-step="gap" data-d="1">+</button>
+    </div>
+    <div class="langhint">Also on the player. Word pause is a real pause, sentence pause can overlap.</div>
+    <div class="synctop" style="margin-top:10px">
+      <span>Volume</span><span class="val" id="volVal">100%</span>
+    </div>
+    <input type="range" id="volRange" min="0" max="100" step="5" value="100">
+    <div class="chips" id="playToggles" style="margin-top:12px">
+      <button class="chip" id="autoplayTog">Auto-play on open</button>
+      <button class="chip" id="resumeTog">Remember position</button>
+      <button class="chip" id="focusTog">Focus mode</button>
+      <button class="chip" id="loopBtn">Loop</button>
+      <button class="chip" id="adbTog">ADB mode on start</button>
+    </div>
+    <div class="langhint"><b>Floating paste button.</b> Drag it anywhere. Press: paste, full screen, read. In full screen it is the way out.</div>
+    <div class="langhint"><b>Floating play/pause.</b> Drag it anywhere. It is the only transport control that survives immersive, and since a tap on the text now means next sentence, it is where pause lives. It used to switch Android apps; that job is gone.</div>
+
+  </div>
+
+  <div class="group g-colour" data-eng="app">
+    <h3>Colour</h3>
+    <div class="wsub">Page theme</div>
+    <div class="chips" id="themeChips">
+      <button class="chip theme-day"   data-theme="day">Day</button>
+      <button class="chip theme-sepia" data-theme="sepia">Sepia</button>
+      <button class="chip theme-night" data-theme="night">Night</button>
+    </div>
+    <div class="wsub">Word highlight</div>
+    <!-- The word-highlight card stood here: a switch, a colour, an
+         intensity and a sync slider, all for a marker that no longer exists.
+         The sentence is the unit that is lit now. -->
+  <!-- The word-timing card went with the word highlight. Nothing is measured
+       any more: a clip starts and its sentence lights up. -->
+
+  <div class="group g-adv" data-eng="app">
+    <h3>Advanced</h3>
+    <div class="gtitle">The script editor</div>
+    <div class="langhint">Two speakers in one call, tagged line by line, with
+      a direction on each line. This screen reads one voice at a time, so that
+      one is still there and still the only way to do it.</div>
+    <div class="chips" style="margin:6px 0">
+      <a class="chip" href="/studio">Open the script editor</a>
+      <a class="chip" href="/transcribe">Open Maha Transcribe</a>
+    </div>
+    <div class="chips">
+      <button class="chip" id="chromeTog">Open in Chrome</button>
+    </div>
+    <div class="langhint">Ask for Chrome by name instead of the phone default.</div>
+    <div class="wsub">Word timing</div>
+    <div class="timing-help">Timing is measured from the audio itself: after a
+      sentence is spoken, the app listens to the finished clip, finds where
+      speech really starts, ends, and rises after each pause, and pins every
+      word to that waveform. It is automatic, free, and works offline. If the
+      red word still feels early or late on a particular voice, nudge it with
+      the Sync slider in the player settings.</div>
+  </div>
+</div>
+
+<button class="floatp" id="floatP" title="Paste and read. Drag to move.">P</button>
+<!-- The second floater. One job and one job only: full screen on, full screen
+     off. A ring with a dot, because it is a state rather than an action and a
+     glyph that changes would be a third thing to learn. -->
+<button class="floatf" id="floatF" title="Full screen on and off. Drag to move.">
+  <span class="fdot"></span>
+</button>
+<!-- The third floater: play and pause. It used to switch Android apps, which
+     needed a privileged shell and was wanted about once an hour. Pause is
+     wanted every minute, and a tap on the text now means "next sentence", so
+     pause had nowhere else to live. It is also the only transport control
+     that survives immersive, which makes it the one way to stop the reading
+     without first leaving the view you are reading in. -->
+<button class="floats" id="floatS" title="Play and pause. Drag to move."></button>
+
+<div class="catchwrap" id="catchWrap">
+  <div class="catchbox">
+    <h4>Paste here</h4>
+    <p>This browser will not hand the page your clipboard by itself. Long press
+      the box below and choose Paste, and reading starts the moment it lands.</p>
+    <textarea id="catchBox" placeholder="Long press, then Paste"></textarea>
+    <div class="catchrow">
+      <button id="catchCancel">Cancel</button>
+      <button class="go" id="catchGo">Read it</button>
+    </div>
+  </div>
+</div>
+
+<button class="fsout" id="fsOut" title="Leave full screen">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+       stroke-linecap="round" stroke-linejoin="round">
+    <path d="M4 9h3a2 2 0 0 0 2-2V4M20 9h-3a2 2 0 0 1-2-2V4M4 15h3a2 2 0 0 1 2 2v3M20 15h-3a2 2 0 0 0-2 2v3"/>
+  </svg></button>
+<div class="toast" id="toast"></div>
+
+<!-- marked, vendored whole. No build step, no CDN, no network: the phone is
+     often offline and this is a local server. If the file is missing or fails
+     to parse, `marked` is simply undefined and every text is treated as plain,
+     which is exactly the behaviour of every version before this one. -->
+<script src="/static/marked.umd.js"></script>
+<script>
+"use strict";
+const $ = s => document.querySelector(s);
+/* ONE PREFIX, ONE LINE. The reader hangs off /reader so that nothing it
+   asks for can collide with the Speak, Listen and Keys routes this app
+   already owns. Doing it here rather than at thirty call sites means the
+   page keeps the shape it was tested in. */
+const READER = "/reader";
+/* THE HEADER IS NOT OPTIONAL. This app refuses any write that does not carry
+   it, and it is right to: a page you merely have open in another tab can post
+   to 127.0.0.1, and this app spends quota and deletes keys. A custom header
+   is the one thing such a request cannot forge — a form cannot set headers at
+   all, and a fetch that tries gets a preflight that is never allowed. Added
+   here, once, so that no call site can forget it. */
+const GUARD = "X-Gtt-Local";
+const api = (u,o)=>{
+  const url = (u.charAt(0)==="/" && u.indexOf("/api/")===0) ? READER+u : u;
+  const opt = Object.assign({}, o||{});
+  opt.headers = Object.assign({}, opt.headers||{});
+  opt.headers[GUARD] = "1";
+  return fetch(url, opt);
+};
+
+/* ---------- typography options ---------- */
+/* In Baba's order: sans first, because that is what he reads with. */
+const FONTS = {
+  sans :'system-ui,-apple-system,"Segoe UI",Roboto,sans-serif',
+  book :'"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif',
+  serif:'Georgia,"Times New Roman",serif',
+  mono :'ui-monospace,"DejaVu Sans Mono",Menlo,Consolas,monospace',
+};
+/* Base perceptual lead: light the word a hair before the voice reaches it, to
+   cancel the audio-output latency the browser adds. In v22 raising this looked
+   like it helped and then overshot, because the server was handing back word
+   starts that were about 50 ms late and late by a DIFFERENT amount per word; a
+   single constant can flatten an average but not a spread. The v23 engine
+   removes that bias at the source (measured residual about -7 ms), so 20 ms is
+   now doing only the job it was written for and should stay where it is. Per
+   voice trimming belongs in the Sync slider, which steps in 5 ms. */
+
+/* ---- drift-corrected media clock (the heart of smooth highlighting) ----
+   Mobile <audio> only updates currentTime a few times a second, which makes a
+   naive highlight jump in chunks and fall up to a few words behind. Instead we
+   run our own predicted clock: between native updates it advances by real wall
+   time multiplied by the playback rate, and when a fresh currentTime arrives we
+   ease toward it (or snap on a seek). This yields glassy, karaoke-smooth motion
+   that stays locked to the audio. */
+const CLK = { pred: 0, lastWall: 0, lastObs: -1, ready: false, lastWord: -2 };
+const LH = {1:1.35, 2:1.5, 3:1.72, 4:1.95, 5:2.2};
+const SIZE_MIN = 1, SIZE_MAX = 14;
+/* Speed and the WORD gap are the two knobs that live on the transport bar, so
+   they step finely: a press is a nudge, not a jump. Hold a button to repeat.
+   The gap between SENTENCES moved into Settings in v26; it still runs into the
+   minus, where the next sentence starts BEFORE the current one has finished
+   and the two overlap by that much. */
+const SPEED_MIN = 0.5, SPEED_MAX = 3.0, SPEED_STEP = 0.05;
+const GAP_MIN = -1.0, GAP_MAX = 3.0, GAP_STEP = 0.05;
+const LAG_MIN = 0.00, LAG_MAX = 3.00, LAG_STEP = 0.05;
+/* The pause between WORDS is a different animal from the pause between
+   sentences. Sentences are separate clips, so the space between them is ours
+   to make. The words inside one clip are not: the voice has already spoken
+   them into a single piece of audio with its own small silences baked in.
+
+   v3 stops trying to be clever about it. The old version changed playbackRate
+   to race through those silences, and every rate change was audible - clicks,
+   chirps, a chipmunk on the consonants, and on some Android webviews the audio
+   simply muted below about a quarter speed. Rate is never touched now. The
+   server has already measured exactly where each between-word silence sits, so
+   the player does the one honest thing: it PAUSES the clip inside a silence,
+   waits the time you asked for, and plays it again. A pause in silence is
+   inaudible by definition. Nothing is re-recorded, nothing is resampled, no
+   word is clipped, no consonant is cut in half.
+
+   That is also why it only runs upward from zero. Making a silence longer is
+   free; making it shorter would mean cutting audio, and there is no way to
+   have less silence than the voice actually recorded. */
+/* The pause between WORDS is gone, in the interface and in the engine.
+   It worked, but it was not used: a pause long enough to notice made a page
+   take half an hour, and anything shorter was indistinguishable from nothing.
+   The silence map it rode on is still measured, because the word highlight
+   and the reading time estimate both use it for other purposes. */
+const THEMES = ["day","sepia","night"];
+
+/* ---------- app state ---------- */
+const ST = {
+  /* What was pasted, markers and all, as opposed to `sentences`, which is the
+     cleaned text the voice is given. Not a setting and never persisted: it
+     belongs to whichever text is open. */
+  source: "",
+  voices: [], voice: 1, vkey: "ukF",
+  langs: [], enabledLangs: ["en","hr"],
+  /* v3: two engines. Edge is the free Microsoft one this app started on;
+     Speechify is keyed, English only, and brings its own word timings. */
+  engine: "edge", spAccent: "uk", spVkey: "", spVoices: [], spInfo: {},
+  spSet: 0, spPerSet: 4, bothEngines: false,
+  floatPaste: true, fpX: 0.82, fpY: 0.72,
+  floatFull: true, ffX: 0.82, ffY: 0.58,
+  emotion: "Neutral", pace: "normal", vscrollM: 0, vscrollF: 0,
+  floatSwap: true, swapIsPlay: false, fsX: 0.82, fsY: 0.44,
+  adbMode: true, browser: "chrome",
+  /* null means never chosen, so the first four can be offered. An empty
+     ARRAY means chosen to be none, and must be left alone. Treating those
+     two as the same value is what made unticked voices come back on every
+     restart: the seed could not tell a decision from a blank. */
+  /* Baba's own starting point, so a fresh install is not a chore. */
+  lang: "eng", langAuto: "eng", croVoice: "lesya", engVoice: "beatrice_32",
+  voiceBar: true, spPicked: null, fullOnPaste: false, hideTabs: true,
+  pane: "app",
+  mode: "read",
+  tid: "", title: "", sentences: [],
+  idx: 0, playing: false,
+  speed: 1.0, volume: 100, gap: 0.0, lag: 0.0, wgap: 0.0, loop: false,
+  size: 4, autoplay: false, focus: false,
+  theme: "night", font: "serif", lineheight: 3, wordhl: true,
+  rgbSent: [255,217,59], rgbWord: [226,59,78], rgbFont: [255,255,255],
+  rgbText: null,
+  wordoffsets: {}, aimeta:false, resume:true,
+};
+
+/* Three elements, not two. One speaks, one holds the next sentence already
+   decoded and waiting, and the third is spare so a negative gap can overlap
+   two clips while a fourth is still being armed. */
+const players = [new Audio(), new Audio(), new Audio()];
+players.forEach(p => { p.preload = "auto"; });
+let cur = 0, rafId = null, gapTimer = null;
+let handedOff = false;              // has this clip already launched its successor
+let playSeq = 0;                    // rises on every start, so stale ended events die
+let armed = { slot:-1, idx:-1 };    // which element is holding which sentence
+let armWanted = -1;
+/* idx -> [[from,to],...] the quiet stretches between the words of that clip,
+   measured on the server from the decoded waveform and shipped beside the
+   word times. Empty for a clip the server could not measure. */
+
+/* ---------- helpers ---------- */
+function toast(msg){
+  const t = $("#toast"); t.textContent = msg; t.classList.add("show");
+  clearTimeout(toast._t); toast._t = setTimeout(()=>t.classList.remove("show"),2600);
+}
+/* THE URL MUST NAME THE VOICE THAT WILL SPEAK.
+   A Speechify vkey says only "Speechify"; which voice and which model
+   actually speak is decided from the language switch and the two seats. So
+   two different voices produced the SAME url, and the browser, quite
+   correctly, replayed the clip it already had. The server had been fixed to
+   store them apart and it changed nothing, because the browser never asked.
+   The seat now rides along, and a different voice is a different url. */
+function seatTag(){
+  if(!String(ST.vkey || "").indexOf) return "";
+  if(String(ST.vkey).indexOf("sp_") !== 0) return "";   /* Edge names itself */
+  const l = (ST.lang === "auto") ? (ST.langAuto || "eng") : ST.lang;
+  const seat = (l === "hr") ? (ST.croVoice || "lesya")
+                            : (ST.engVoice || "beatrice_32");
+  return "?v=" + encodeURIComponent(seat + "-" + (l === "hr" ? "m" : "e"));
+}
+function audioUrl(i){ return `${READER}/api/audio/${ST.tid}/${ST.vkey}/${i}.wav`; }
+function clampIdx(i){ return Math.max(0, Math.min(i, ST.sentences.length-1)); }
+function active(){ return players[cur]; }
+
+/* ---------- voices ----------
+   Two engines, one strip. Edge fills it from whichever languages are ticked
+   in Settings and scrolls if there are many; Speechify fills it with exactly
+   four, two female and two male, because that is all the room there is. */
+function enabledSet(){ return new Set(ST.enabledLangs||[]); }
+/* The reading language filters everything. A voice that cannot pronounce the
+   language on screen has no business being offered, and certainly no business
+   sitting on the top row where a pocket can press it. */
+/* AUTO is not a language, it is a promise to find out. Until Groq answers,
+   the last answer stands, and English is the opening assumption. */
+function langCode(){
+  const l = (ST.lang === "auto") ? (ST.langAuto || "eng") : ST.lang;
+  return l === "hr" ? "hr" : "en";
+}
+function autoDetect(text){
+  if(ST.lang !== "auto") return;
+  const body = text || (ST.sentences || []).slice(0, 5).join(" ");
+  if(!body.trim()) return;
+  api("/api/lang/detect", {method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({text: body})})
+    .then(r=>r.json()).then(d=>{
+      if(ST.lang !== "auto") return;          /* switched away while waiting */
+      const was = ST.langAuto;
+      ST.langAuto = (d.lang === "hr") ? "hr" : "eng";
+      if(was !== ST.langAuto){
+        renderVoices(); renderEdgeGrid();
+        try{ renderCroGrid(); }catch(e){}
+        toast((ST.langAuto === "hr" ? "Croatian" : "English") +
+              (d.by === "groq" ? "" : " (guessed here)"));
+      }
+      persist();
+    }).catch(()=>{});
+}
+/* THIRTY VOICES AND NO LANGUAGE FILTER. Edge ships a voice per language and
+   the list had to be narrowed before it could be read. Gemini ships thirty
+   voices that all speak whatever they are given, so the language is a
+   property of the TEXT here, not of the voice, and filtering by it would
+   empty the grid. */
+function edgeVoices(){ return ST.voices || []; }
+/* In Croatian, Speechify's offering IS the Croatian pair: it has no Croatian
+   voice of its own, so the two auditioned foreigners are the whole set. */
+function croPseudoVoices(){
+  const l = (ST.lang === "auto") ? (ST.langAuto || "eng") : ST.lang;
+  const list = (CROV && (l === "hr" ? CROV.cro : CROV.eng)) || [];
+  return list.map(v => ({
+    id: "cro:" + v.id, vkey: "cro_" + v.id, name: v.name,
+    label: v.sub, sex: /female/i.test(v.sub) ? "F" : "M",
+    engine: "speechify", cro: v.id, forLang: l
+  }));
+}
+/* The Speechify catalogue is far longer than the four buttons at the top of
+   the reader, so those four are a WINDOW onto it. This is that window, and
+   everything else, the strip and the grid in Settings, reads from here so the
+   two can never disagree about which four are showing. */
+function spSets(){
+  const n = (ST.spVoices || []).length;
+  return Math.max(1, Math.ceil(n / (ST.spPerSet || 4)));
+}
+function spClampSet(){
+  ST.spSet = Math.max(0, Math.min(spSets() - 1, ST.spSet | 0));
+  return ST.spSet;
+}
+function spWindow(){
+  const per = ST.spPerSet || 4, s = spClampSet();
+  return (ST.spVoices || []).slice(s * per, s * per + per);
+}
+/* The Speechify voices ticked for the top row. Any number of them, because
+   the row scrolls; four was only ever the size of the window in Settings. */
+function spPickedVoices(){
+  const want = ST.spPicked || [];   /* null behaves as empty until seeded */
+  if(!want.length) return [];
+  const by = {}, seen = {};
+  (ST.spVoices || []).forEach(v => { by[v.vkey] = v; });
+  /* de-duped on the way out. Ticking cannot produce a repeat, but a state
+     file edited by hand or merged from two devices can, and the same voice
+     twice in the row is confusing rather than harmless. */
+  return want.filter(k => {
+    if(!by[k] || seen[k]) return false;
+    seen[k] = 1; return true;
+  }).map(k => by[k]);
+}
+function isPicked(vkey){ return (ST.spPicked || []).indexOf(vkey) >= 0; }
+function togglePick(vkey){
+  const a = (ST.spPicked || []).slice();   /* a decision from here on */
+  const i = a.indexOf(vkey);
+  if(i >= 0) a.splice(i, 1); else a.push(vkey);
+  ST.spPicked = a;
+}
+/* What each engine contributes to the top row. There used to be a switch per
+   engine to hide it, which was redundant: an engine with nothing ticked, or
+   no language ticked, already contributes nothing. Two ways to say the same
+   thing is one way too many, and the ticks are the honest one because they
+   say WHICH voices as well as whether. */
+function topEdge(){ return edgeVoices(); }
+function topSp(){ return []; }   /* there is no second engine here */
+function shownVoices(){
+  return ST.engine === "speechify" ? topSp() : topEdge();
+}
+/* the whole list, for looking a voice up by id even when it is not on screen */
+function spAll(){ return ST.spVoices || []; }
+/* Is this the voice in hand? A Croatian seat answers on croVoice, since it
+   is not a catalogue voice and never becomes ST.voice. */
+function voiceIsCurrent(v){
+  if(!v) return false;
+  if(v.cro) return v.cro === ((v.forLang === "hr") ? ST.croVoice : ST.engVoice)
+                  && ST.engine === "speechify";
+  return v.id === ST.voice;
+}
+function anyVoice(id){
+  return spAll().find(x=>x.id===id) || ST.voices.find(x=>x.id===id);
+}
+function sexClass(v){ return v.sex === "F" ? "f" : (v.sex === "M" ? "m" : ""); }
+function voiceSub(v){
+  return v.label || "";
+}
+function _voiceSubOld(v){
+  if(v.engine !== "speechify") return v.label;
+  /* four buttons across a phone leaves no room for "English (United Kingdom)
+     female", so Speechify says it the short way. */
+  const acc = (v.accent === "us") ? "US" : "UK";
+  const sex = (v.sex === "F") ? "female" : "male";
+  return acc + " " + sex + (v.tone ? " \u00b7 " + v.tone : "");
+}
+function voiceBtn(v){
+  const b = document.createElement("button");
+  b.className = "voice " + sexClass(v) + (voiceIsCurrent(v) ? " on":"");
+  b.innerHTML = `<b>${v.name}</b><small>${voiceSub(v)}</small>`;
+  b.onclick = ()=> setVoice(v.id);
+  return b;
+}
+/* ---------- hearing a voice ----------
+   A name says nothing about a sound. Tapping a voice in Settings has it say
+   its own name, so 963 of them can be told apart by ear rather than by
+   guessing from a word.
+
+   If the reader was speaking, it is paused for the sample and started again
+   afterwards, so a preview never talks over the article and never leaves the
+   reading abandoned halfway. */
+let PREVIEW = null, PREVIEW_WAS = false;
+function stopPreview(){
+  if(!PREVIEW) return;
+  try{ PREVIEW.pause(); }catch(e){}
+  PREVIEW.onended = PREVIEW.onerror = null;
+  PREVIEW = null;
+}
+function previewVoice(v){
+  if(!v || !v.vkey) return;
+  const again = PREVIEW && PREVIEW.dataset && PREVIEW.dataset.vkey === v.vkey;
+  const wasPlaying = PREVIEW ? PREVIEW_WAS : !!ST.playing;
+  stopPreview();
+  if(again) return;                 /* tapping the same one again stops it */
+  PREVIEW_WAS = wasPlaying;
+  if(wasPlaying){ try{ pause(); }catch(e){} }
+  const a = new Audio("/api/preview/" + encodeURIComponent(v.vkey));
+  a.dataset.vkey = v.vkey;
+  try{ a.volume = Math.max(0, Math.min(1, (ST.volume==null?100:ST.volume)/100)); }catch(e){}
+  PREVIEW = a;
+  const done = (msg)=>{
+    if(PREVIEW !== a) return;
+    stopPreview();
+    if(msg) toast(msg);
+    if(PREVIEW_WAS){ PREVIEW_WAS = false; try{ resume(); }catch(e){} }
+  };
+  a.onended = ()=> done("");
+  a.onerror = ()=> done("Could not play that voice.");
+  const p = a.play();
+  if(p && p.catch) p.catch(()=> done("Could not play that voice."));
+}
+
+/* The Edge voices, in Settings, so the strip on top is never the only way to
+   choose one. Same shape and the same colour coding as the Speechify grid,
+   because they are the same job. */
+function renderEdgeGrid(){
+  const wrap = $("#edgeVoiceGrid"); if(!wrap) return;
+  wrap.innerHTML = "";
+  const list = edgeVoices();
+  if(!list.length){
+    const d = document.createElement("div");
+    d.className = "spstate";
+    d.textContent = "No languages ticked, so there are no voices to choose.";
+    wrap.appendChild(d); return;
+  }
+  list.forEach(v=>{
+    const row = document.createElement("div");
+    row.className = "spcell " + sexClass(v) + (v.id === ST.voice ? " on" : "");
+    const nm = document.createElement("button");
+    nm.className = "spname";
+    nm.innerHTML = `<b>${v.name}</b><small>${v.label}</small>`;
+    nm.onclick = ()=>{
+                       setVoice(v.id); renderEdgeGrid(); previewVoice(v); };
+    row.appendChild(nm);
+    wrap.appendChild(row);
+  });
+}
+/* ---------- THE TWO WHEELS ----------
+   Male on top, female underneath, every voice on one of the two, each row
+   scrolling sideways on its own. Two rows and not one long strip because
+   thirty voices in a single line means spinning past fifteen you did not
+   want to reach the ones you did; split in two, the half you want is
+   already the row you are looking at.
+
+   The rows are built from a MEASURED pitch, not from the names. See
+   voicesex.py — Google publishes no gender, and the alternative to
+   measuring was writing down what the names sound like.
+
+   WHERE EACH WHEEL WAS LEFT IS REMEMBERED. That is the whole point of a
+   wheel: you spin it, you find the voice, and next time it is standing
+   where you left it rather than rewound to the start with your voice
+   somewhere off the right-hand edge. Saved per row, restored after every
+   render, and never fought with while a finger is still on it. */
+const VROWS = [["M", "vscrollM"], ["F", "vscrollF"]];
+
+function voicesBySex(sex){
+  const all = shownVoices();
+  if(sex === "M") return all.filter(v => v.sex === "M");
+  if(sex === "F") return all.filter(v => v.sex === "F");
+  /* Anything not measured yet belongs to neither row. Dropping it into one
+     of them would be a guess wearing a measurement's clothes. It is still
+     reachable in Settings, where it can be measured or placed by hand. */
+  return all.filter(v => v.sex !== "M" && v.sex !== "F");
+}
+
+/* Remembering where a wheel was left, which is fiddlier than it sounds.
+
+   The row is rebuilt from scratch on every render, so its scrollLeft starts
+   at 0 and has to be put back. Two things go wrong if that is done naively,
+   and the first version here hit both:
+
+   1. FILLING THE ROW FIRES A SCROLL EVENT, at position 0. Treat that as the
+      reader moving the wheel and 0 is what gets saved — the position is
+      destroyed by the act of drawing it. So nothing is listened to until the
+      restore has happened and settled.
+
+   2. THE RESTORE MUST NOT FIGHT A MOVING FINGER. Putting scrollLeft back
+      while someone is mid-swipe yanks the row out from under them. The first
+      attempt guarded that with a global "recently scrolled" timestamp — and
+      the spurious event from (1) set that timestamp, which then suppressed
+      the restore itself. The guard and the bug were the same line. A per-row
+      flag that is only true during the restore has neither problem.
+
+   One timer per row, too: a single shared one meant scrolling the second row
+   cancelled the first row's pending save. */
+function wireVRow(key, el){
+  let t = null, restoring = true;
+  const want = (typeof ST[key] === "number") ? ST[key] : 0;
+  requestAnimationFrame(()=>{
+    /* after layout: before it, the row has no width and scrollLeft silently
+       refuses to move */
+    try{ if(want > 0) el.scrollLeft = want; }catch(e){}
+    /* let the event caused by the line above land, then start listening */
+    setTimeout(()=>{ restoring = false; }, 80);
+  });
+  el.addEventListener("scroll", ()=>{
+    if(restoring) return;
+    clearTimeout(t);
+    t = setTimeout(()=>{
+      t = null;
+      const at = Math.round(el.scrollLeft);
+      if(ST[key] === at) return;
+      ST[key] = at;
+      persist();
+    }, 400);
+  }, {passive:true});
+}
+
+function renderVoices(){
+  const wrap = $("#voices"); wrap.innerHTML = "";
+  /* switched off by hand: the strip goes entirely, and the voice keeps
+     working from whatever was last chosen in Settings */
+  if(!ST.voiceBar){
+    wrap.style.display = "none";
+    document.body.classList.add("nobar");
+    renderEdgeGrid();
+    return;
+  }
+  document.body.classList.remove("nobar");
+
+  const rows = VROWS.map(([sex, key]) => [sex, key, voicesBySex(sex)]);
+  const unplaced = voicesBySex("");
+  if(unplaced.length) rows.push(["", "", unplaced]);
+  const any = rows.some(r => r[2].length);
+
+  // nothing to show at all: the strip disappears and the reader quietly
+  // keeps using the last voice that was picked
+  if(!any){
+    wrap.style.display = "none";
+    document.body.classList.add("novoice");
+    renderEdgeGrid();
+    return;
+  }
+  wrap.style.display = "";
+  document.body.classList.remove("novoice");
+  wrap.classList.add("dual");          /* a column of rows, each scrolling */
+
+  rows.forEach(([sex, key, list]) => {
+    if(!list.length) return;
+    const row = document.createElement("div");
+    row.className = "vrow" + (sex ? " v" + sex : " vU");
+    row.dataset.sex = sex;
+    list.forEach(v => row.appendChild(voiceBtn(v)));
+    wrap.appendChild(row);
+    if(key) wireVRow(key, row);
+  });
+  renderEdgeGrid();
+}
+
+/* ---------- languages (Settings checkbox list) ---------- */
+function renderLangList(){
+  const wrap = $("#langList"); if(!wrap) return;
+  wrap.innerHTML = "";
+  const on = enabledSet();
+  (ST.langs||[]).forEach(lg => {
+    const row = document.createElement("button");
+    const isOn = on.has(lg.key);
+    row.className = "langrow" + (isOn ? " on":"");
+    const names = (lg.voices||[]).map(v=>v.name).join(" \u00b7 ");
+    const nat = lg.native ? `<em>${lg.native}</em>` : "";
+    const uses = lg.uses
+      ? `<div class="usetxt">Can be used for: ${lg.uses}</div>` : "";
+    row.innerHTML =
+      `<span class="box">\u2713</span>` +
+      `<span class="meta"><div class="name">${lg.label}${nat}</div>` +
+      `<div class="vv">${names}</div>${uses}</span>`;
+    row.onclick = ()=> toggleLang(lg.key);
+    wrap.appendChild(row);
+  });
+}
+function toggleLang(key){
+  const on = enabledSet();
+  if(on.has(key)) on.delete(key); else on.add(key);
+  applyEnabledLangs(on);
+}
+function setAllLangs(all){
+  const on = new Set(all ? (ST.langs||[]).map(l=>l.key) : []);
+  applyEnabledLangs(on);
+}
+function applyEnabledLangs(onSet){
+  // preserve catalogue order; empty is allowed (zero languages)
+  let keys = (ST.langs||[]).map(l=>l.key).filter(k=>onSet.has(k));
+  ST.enabledLangs = keys;
+  const shown = shownVoices();
+  // if some languages are shown but the active voice's language was hidden,
+  // move to the first shown voice. If nothing is shown (zero languages), keep
+  // ST.voice exactly as it is so the reader remembers the last choice.
+  if(shown.length && !shown.some(v=>voiceIsCurrent(v))){
+    setVoice(shown[0].id);
+  }
+  renderLangList();
+  soundChanged("");
+}
+/* THE CACHE KEY IS THE WHOLE WAY OF SPEAKING, NOT THE VOICE.
+   Edge's voice was the entire instruction, so a voice name was a sufficient
+   name for the audio. Gemini is told in prose how to say the line, so the
+   same sentence in the same voice read "weary" and read "excited" is two
+   different clips. Voice, direction and pace all go in the key, spelled the
+   same way the server spells it — strip everything that is not a letter or a
+   digit — or the page would ask for a clip under a name the server never
+   files anything under, and every sentence would be synthesised afresh. */
+/* ---------- the direction ----------
+   Thirty eight of them in seven groups, served by the app rather than listed
+   here, because the Speak tab already has this table and two vocabularies for
+   one idea is how the two of them drift apart. */
+let EMO = { groups: [], paces: ["normal"] };
+function loadDirection(){
+  return api("/api/emotions").then(r=>r.json()).then(d=>{
+    EMO = { groups: (d && d.groups) || [], paces: (d && d.paces) || ["normal"] };
+    renderDirection();
+  }).catch(()=>{});
+}
+function renderDirection(){
+  const box = $("#emoGroups");
+  if(box){
+    box.innerHTML = "";
+    EMO.groups.forEach(g=>{
+      const wrap = document.createElement("div");
+      wrap.className = "emogrp";
+      const h = document.createElement("b"); h.textContent = g.group;
+      const row = document.createElement("div"); row.className = "emorow";
+      g.items.forEach(it=>{
+        const b = document.createElement("button");
+        b.className = "emo" + (it.label === ST.emotion ? " on" : "");
+        b.innerHTML = "<i></i><span></span>";
+        b.querySelector("i").textContent = it.glyph || "";
+        b.querySelector("span").textContent = it.label;
+        /* the direction itself, as the voice will be given it */
+        b.title = it.direction || it.label;
+        b.onclick = ()=>{
+          if(ST.emotion === it.label) return;
+          ST.emotion = it.label;
+          directionChanged("Reading " + (it.spoken || it.label));
+        };
+        row.appendChild(b);
+      });
+      wrap.appendChild(h); wrap.appendChild(row); box.appendChild(wrap);
+    });
+  }
+  const pc = $("#paceChips");
+  if(pc){
+    pc.innerHTML = "";
+    EMO.paces.forEach(p=>{
+      const b = document.createElement("button");
+      b.className = "chip" + (p === ST.pace ? " on" : "");
+      b.textContent = p;
+      b.onclick = ()=>{
+        if(ST.pace === p) return;
+        ST.pace = p;
+        directionChanged("Pace: " + p);
+      };
+      pc.appendChild(b);
+    });
+  }
+}
+/* WHICH INSTRUMENT IS MEASURING THE WORDS.
+   Gemini reports no word times, so the highlight is measured after the fact,
+   and which instrument did the measuring is the difference between a word
+   mark landing within 50 ms and within 300. That is worth saying out loud on
+   the page: a highlight that quietly got worse because a key died is exactly
+   the failure this project keeps having to write down. */
+function keySafe(x){ return String(x||"").replace(/[^A-Za-z0-9]+/g, ""); }
+function vkeyNow(){
+  return keySafe(ST.voice || "Charon") + "__" +
+         (keySafe(ST.emotion) || "Neutral") + "__" +
+         (keySafe(ST.pace) || "normal");
+}
+/* Changing the direction changes the audio, so everything measured about the
+   old audio has to go with it. Same shape as changing the voice, because it
+   is the same kind of change. */
+function directionChanged(msg){
+  ST.vkey = vkeyNow();
+  clearWarm();
+  const wasPlaying = ST.playing;
+  renderVoices(); renderDirection(); persist();
+  if(ST.tid && wasPlaying){ startAt(ST.idx); }
+  if(ST.tid) prefetch(ST.idx);
+  if(msg) setStatus(msg);
+}
+function setVoice(id, quiet){
+  /* A Croatian seat is not a catalogue voice, it is a choice of WHICH foreign
+     voice reads Croatian, so it is stored as that and nothing else moves. */
+  if(typeof id === "string" && id.indexOf("cro:") === 0){
+    const _l = (ST.lang === "auto") ? (ST.langAuto || "eng") : ST.lang;
+    if(_l === "hr") ST.croVoice = id.slice(4); else ST.engVoice = id.slice(4);
+    /* THE VOICE KEY MUST MOVE TOO. This branch used to set the seat and
+       return, leaving ST.vkey pointing at whatever Edge voice was last used,
+       so every request still went to Edge and switching engine appeared to
+       do nothing at all. sp_seat is a standing key meaning "whatever the
+       seats and the language currently say", which the server resolves on
+       every request rather than once. */
+    ST.vkey = "sp_seat";
+    ST.voice = id;
+
+    renderVoices(); try{ renderCroGrid(); }catch(e){}
+    persist();
+    if(!quiet){
+      const cv = (CROV || []).find(x => x.id === ST.croVoice);
+      toast((cv ? cv.name : "That voice") + " reads Croatian");
+    }
+    return;
+  }
+  const v = anyVoice(id); if(!v) return;
+  const wasPlaying = ST.playing;
+  ST.voice = id; ST.vkey = vkeyNow();
+  clearWarm();
+  renderVoices(); persist();
+  if(ST.tid && wasPlaying){ startAt(ST.idx); }
+  if(ST.tid) prefetch(ST.idx);
+  try{ renderEdgeGrid(); }catch(e){}
+  setStatus("Voice: " + v.name + ", " + (v.label || "clear"));
+}
+
+/* ---------- the two engines ---------- */
+/* WHICH PANE is showing is not the same question as WHICH ENGINE speaks.
+   They used to be one value, which is why everything that was not about a
+   voice had to be crammed into whichever engine happened to be selected.
+   Picking Edge or Speechify still switches the engine, because that is what
+   those two panes are for; picking Settings changes nothing about the voice. */
+function applyEngineCards(){
+  try{ renderLangBtn(); }catch(e){}
+  const pane = ST.pane || ST.engine || "edge";
+  document.querySelectorAll("#engTabs .engtab").forEach(b=>
+    b.classList.toggle("on", b.dataset.pane === pane));
+  renderLangBtn();
+  document.querySelectorAll("#sheet .group[data-eng]").forEach(g=>{
+    g.style.display = (g.dataset.eng === pane) ? "" : "none";
+  });
+}
+/* Changing the language must leave a usable voice behind. If the one in hand
+   cannot speak the new language, the first that can is taken. */
+/* ---------- a setting that changes the SOUND takes effect at once ----------
+   Settings used to be a place you visited and left. Change the language while
+   a Croatian page was being read in English and nothing happened: the clips
+   already made were cached, the sentence in hand kept playing, and the app
+   looked deaf to its own switches.
+   Now every control that changes what is HEARD calls this. It drops the
+   caches the old voice filled, and if a sentence is playing it is re-spoken
+   from its own beginning in the new voice, so the change is audible on the
+   line being read rather than the one after next. */
+function soundChanged(why){
+  
+  try{ clearWarm(); }catch(e){}
+  renderVoices();
+  const wasPlaying = ST.playing;
+  const at = ST.idx;
+  try{ pause(); }catch(e){}
+  if(wasPlaying){
+    /* the same sentence again, in the new voice, from its first word */
+    setTimeout(()=>{ try{ startAt(at); }catch(e){} }, 40);
+  }
+  persistNow();
+  if(why) toast(why);
+}
+
+function setLang(l){
+  l = (l === "hr" || l === "auto") ? l : "eng";
+  if(l === ST.lang) return;
+  ST.lang = l;
+  /* Leave a usable voice behind, and prefer the engine already in hand: a
+     person on Speechify who switches language wants the Croatian seat, not to
+     be thrown across to Edge. Only when the engine has nothing to offer does
+     the other one get a turn. */
+  const mine = (ST.engine === "speechify") ? topSp() : topEdge();
+  const other = (ST.engine === "speechify") ? topEdge() : topSp();
+  if(!mine.concat(other).some(v => voiceIsCurrent(v))){
+    const first = mine[0] || other[0];
+    if(first) setVoice(first.id, true);   /* quiet: setLang says it instead */
+  }
+  renderLangBtn();
+  refreshToggles(); renderEdgeGrid(); renderLangList();
+  soundChanged("");
+  try{ renderCroGrid(); }catch(e){}
+  persist();
+  toast(l === "auto" ? "Language decided automatically"
+      : l === "hr"   ? "Reading Croatian" : "Reading English");
+  if(l === "auto") autoDetect();
+}
+/* THE BUTTON IS PAINTED IN EXACTLY ONE PLACE.
+   It used to be painted inside applyEngineCards, which setPane calls and
+   setLang does not. So the language changed, the toast fired, and the button
+   went on showing the old word. One painter, called by everyone who can
+   change the language, is the whole fix. */
+/* ---------- the whole text as ONE file ----------
+   The reader speaks a sentence at a time and keeps the clips apart, which is
+   right for reading and wrong for keeping. This asks the server to join them
+   into a single mp3, so a text read once can be carried away and played
+   anywhere, as many times as he likes.
+
+   Every sentence has to exist before they can be joined, so the button says
+   what it is doing rather than appearing to hang: a long text may need a
+   minute the first time, and nothing at all the second. */
+function downloadOne(){
+  const b = $("#dlBtn"); if(!b) return;
+  if(!ST.tid){ toast("Nothing to save yet."); return; }
+  if(b.classList.contains("busy")) return;
+  b.classList.add("busy");
+  toast("Making one file. The first time takes a moment.");
+  api("/api/download_one", {method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({tid: ST.tid, vkey: ST.vkey})})
+    .then(r=>r.json()).then(d=>{
+      b.classList.remove("busy");
+      if(d.error){ toast(d.error); return; }
+      toast("Saved: " + (d.name || "one mp3"));
+      /* handed to the browser as a normal download, so it lands wherever
+         downloads land on this machine and needs no file permission */
+      const a = document.createElement("a");
+      a.href = "/api/download_one/" + encodeURIComponent(d.file);
+      a.download = d.name || "reading.mp3";
+      document.body.appendChild(a); a.click(); a.remove();
+    })
+    .catch(()=>{ b.classList.remove("busy"); toast("Could not make the file."); });
+}
+/* The three floater switches live on the dashboard now. They were buried in
+   Advanced, which is a poor home for something toggled several times a day. */
+function renderFloatTogs(){
+  const rows = [["#flP","floatPaste","hasfloat",placeFloat],
+                ["#flF","floatFull","hasfloatf",placeFloatF],
+                ["#flS","floatSwap","hasfloats",placeFloatS]];
+  rows.forEach(([sel,key])=>{
+    const b = $(sel); if(!b) return;
+    b.classList.toggle("on", !!ST[key]);
+  });
+}
+function wireFloatTogs(){
+  const rows = [["#flP","floatPaste",placeFloat,"paste button"],
+                ["#flF","floatFull",placeFloatF,"full screen button"],
+                ["#flS","floatSwap",placeFloatS,"play/pause button"]];
+  rows.forEach(([sel,key,place,label])=>{
+    const b = $(sel); if(!b) return;
+    b.onclick = ()=>{
+      ST[key] = !ST[key];
+      refreshToggles(); renderFloatTogs(); persistNow();
+      if(ST[key]){ try{ place(); }catch(e){} }
+      toast(label + (ST[key] ? " shown" : " hidden"));
+    };
+  });
+}
+function renderLangBtn(){
+  /* The engine chip is gone: it named Edge or Speechify, and this app speaks
+     with Gemini and nothing else. */
+  const lb = $("#langBtn"); if(!lb) return;
+  lb.classList.add("sp");
+  const l = ST.lang || "eng";
+  lb.innerHTML = "<b>" + (l === "hr" ? "HR" : l === "auto" ? "AUTO" : "ENG") + "</b>";
+  lb.classList.toggle("auto", l === "auto");
+  lb.title = l === "auto" ? "Decided from the text. Tap for English."
+           : l === "hr"   ? "Reading Croatian. Tap for automatic."
+                          : "Reading English. Tap for Croatian.";
+}
+/* ENG -> HR -> AUTO -> ENG. Three states on one button, because a second
+   button would be a second small target. */
+function nextLang(){
+  const l = ST.lang || "eng";
+  return l === "eng" ? "hr" : l === "hr" ? "auto" : "eng";
+}
+function setPane(p){
+  if(p !== "edge" && p !== "speechify" && p !== "app") p = "edge";
+  ST.pane = p;
+
+  persist();
+}
+function setEngine(e, quiet){
+  if(e !== "edge" && e !== "speechify") return;
+  const changed = (e !== ST.engine);
+  ST.engine = e;
+  applyEngineCards();
+  /* An engine change must land on a voice that BELONGS to the new engine.
+     voiceIsCurrent knows about seats; comparing ids does not, so a seat was
+     never recognised as current and the first one was chosen again, through
+     the branch that forgot to move the key. */
+  /* THE KEY MUST FOLLOW THE ENGINE, even when the voice list is not loaded.
+     shownVoices() is empty until /api/cro_voices has answered, and an engine
+     change that happens first used to leave ST.vkey on an Edge voice: the
+     engine said Speechify and every request still went to Edge. The key is
+     therefore set from the ENGINE, which is known immediately, and the list
+     only refines WHICH voice within it. */
+  if(e === "speechify"){
+    ST.vkey = "sp_seat";
+  } else if(String(ST.vkey || "").indexOf("sp_") === 0){
+    /* Coming back to Edge. topEdge() is empty until the voices have loaded,
+       so a remembered Edge key is used, then any Edge voice, and only then
+       the list. Without this the return leg silently kept the Speechify key
+       and going back to Edge did nothing, which is the same bug in reverse. */
+    const back = topEdge()[0] || (ST.voices || []).find(v => v.lang === langCode())
+                 || (ST.voices || [])[0];
+    if(back){ ST.voice = back.id; ST.vkey = back.vkey; }
+    else if(ST.edgeVkey){ ST.vkey = ST.edgeVkey; }
+    else { ST.vkey = (langCode() === "hr") ? "hrF" : "ukF"; }
+  }
+  if(e === "edge" && String(ST.vkey || "").indexOf("sp_") !== 0) ST.edgeVkey = ST.vkey;
+  
+  try{ clearWarm(); }catch(err){}
+  const list = shownVoices();
+  if(list.length && !list.some(v=>voiceIsCurrent(v))){
+    /* remember which Speechify voice was last used, so switching back and
+       forth does not keep resetting to the first of the four */
+    const want = (e === "speechify" && ST.spVkey)
+      ? list.find(v=>v.vkey === ST.spVkey) : null;
+    setVoice((want || list[0]).id);
+  } else {
+    renderVoices();
+  }
+  persist();
+  if(changed && !quiet){
+    toast(e === "speechify" ? "Speechify" : "Edge");
+  }
+}
+
+/* ---------- Speechify: accents, its four voices, and the key ring ---------- */
+function renderSpAccents(){ /* the accent row is gone: two radio lists replaced it */ }
+function renderSpGrid(){ /* the paged grid is gone: two radio lists replaced it */ }
+
+/* Paging. Two arrows and a count, then a row of numbers so any page is one
+   tap away rather than forty. With 84 American voices that is 21 pages, and
+   walking to page 19 with an arrow would be absurd. */
+function renderSpPager(){ /* its pager is gone: two radio lists replaced it */ }
+function spGoSet(i){
+  const total = spSets();
+  ST.spSet = Math.max(0, Math.min(total - 1, i));
+  /* The window moved, so the four at the top of the reader are different
+     voices now. Show them, but do not switch the voice that is speaking:
+     changing page is browsing, choosing a voice is a tap on one. */
+  renderSpGrid(); renderVoices(); persist();
+}
+function spWhen(ts){
+  if(!ts) return "";
+  const d = Math.floor(Date.now()/1000) - ts;
+  if(d < 3600) return Math.max(1,Math.floor(d/60)) + " min ago";
+  if(d < 86400) return Math.floor(d/3600) + " h ago";
+  return Math.floor(d/86400) + " d ago";
+}
+function fmtChars(n){
+  n = n|0;
+  if(n >= 1000000) return (n/1000000).toFixed(1) + "M";
+  if(n >= 1000) return Math.round(n/1000) + "k";
+  return String(n);
+}
+/* Every key, not only the dead ones, and what each has spent. Shared files
+   get used unevenly and there is no other way to see whose account is
+   carrying everyone. */
+/* The Croatian rows. Two hit areas, as with the voice tick boxes: the name
+   chooses the voice, the round button speaks one fixed Croatian sentence so
+   the two can be compared by ear without leaving Settings. */
+let CROV = null, croAudio = null;
+function stopCroPreview(){
+  if(croAudio){ try{ croAudio.pause(); }catch(e){} croAudio = null; }
+  document.querySelectorAll("#croGrid .croplay")
+    .forEach(b => b.innerHTML = "&#9654;");
+}
+function renderVoiceRadios(){
+  const draw = (boxId, list, chosen, pick, hrSample)=>{
+    const box = $(boxId); if(!box) return;
+    box.innerHTML = "";
+    (list || []).forEach(v => {
+      const row = document.createElement("button");
+      row.className = "rrow" + (v.id === chosen ? " on" : "");
+      const dot = document.createElement("span"); dot.className = "rdot";
+      const txt = document.createElement("span"); txt.className = "rtxt";
+      txt.innerHTML = "<b>" + v.name + "</b><small>" + (v.sub || "") + "</small>";
+      const play = document.createElement("button");
+      play.className = "rplay"; play.innerHTML = "&#9654;";
+      play.title = "Hear " + v.name;
+      play.onclick = (e)=>{
+        e.stopPropagation();
+        const url = "/api/preview_v/" + encodeURIComponent(v.id) +
+                    (hrSample ? "?hr=1" : "");
+        const mine = croAudio && croAudio.dataset && croAudio.dataset.u === url;
+        stopCroPreview();
+        if(mine) return;                       /* a second tap stops it */
+        try{ pause(); }catch(e2){}
+        const a = new Audio(url); a.dataset.u = url; croAudio = a;
+        play.innerHTML = "&#9632;";
+        a.onended = stopCroPreview;
+        a.onerror = ()=>{ stopCroPreview(); toast("Could not play that voice."); };
+        a.play().catch(()=>{ stopCroPreview(); toast("Could not play that voice."); });
+      };
+      row.onclick = ()=> pick(v);
+      row.appendChild(dot); row.appendChild(txt); row.appendChild(play);
+      box.appendChild(row);
+    });
+  };
+  draw("#croList", (CROV && CROV.cro) || [], ST.croVoice, v=>{
+    ST.croVoice = v.id; renderVoiceRadios();
+    soundChanged(v.name + " reads Croatian");
+  }, true);
+  draw("#engList", (CROV && CROV.eng) || [], ST.engVoice, v=>{
+    ST.engVoice = v.id; renderVoiceRadios();
+    soundChanged(v.name + " reads English");
+  }, false);
+}
+function renderCroGrid(){ renderVoiceRadios(); }
+
+function loadCroVoices(){
+  api("/api/cro_voices").then(r=>r.json()).then(d=>{
+    CROV = d;
+    if(d.croChosen && !ST.croVoice) ST.croVoice = d.croChosen;
+    if(d.engChosen && !ST.engVoice) ST.engVoice = d.engChosen;
+    renderVoiceRadios(); renderVoices();
+  }).catch(()=>{});
+}
+
+/* ONE picker for every key. The list below it is the FALLBACK ORDER: the
+   first live key does the work and, if it is refused, the next takes over. */
+function renderKeyList(){
+  api("/api/keys").then(r=>r.json()).then(d=>{
+    const box=$("#keyList"); if(!box) return;
+    box.innerHTML="";
+    const keys=d.keys||[];
+    if(!keys.length){
+      const p=document.createElement("div");
+      p.className="langhint"; p.textContent="No keys yet.";
+      box.appendChild(p); return;
+    }
+    keys.forEach(k=>{
+      const row=document.createElement("div");
+      row.className="keyrow"+(k.state==="dead"?" dead":"");
+      row.innerHTML =
+        '<span class="kp">'+k.provider+'</span>'+
+        '<span class="kn">'+k.order+'</span>'+
+        '<span class="km">'+k.mask+'</span>'+
+        '<span class="kl">'+(k.label||"")+'</span>'+
+        '<span class="ks">'+k.state+'</span>';
+      box.appendChild(row);
+    });
+  }).catch(()=>{});
+}
+function wireKeys(){
+  const pick=$("#keyPick"), file=$("#keyImport"), ref=$("#keyRefresh");
+  if(pick && file){
+    pick.onclick = ()=> file.click();
+    file.onchange = ()=>{
+      const f=file.files && file.files[0]; if(!f) return;
+      const fd=new FormData(); fd.append("file", f);
+      toast("Reading the file...");
+      api("/api/keys/import",{method:"POST", body:fd}).then(r=>r.json()).then(d=>{
+        if(d.error){ toast(d.error); return; }
+        const bits=[];
+        Object.keys(d.added||{}).forEach(p=>bits.push(d.added[p]+" "+p));
+        const other=Object.keys(d.other||{});
+        let msg = bits.length ? ("Added " + bits.join(", ")) : "Nothing new to add";
+        if(other.length) msg += " \u00b7 " + other.join(", ") + " not needed here";
+        toast(msg);
+        renderKeyList(); renderGroq(); try{ renderSpKeyList(); }catch(e){}
+      }).catch(()=>toast("Could not read that file."));
+      file.value="";
+    };
+  }
+  if(ref) ref.onclick = ()=>{ renderKeyList(); renderGroq(); };
+}
+function renderGroq(){
+  api("/api/groq/status").then(r=>r.json()).then(d=>{
+    const el=$("#groqInfo"); if(!el) return;
+    el.textContent = d.total
+      ? (d.live + " of " + d.total + " keys live" +
+         (d.model ? " \u00b7 " + d.model : "") + (d.dead ? " \u00b7 " + d.dead + " dead" : ""))
+      : "no key";
+  }).catch(()=>{});
+}
+function wireGroq(){
+  const test=$("#groqTest");
+  if(test) test.onclick = ()=>{
+    toast("Asking Groq...");
+    api("/api/groq/test", {method:"POST"}).then(r=>r.json()).then(d=>{
+      toast(d.ok ? ("Groq answered, using " + d.model) : (d.err || "Groq did not answer"));
+      renderGroq();
+    }).catch(()=>toast("Groq could not be reached."));
+  };
+}
+function renderSpKeyList(){
+  const wrap = $("#spList"); if(!wrap) return;
+  const list = (ST.spInfo && ST.spInfo.keyList) || [];
+  wrap.innerHTML = "";
+  if(!list.length) return;
+  const h = document.createElement("div");
+  h.className = "deadhead";
+  const tot = (ST.spInfo && ST.spInfo.charsTotal) || 0;
+  h.textContent = list.length + " keys" + (tot ? "  \u00b7  " + fmtChars(tot) + " characters spent" : "");
+  wrap.appendChild(h);
+  list.forEach(k=>{
+    const row = document.createElement("div");
+    row.className = "deadrow";
+    const meta = document.createElement("div");
+    meta.className = "dmeta";
+    const tag = k.using ? " \u00b7 in use" : (k.dead ? " \u00b7 dead" : "");
+    const weak = k.strong ? "" : " \u00b7 not key shaped";
+    meta.innerHTML = `<div class="dname">${k.label || "unnamed"}</div>` +
+      `<div class="dsub">${k.mask}${tag}${weak}` +
+      `${k.chars ? " \u00b7 " + fmtChars(k.chars) + " chars, " + k.calls + " calls" : ""}</div>`;
+    row.appendChild(meta);
+    if(k.using) row.style.borderColor = "var(--tune)";
+    wrap.appendChild(row);
+  });
+}
+function renderSpDead(){
+  const wrap = $("#spDead"); if(!wrap) return;
+  const list = (ST.spInfo && ST.spInfo.failed) || [];
+  wrap.innerHTML = "";
+  if(!list.length) return;
+  const h = document.createElement("div");
+  h.className = "deadhead";
+  h.textContent = list.length + (list.length===1 ? " dead key" : " dead keys");
+  wrap.appendChild(h);
+  list.forEach(k=>{
+    const row = document.createElement("div");
+    row.className = "deadrow";
+    const meta = document.createElement("div");
+    meta.className = "dmeta";
+    meta.innerHTML = `<div class="dname">${k.label || "unnamed"}</div>` +
+      `<div class="dsub">${k.mask} \u00b7 ${k.reason || "rejected"}` +
+      `${k.at ? " \u00b7 " + spWhen(k.at) : ""}${k.gone ? " \u00b7 removed" : ""}</div>`;
+    row.appendChild(meta);
+    if(!k.gone){
+      const retry = document.createElement("button");
+      retry.className = "deadbtn"; retry.textContent = "Retry";
+      retry.title = "Clear the mark and let this key be used again";
+      retry.onclick = ()=> spKeyAction("/api/speechify/revive", k.fp,
+                                       "Will try " + (k.label||k.mask) + " again");
+      row.appendChild(retry);
+      const drop = document.createElement("button");
+      drop.className = "deadbtn warn"; drop.textContent = "Remove";
+      drop.title = "Strike this key out of the file for good";
+      drop.onclick = ()=> spKeyAction("/api/speechify/drop", k.fp,
+                                      "Removed " + (k.label||k.mask));
+      row.appendChild(drop);
+    }
+    wrap.appendChild(row);
+  });
+}
+function spKeyAction(url, fp, msg){
+  api(url, {method:"POST", headers:{"Content-Type":"application/json"},
+            body: JSON.stringify({fp: fp})})
+    .then(r=>r.json()).then(d=>{ applySpInfo(d); toast(msg); })
+    .catch(()=> toast("Could not reach the server."));
+}
+function renderSpKeys(){
+  const st = $("#spKeyState"), err = $("#spKeyErr"), line = $("#spState");
+  const d = ST.spInfo || {};
+  if(st){
+    st.textContent = d.keys ? (d.keys + (d.keys === 1 ? " key" : " keys")) : "not set";
+    st.classList.toggle("ok", !!d.ready);
+  }
+  if(err) err.textContent = (!d.ready && d.error) ? d.error : "";
+  if(line){
+    line.classList.toggle("bad", !d.ready && !!d.keys);
+    if(!d.keys){
+      line.textContent = "No key file loaded yet.";
+    } else if(d.ready){
+      const nm = d.usingLabel ? (d.usingLabel + " \u00b7 " + d.using) : d.using;
+      line.innerHTML = "Speaking through <b>" + nm + "</b>, " + d.live +
+        " of " + d.keys + " still good. Nothing else is being tested; this key " +
+        "carries everything until it stops working.";
+    } else {
+      line.textContent = d.error || "No key in this file is working.";
+    }
+  }
+}
+function applySpInfo(d){
+  if(!d) return;
+  ST.spInfo = d;
+  if(d.accent) ST.spAccent = d.accent;
+  ST.spVoices = (d.voices || []);
+  if(d.perSet) ST.spPerSet = d.perSet;
+  spClampSet();
+  renderSpAccents(); renderSpGrid(); renderSpKeys();
+  renderSpKeyList(); renderSpDead();
+  if(ST.engine === "speechify") renderVoices();
+}
+function loadSpeechify(){
+  return api("/api/speechify/status").then(r=>r.json())
+    .then(applySpInfo).catch(()=>{});
+}
+function setSpAccent(acc){
+  if(acc === ST.spAccent && (ST.spVoices||[]).length) return;
+  ST.spAccent = acc; ST.spSet = 0; renderSpAccents();
+  api("/api/speechify/accent", {method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({accent: acc})})
+    .then(r=>r.json()).then(d=>{
+      applySpInfo(d);
+      /* the four seats now hold different voices, so the one that was picked
+         is gone: take the first of the new set */
+      const list = ST.spVoices || [];
+      if(ST.engine === "speechify" && list.length &&
+         !list.some(v=>v.id===ST.voice)){ setVoice(list[0].id); }
+      persist();
+    }).catch(()=> toast("Could not reach Speechify."));
+}
+
+/* ---------- Markdown, phase 1: detect, parse once, sanitise ----------
+   The reader shows formatted Markdown. It is parsed ONCE into HTML and never
+   re-parsed while reading; highlighting later works by toggling classes on
+   spans inside that HTML, exactly as it always has for plain text.
+
+   Raw Markdown is never displayed, so the absence of a highlight syntax in
+   Markdown does not matter. Formatting and highlight are separate layers. */
+
+/* WHEN IS IT MARKDOWN.
+   Plain text must come through completely untouched, so a single weak hint is
+   never enough. A hyphen list or an emphatic *word* appears in ordinary prose
+   and in pasted articles all the time.
+
+   STRONG signals essentially never occur in prose that was not meant as
+   Markdown: a # heading, a fence, a [text](url) link, a table delimiter row.
+   One of those decides it.
+
+   WEAK signals are common in plain writing on their own but rare in
+   combination: bullets, > quotes, **bold**, *italic*, `code`, --- rules,
+   setext underlines. TWO different weak signals decide it; one does not.
+
+   They are grouped into FAMILIES and each family counts at most once, because
+   two hints drawn from the same construct are not two hints. "The end.\n---"
+   is one dash rule, and it reads as both a thematic break and a setext
+   underline; counted separately it would carry a plain paragraph over the
+   line on its own. */
+const MD_STRONG = [
+  /^ {0,3}#{1,6}[ \t]+\S/m,                       /* # heading            */
+  /^ {0,3}(?:```|~~~)/m,                          /* fenced code block    */
+  /!?\[[^\]\n]*\]\([^()\s]*\)/,                   /* [link](url), image   */
+  /^ {0,3}\|?[ \t]*:?-{3,}:?[ \t]*(\|[ \t]*:?-+:?[ \t]*)+\|?[ \t]*$/m
+];
+const MD_WEAK = [
+  [ /^ {0,3}[-*+][ \t]+\S/m,                        /* - bullet           */
+    /^ {0,3}\d{1,9}[.)][ \t]+\S/m ],                /* 1. numbered        */
+  [ /^ {0,3}>[ \t]?\S/m ],                          /* > block quote      */
+  [ /(\*\*|__)(?=\S)[\s\S]+?(?<=\S)\1/ ],           /* **bold**           */
+  [ /(?<![\w*])\*(?=\S)[^*\n]+?(?<=\S)\*(?![\w*])/ ],/* *italic*          */
+  [ /`[^`\n]+`/ ],                                  /* `code`             */
+  [ /^ {0,3}([-*_])[ \t]*(?:\1[ \t]*){2,}$/m,       /* --- rule, and the  */
+    /^[^\s>#|=-][^\n]*\n {0,3}(?:={2,}|-{2,})[ \t]*$/m ] /* setext twin   */
+];
+function looksLikeMarkdown(text){
+  if(!text || text.length < 3) return false;
+  for(const re of MD_STRONG){ if(re.test(text)) return true; }
+  let weak = 0;
+  for(const fam of MD_WEAK){
+    if(fam.some(re => re.test(text)) && ++weak >= 2) return true;
+  }
+  return false;
+}
+
+/* WHAT MAY SURVIVE THE PARSE.
+   marked emits a small, known set of tags. Anything outside it is either
+   dropped whole (it carries no reading matter) or unwrapped (it might).
+   No DOMPurify: this is a fixed allowlist over one known producer, and the
+   parse happens in a detached document that has no browsing context, so
+   nothing in it can run or fetch while it is being cleaned. */
+const MD_OK_TAGS = new Set(["p","br","hr","h1","h2","h3","h4","h5","h6",
+  "strong","em","b","i","del","s","code","pre","blockquote","ul","ol","li",
+  "a","img","table","thead","tbody","tfoot","tr","th","td","span","div","sup","sub"]);
+/* Dropped with everything inside them. Script and style are obvious; the rest
+   either execute, load, or draw something that is not text. */
+const MD_KILL_TAGS = new Set(["script","style","iframe","object","embed",
+  "svg","math","form","input","button","textarea","select","option","link",
+  "meta","base","noscript","template","title","audio","video","source",
+  "track","canvas","applet","frame","frameset","portal","dialog"]);
+/* Per tag, the only attributes allowed through. Everything else goes,
+   which covers every on* handler in one rule rather than by name. */
+const MD_OK_ATTRS = {
+  a:    new Set(["href","title"]),
+  img:  new Set(["src","alt","title"]),
+  ol:   new Set(["start"]),
+  td:   new Set(["colspan","rowspan","align"]),
+  th:   new Set(["colspan","rowspan","align"]),
+  code: new Set(["class"]),
+  pre:  new Set(["class"])
+};
+/* A URL is safe if it is plainly relative, or http/https/mailto. Anything
+   whose scheme cannot be read is refused rather than guessed at. Control
+   characters are stripped first: "java\tscript:" is a real evasion. */
+function mdSafeUrl(u){
+  if(!u) return false;
+  const s = String(u).replace(/[\u0000-\u0020\u007f]/g, "").toLowerCase();
+  if(/^(https?:|mailto:|#|\/|\.\/|\.\.\/)/.test(s)) return true;
+  return !/^[a-z][a-z0-9+.-]*:/.test(s);   /* no scheme at all is fine */
+}
+/* class is allowed on code/pre only for marked's own language-xxx label. */
+function mdSafeClass(v){
+  return String(v).split(/\s+/).filter(c => /^language-[\w+#.-]+$/.test(c)).join(" ");
+}
+function mdSanitize(html){
+  const doc = new DOMParser().parseFromString(
+    "<body>" + String(html) + "</body>", "text/html");
+  const body = doc.body;
+  /* Snapshot first: the tree is about to be rewritten underneath us. */
+  Array.prototype.slice.call(body.querySelectorAll("*")).forEach(el => {
+    if(!el.parentNode) return;                 /* already taken with a parent */
+    const tag = (el.tagName || "").toLowerCase();
+    if(MD_KILL_TAGS.has(tag)){ el.remove(); return; }
+    if(!MD_OK_TAGS.has(tag)){                  /* unknown: keep the words */
+      const p = el.parentNode;
+      while(el.firstChild) p.insertBefore(el.firstChild, el);
+      el.remove(); return;
+    }
+    const ok = MD_OK_ATTRS[tag] || null;
+    Array.prototype.slice.call(el.attributes).forEach(at => {
+      const n = at.name.toLowerCase();
+      if(!ok || !ok.has(n)){ el.removeAttribute(at.name); return; }
+      if(n === "href" || n === "src"){
+        if(!mdSafeUrl(at.value)) el.removeAttribute(at.name);
+      }else if(n === "class"){
+        const keep = mdSafeClass(at.value);
+        if(keep) el.setAttribute("class", keep); else el.removeAttribute("class");
+      }
+    });
+    /* A link that lost its href is still a link to nowhere; leave the text. */
+    if(tag === "a" && !el.getAttribute("href")){
+      const p = el.parentNode;
+      while(el.firstChild) p.insertBefore(el.firstChild, el);
+      el.remove();
+    }
+  });
+  return body.innerHTML;
+}
+/* One call: source in, safe HTML out. Parsed ONCE, here, and never again. */
+function mdRender(src){
+  if(typeof marked === "undefined") return null;
+  try{
+    return mdSanitize(marked.parse(String(src), {gfm:true, breaks:false}));
+  }catch(e){ return null; }
+}
+
+/* ---------- phase 2: one source of truth ----------
+   Walk the rendered text nodes, wrap every word in a span, and build the
+   string the voice receives FROM THOSE SPANS. Speech and highlight then share
+   one coordinate system by construction rather than by careful agreement.
+
+   Sentences are split on the RENDERED TEXT. The Markdown source is never
+   split, never sent to a voice, and never seen by the reader.
+
+   The DOM and the spoken string deliberately DIFFER in their whitespace: the
+   page keeps whatever spacing it needs to look right, while the spoken string
+   collapses runs to a single space. That is not a mismatch, because nothing
+   maps by comparing text - every word span carries its own [s,e) offsets into
+   the spoken string, recorded as the string is built. */
+/* A block ends a line in the spoken string, and the server turns that into a
+   sentence break. TD and TH are NOT here: a table reads far better as one row
+   per sentence with the cells separated inside it than as one sentence per
+   cell, which would make "Stage" and "Cost" two things to listen to. */
+const MD_BLOCKS = new Set(["P","DIV","H1","H2","H3","H4","H5","H6","UL","OL",
+  "LI","BLOCKQUOTE","PRE","HR","TABLE","THEAD","TBODY","TFOOT","TR"]);
+/* Tags that hold other blocks and never hold prose of their own. Whitespace
+   sitting directly inside one of these is the parser's own line breaks. */
+const MD_CONTAINERS = new Set(["TABLE","THEAD","TBODY","TFOOT","TR","UL","OL",
+  "DIV","BLOCKQUOTE"]);
+
+function mdBuild(root){
+  const spans = [], gaps = [];
+  let out = "";
+  /* A block boundary becomes a blank line, which is what the sentence
+     splitter and the old cleaner both expect to see between paragraphs. */
+  function gap(){
+    if(!out) return;
+    if(/\n\n$/.test(out)) return;
+    out += /\n$/.test(out) ? "\n" : "\n\n";
+  }
+  /* Returns true when a space was actually added, which is how the caller
+     knows whether this whitespace is worth a span of its own. */
+  function space(){
+    if(out && !/\s$/.test(out)){ out += " "; return true; }
+    return false;
+  }
+  /* Whitespace INSIDE a sentence gets a span too, so the sentence highlight
+     is a continuous band rather than a row of separately lit words with pale
+     gaps between them. Gaps are kept apart from the word spans: the word
+     spans are the contract phase 2 established and nothing else may enter
+     that list. Structural whitespace BETWEEN blocks never becomes a gap,
+     because the block boundary has already ended the line. */
+  function gapSpan(tn, s){
+    const g = tn.ownerDocument.createElement("span");
+    g.className = "g";
+    g.textContent = tn.nodeValue;
+    gaps.push({el: g, s: s, e: out.length});
+    return g;
+  }
+  function wrapText(tn){
+    const text = tn.nodeValue;
+    if(!text) return;
+    const doc = tn.ownerDocument;
+    if(!/\S/.test(text)){
+      /* Whitespace between two BLOCK-level siblings is structural, not a word
+         gap: the newlines a parser leaves between <th> cells or between <li>
+         items are formatting of the HTML, not spacing of the prose. Spoken as
+         a space they produce "Stage , Cost " with a gap before the comma.
+         The block boundary has already done the separating. */
+      const par = (tn.parentNode && tn.parentNode.tagName || "").toUpperCase();
+      if(MD_CONTAINERS.has(par)) return;
+      const s = out.length;
+      if(space()){
+        const g = gapSpan(tn, s);
+        tn.parentNode.replaceChild(g, tn);
+      }
+      return;
+    }
+    const frag = doc.createDocumentFragment();
+    const re = /\S+/g;
+    let m, last = 0;
+    function emitGap(a, b){
+      const piece = doc.createTextNode(text.slice(a, b));
+      const s = out.length;
+      if(space()){
+        const g = doc.createElement("span");
+        g.className = "g"; g.textContent = text.slice(a, b);
+        gaps.push({el: g, s: s, e: out.length});
+        frag.appendChild(g);
+      }else{
+        frag.appendChild(piece);
+      }
+    }
+    while((m = re.exec(text)) !== null){
+      if(m.index > last) emitGap(last, m.index);
+      const s = out.length;
+      const w = doc.createElement("span");
+      w.className = "w";
+      w.textContent = m[0];
+      frag.appendChild(w);
+      out += m[0];
+      spans.push({el: w, s: s, e: out.length});
+      last = m.index + m[0].length;
+    }
+    if(last < text.length) emitGap(last, text.length);
+    tn.parentNode.replaceChild(frag, tn);
+  }
+  function walk(node){
+    /* A snapshot, because wrapText replaces the very node being visited and
+       a live childNodes list would skip half the document. */
+    const kids = Array.prototype.slice.call(node.childNodes);
+    for(let i = 0; i < kids.length; i++){
+      const c = kids[i];
+      if(c.nodeType === 3){ wrapText(c); continue; }
+      if(c.nodeType !== 1) continue;
+      const tag = c.tagName.toUpperCase();
+      if(tag === "BR"){ if(out && !/\n$/.test(out)) out += "\n"; continue; }
+      /* AN IMAGE SPEAKS NOTHING, not even its alt text. Alt text has no text
+         node and therefore no span, and a word with no span is a word the
+         highlight cannot follow and the reader cannot see coming. Speaking it
+         would break the one rule phase 2 exists to keep. The picture is on
+         the screen; it does not need narrating. */
+      if(tag === "IMG"){ continue; }
+      /* A FENCED CODE BLOCK IS NOT READ ALOUD. Thirty lines of Python spoken
+         by a voice is not reading, it is noise, and it is the single fastest
+         way to make a long article unlistenable. It stays fully VISIBLE and
+         is simply stepped over. Inline `code` is different and is still
+         spoken, because it is usually one word inside a sentence. */
+      if(tag === "PRE"){ gap(); continue; }
+      /* Cells inside a row are separated rather than broken apart, so a row
+         reads as one thing: "Stage, Cost". The separator is two characters
+         nobody typed, so it owns no span and lights nothing, which is the
+         same treatment whitespace already gets. */
+      if(tag === "TD" || tag === "TH"){
+        if(out && !/\n$/.test(out) && !/,\s$/.test(out)) out += ", ";
+        walk(c);
+        continue;
+      }
+      const block = MD_BLOCKS.has(tag);
+      if(block) gap();
+      walk(c);
+      if(block) gap();
+    }
+  }
+  walk(root);
+  /* No carriage returns, ever: the server normalises \r\n to \n before it
+     splits, and that would move every offset out from under the spans. */
+  out = out.replace(/\r/g, "");
+  return {spoken: out.trim(), spans: spans, gaps: gaps, raw: out};
+}
+
+/* Parse once, wrap once. Returns a DETACHED root whose nodes are moved into
+   the page later - moved, not re-parsed, so there is exactly one parse per
+   text no matter how often the view is rebuilt. */
+function mdPrepare(src){
+  if(!src || !looksLikeMarkdown(src)) return null;
+  const html = mdRender(src);
+  if(html === null) return null;
+  const root = document.createElement("div");
+  root.innerHTML = html;
+  const built = mdBuild(root);
+  if(!built.spoken.trim()) return null;
+  /* mdBuild trims the ends; the spans were numbered against the untrimmed
+     string, so shift them back onto the trimmed one. */
+  const lead = built.raw.length - built.raw.replace(/^\s+/, "").length;
+  if(lead){
+    for(let i = 0; i < built.spans.length; i++){
+      built.spans[i].s -= lead; built.spans[i].e -= lead;
+    }
+    for(let i = 0; i < built.gaps.length; i++){
+      built.gaps[i].s -= lead; built.gaps[i].e -= lead;
+    }
+  }
+  return {root: root, spoken: built.spoken, spans: built.spans,
+          gaps: built.gaps};
+}
+
+/* Which word spans belong to sentence [a,b). Offsets, never text matching. */
+function mdSpansIn(spans, a, b){
+  const out = [];
+  for(let i = 0; i < spans.length; i++){
+    if(spans[i].s >= a && spans[i].e <= b) out.push(spans[i]);
+  }
+  return out;
+}
+
+/* ---------- phase 3: the highlight, over the formatting ----------
+   Nothing here re-renders anything. The sentence being read and the word
+   being spoken are both a CLASS on spans that already exist, which is exactly
+   what the app has always done for plain text; all that changes is that a
+   sentence is now a RANGE of spans rather than one element wrapping them. */
+
+/* Everything currently lit, so it can be put out without searching the page.
+   Holding the elements is much cheaper than a querySelectorAll across a long
+   document on every sentence change. */
+const MDLIT = {band: [], now: []};
+
+/* ---------- keeping up with the voice ----------
+   A long sentence can run past the bottom of the screen, and then the word
+   being spoken is lit somewhere nobody can see. Following the SENTENCE is not
+   enough: a sentence can be taller than the window.
+
+   So the word itself is watched. While it sits comfortably inside the reading
+   area nothing moves at all, because a page that creeps on every word is far
+   worse than one that never moves. Only when the word crosses an edge does the
+   view jump, and it jumps to put the START OF THE SENTENCE near the top: the
+   words just spoken above, the words about to come below.
+
+   Since every sentence now begins at the top, a word can only fall off the
+   bottom inside a sentence TALLER than the screen, and then the word itself
+   is what gets brought up. Working out the sentence's own box is no longer
+   needed and the function that did it has gone. */
+let lastAutoScroll = 0;
+
+/* ---------- the teleprompter rule ----------
+   EVERY sentence begins at the top of the screen. Not only when it has
+   wandered out of view: every one, every time, unconditionally.
+
+   The old rule only moved when a sentence had already crossed an edge, which
+   meant the reading line landed wherever the previous sentence happened to
+   leave it, sometimes at the top, sometimes halfway down, sometimes at the
+   very bottom with nothing after it. The eye had to search for the line each
+   time. A teleprompter does not make you search: the line you are on is
+   always in the same place, and everything below it is what is coming.
+
+   TOP_PAD is how far below the top edge the sentence sits. A little air, so
+   the first line is not jammed against the frame.
+
+   This is never throttled. It is the main movement of the app, and a sentence
+   change is a deliberate event, not the per-word chatter that the throttle
+   exists to damp. */
+const TOP_PAD = 12;
+
+/* The jump is INSTANT. A smooth scroll is a small animation, and an animation
+   is a delay by another name: the line slides for a few hundred milliseconds
+   while the voice is already speaking it, so the eye arrives after the ear.
+   It lands at once instead, and the page is simply where it should be.
+
+   If a pause before the jump is wanted it is a SETTING, in seconds, rather
+   than something baked into an easing curve. At 0.00 there is nothing at all
+   between the sentence starting and the page moving.
+
+   A pending delayed jump is cancelled the moment another sentence begins, so
+   a fast passage cannot queue a row of jumps that all land together. */
+let lagTimer = null;
+function cancelLag(){ if(lagTimer){ clearTimeout(lagTimer); lagTimer = null; } }
+
+function sentenceToTop(el, scroller){
+  cancelLag();
+  if(!el) return;
+  const go = ()=>{
+    lagTimer = null;
+    const sc = $(scroller || "#readerScroll"); if(!sc) return;
+    const r = el.getBoundingClientRect(), pr = sc.getBoundingClientRect();
+    const delta = r.top - (pr.top + TOP_PAD);
+    if(Math.abs(delta) < 2) return;      /* already there, do not jitter */
+    lastAutoScroll = Date.now();
+    sc.scrollBy({top: delta, behavior: "auto"});
+  };
+  const lag = +(ST.lag || 0);
+  if(lag > 0) lagTimer = setTimeout(go, lag * 1000);
+  else go();
+}
+
+function mdUnlight(){
+  for(let i = 0; i < MDLIT.band.length; i++)
+    MDLIT.band[i].classList.remove("lit", "litp");
+  for(let i = 0; i < MDLIT.now.length; i++)
+    MDLIT.now[i].classList.remove("now");
+  MDLIT.band = []; MDLIT.now = [];
+}
+
+/* The band across sentence i: its words AND the spaces between them, so the
+   highlight is continuous rather than striped. */
+function mdBand(i){
+  const r = (ST.spans || [])[i];
+  if(!r) return [];
+  const out = mdSpansIn(MD.spans, r[0], r[1]).map(o => o.el);
+  const g = mdSpansIn(MD.gaps || [], r[0], r[1]).map(o => o.el);
+  return out.concat(g);
+}
+
+function mdHighlight(i, paused){
+  mdUnlight();
+  const band = mdBand(i);
+  if(!band.length) return;
+  const cls = paused ? "litp" : "lit";
+  for(let k = 0; k < band.length; k++) band[k].classList.add(cls);
+  MDLIT.band = band;
+  /* Scroll to the FIRST word of the sentence. The band is not one element, so
+     there is no single box to bring into view. */
+  /* The band is not one element, so the first word of the sentence is what
+     goes to the top. Same rule, same place on the screen. */
+  sentenceToTop(band[0]);
+}
+
+/* Tapping a word reads from that sentence, which is what tapping a sentence
+   has always done in plain text. Without this a Markdown text cannot be
+   started from the middle at all. */
+function mdSentenceAt(el){
+  const r = ST.spans || [];
+  let hit = null;
+  for(let j = 0; j < MD.spans.length; j++) if(MD.spans[j].el === el) hit = MD.spans[j];
+  if(!hit) for(let j = 0; j < (MD.gaps||[]).length; j++)
+    if(MD.gaps[j].el === el) hit = MD.gaps[j];
+  if(!hit) return -1;
+  for(let i = 0; i < r.length; i++)
+    if(hit.s >= r[i][0] && hit.e <= r[i][1]) return i;
+  return -1;
+}
+
+/* What the current text turned out to be, and the spans it was built from.
+   `pending` carries the parse made before /api/prepare was called across to
+   renderDoc, so the nodes are MOVED into the page rather than parsed twice. */
+const MD = {on:false, root:null, spans:[], gaps:[], spoken:"",
+            pending:null, mapped:false};
+
+/* ---------- rendering the document ---------- */
+function renderDoc(){
+  const doc = $("#doc"); doc.innerHTML = "";
+  /* BACK TO THE TOP, ALWAYS. The reader keeps 78vh of blank page after the
+     last word so the final sentence can also travel to the top. Nothing reset
+     the scroll when a new text arrived, so a reader left scrolled down showed
+     the new text's EMPTY TAIL: a black screen with nothing on it, which is
+     exactly what a broken app looks like. A new text starts at its beginning. */
+  try{ const sc = $("#readerScroll"); if(sc) sc.scrollTop = 0; }catch(e){}
+  /* PHASE 2. The Markdown was parsed ONCE, before /api/prepare was called,
+     and its words were wrapped in spans then. Those very nodes are MOVED into
+     the page here - not parsed again, not re-serialised - so there is exactly
+     one parse per text however often the view is rebuilt.
+
+     Reading never re-renders. Highlighting is a class on a span.
+
+     The plain path below is untouched: a text that is not Markdown takes the
+     same road it always has, one .sent span per sentence. */
+  let pre = MD.pending; MD.pending = null;
+  MD.on = false; MD.root = null; MD.spans = []; MD.gaps = [];
+  MD.spoken = ""; MD.mapped = false;
+  try{ mdUnlight(); }catch(e){}
+  /* A source editor left holding the PREVIOUS text would commit that text
+     over this one the moment EDIT was left. */
+  const _ta = $("#mdEdit"); if(_ta){ _ta.value = ""; _ta.classList.remove("on"); }
+  doc.classList.remove("mdhidden");
+  /* Opened from the Archive there is no pending parse, so build one now from
+     the source the payload carried. */
+  if(!pre && ST.source && looksLikeMarkdown(ST.source)) pre = mdPrepare(ST.source);
+  if(pre){
+    MD.on = true; MD.root = pre.root; MD.spans = pre.spans;
+    MD.gaps = pre.gaps || []; MD.spoken = pre.spoken;
+    /* The spans were numbered against OUR string. The sentence offsets came
+       from the server, numbered against ITS string. If the two are not the
+       same string the offsets mean nothing, so the text is still shown
+       formatted but nothing is mapped, rather than mapped wrongly. That can
+       only happen if the parser changed under a text already in the library. */
+    MD.mapped = (typeof ST.spoken === "string" && ST.spoken === pre.spoken);
+    while(pre.root.firstChild) doc.appendChild(pre.root.firstChild);
+    doc.classList.add("md");
+    prefetch(0); prefetch(1); prefetch(2);
+    return;
+  }
+  doc.classList.remove("md");
+  ST.sentences.forEach((s,i)=>{
+    const span = document.createElement("span");
+    span.className = "sent"; span.dataset.i = i;
+    span.textContent = s + " ";
+    /* No handler of its own any more. THE GESTURE ON THE TEXT IS ONE THING
+       and it belongs to the whole reading area, not to a sentence: see
+       wireCenterTaps. A span that also answered taps would mean the same
+       finger got a different answer depending on whether it landed on a word
+       or in the margin beside it. */
+    doc.appendChild(span);
+  });
+  // start synthesising the opening sentences straight away
+  prefetch(0); prefetch(1); prefetch(2);
+}
+function sentEl(i){ return $(`#doc .sent[data-i="${i}"]`); }
+
+
+/* ---------- highlight ---------- */
+function highlight(i, paused){
+  CLK.lastWord = -2;
+  /* A Markdown text has no .sent elements: a sentence is a RANGE of word
+     spans. Same idea, same classes, different container. */
+  if(MD.mapped){ mdHighlight(i, paused); updateCounter(); return; }
+  document.querySelectorAll("#doc .sent.active, #doc .sent.paused")
+    .forEach(e=>e.classList.remove("active","paused"));
+  const el = sentEl(i); if(!el) return;
+  el.classList.add(paused ? "paused" : "active");
+  sentenceToTop(el);
+  updateCounter();
+}
+/* ---------- how long is left ----------
+   Nothing knows the true length of a text until every clip has been made,
+   and making them all up front would defeat the point of a cache that only
+   builds what is needed. So this measures what it can and reasons about the
+   rest: any sentence already spoken has a real duration in the bounds cache,
+   and the ratio of seconds to characters from those is applied to the
+   sentences not yet made. Before anything has been spoken it falls back to
+   about fourteen and a half characters a second, which is close enough for a
+   number that is only ever a guide.
+
+   The two pauses and the speed are all folded in, because a two second pause
+   between words on a long text is not a rounding error, it is half an hour. */
+function estRate(){
+  /* It used to refine this from the measured word times of whatever had been
+     played. There are no word times now, so it is the plain figure: about
+     fourteen and a half characters a second, which is ordinary reading aloud
+     and close enough for an estimate nobody makes a decision on. */
+  return 1 / 14.5;
+}
+function estSeconds(from){
+  const S = ST.sentences || [];
+  if(!S.length) return 0;
+  const rate = estRate(), sp = Math.max(0.25, ST.speed || 1);
+  let sec = 0, n = 0;
+  for(let i = Math.max(0, from | 0); i < S.length; i++){
+    const s = S[i] || "";
+    sec += (s.length * rate) / sp;
+    n++;
+  }
+  sec += Math.max(0, n - 1) * (ST.gap || 0);   /* may be negative: overlap */
+  return Math.max(0, sec);
+}
+function fmtTime(s){
+  s = Math.round(s);
+  if(s < 1) return "0:00";
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), q = s % 60;
+  const pad = v => String(v).padStart(2, "0");
+  return h ? (h + ":" + pad(m) + ":" + pad(q)) : (m + ":" + pad(q));
+}
+function updateCounter(){
+  const n = ST.sentences.length, el = $("#counter");
+  if(el){
+    el.innerHTML = (n ? (ST.idx + 1) : 0) + " / " + n +
+                   "<b>" + (n ? fmtTime(estSeconds(ST.idx)) : "0:00") + "</b>";
+  }
+  $("#barFill").style.width = (n? ((ST.idx)/(n))*100 : 0) + "%";
+}
+
+function follow(){
+  rafId = null;
+  if(!ST.playing){ return; }
+  const el = active();
+  /* NOTHING IS TRACKED INSIDE A SENTENCE ANY MORE.
+     There used to be a predicted media clock here, smoothed because the
+     element's own currentTime updates too coarsely to move a word marker
+     without it stepping. The highlight is the whole sentence now, and a
+     sentence changes only when the clip does, so the clock, the word-gap
+     rate changes it had to be told about, and the per-frame lookup are all
+     gone. What is left in this loop is the handover and the progress bar. */
+  /* Hand the sentence over ourselves instead of waiting for the browser to
+     fire 'ended'. That event arrives late and by an amount that varies clip
+     to clip, and it was a real part of the stutter: by the time it landed,
+     nothing was being asked to play. We cross a hair before the end (or, on a
+     negative gap, that much earlier still) and only once the next clip is
+     genuinely decoded and waiting, so the two run into each other seamlessly. */
+  const dur = el.duration;
+  if(!handedOff && ST.gap <= 0 && dur && isFinite(dur)){
+    const ni = ST.idx + 1;
+    const cross = dur + Math.min(ST.gap, -HANDOFF_LEAD);
+    if(ni < ST.sentences.length && el.currentTime >= cross && nextReady(ni)){
+      /* on a negative sentence pause this clip keeps sounding under the next
+         one, so make sure it is running at the plain speed as it goes. */
+      try{ el.playbackRate = ST.speed; }catch(e){}
+      handedOff = true; startAt(ni, true); return;
+    }
+  }
+  const frac = el.duration ? el.currentTime/el.duration : 0;
+  const n = ST.sentences.length;
+  $("#barFill").style.width = (n? ((ST.idx+frac)/n)*100 : 0) + "%";
+  rafId = requestAnimationFrame(follow);
+}
+
+/* ---------- prefetch ----------
+   The audio for a sentence is synthesised by the server on first request, so
+   if we only ask for it when it is needed the player sits in silence waiting.
+   v23 fetched each clip ahead of time and then threw the bytes away, trusting
+   the browser cache to still have them. It usually did, but a cache lookup is
+   not free and a revalidation round trip certainly is not, so every sentence
+   change paid a small unpredictable tax and the reading kept catching. Now the
+   fetched body is kept as a blob URL: setting src on it touches no network and
+   no disk at all. Three sentences are held ready at all times, and the ones
+   far behind are released so a long text does not accumulate every clip. */
+const PREFETCH_AHEAD = 3;       // sentences kept fetched ahead of the one playing
+const HANDOFF_LEAD = 0.04;      // cross to the next clip this early, in seconds
+const warmed = new Map();       // "tid/vkey/idx" -> promise, so we ask only once
+const clipUrls = new Map();     // "tid/vkey/idx" -> blob: URL of the finished mp3
+function warmKey(i){ return ST.tid+"/"+ST.vkey+"/"+i; }
+function clearWarm(){
+  warmed.clear();
+  clipUrls.forEach(u=>{ try{ URL.revokeObjectURL(u); }catch(e){} });
+  clipUrls.clear();
+  armed = { slot:-1, idx:-1 }; armWanted = -1;
+}
+function clipSrc(i){
+  const k = warmKey(i);
+  return clipUrls.has(k) ? clipUrls.get(k) : audioUrl(i);
+}
+function warmUnit(i){
+  if(i<0 || i>=ST.sentences.length || !ST.tid) return Promise.resolve();
+  const k = warmKey(i);
+  if(warmed.has(k)) return warmed.get(k);
+  const p = api(audioUrl(i))
+    .then(r => r.ok ? r.blob() : null)
+    .then(b => {
+      if(!b) return null;
+      const u = URL.createObjectURL(b);
+      clipUrls.set(k, u);
+      // it may have landed after we tried to arm it; arm it now that it is here
+      if(armWanted === i && armed.idx !== i) armNext(ST.idx);
+      return u;
+    })
+    .catch(()=>{ warmed.delete(k); return null; });
+  warmed.set(k, p);
+  return p;
+}
+function prefetch(i){
+  if(i<0 || i>=ST.sentences.length) return;
+  warmUnit(i);
+}
+/* keep three sentences ready while the current one plays */
+function prefetchAhead(i){
+  for(let k=1;k<=PREFETCH_AHEAD;k++) prefetch(i+k);
+  trimClips(i);
+}
+function trimClips(i){
+  const pre = ST.tid+"/"+ST.vkey+"/";
+  clipUrls.forEach((u,k)=>{
+    const n = parseInt(k.slice(k.lastIndexOf("/")+1),10);
+    if(!k.startsWith(pre) || n < i-3 || n > i+PREFETCH_AHEAD+2){
+      try{ URL.revokeObjectURL(u); }catch(e){}
+      clipUrls.delete(k); warmed.delete(k);
+    }
+  });
+}
+/* ---------- the spare element ----------
+   While one sentence speaks, the next is loaded into an element that is not
+   playing and left sitting at readyState 4. The handover is then a swap and a
+   play() on the same tick, with nothing to fetch and nothing to decode. */
+function freeSlot(){
+  for(let k=1;k<players.length;k++){
+    const s = (cur+k) % players.length;
+    if(s !== armed.slot && players[s].paused) return s;
+  }
+  for(let k=1;k<players.length;k++){
+    const s = (cur+k) % players.length;
+    if(players[s].paused) return s;
+  }
+  return (cur+1) % players.length;
+}
+function armNext(i){
+  const ni = i + 1;
+  armWanted = ni;
+  if(ni >= ST.sentences.length){ armed = { slot:-1, idx:-1 }; return; }
+  if(armed.idx === ni && armed.slot >= 0 && armed.slot !== cur) return;
+  const slot = freeSlot();
+  if(slot === cur) return;
+  const el = players[slot];
+  try{ el.pause(); }catch(e){}
+  el.onended = null; el.onerror = null;
+  el.src = clipSrc(ni);
+  el.playbackRate = ST.speed; el.volume = ST.volume/100;
+  try{ el.load(); }catch(e){}
+  armed = { slot: slot, idx: ni };
+}
+function nextReady(ni){
+  if(armed.idx !== ni || armed.slot < 0) return false;
+  return players[armed.slot].readyState >= 3;   // HAVE_FUTURE_DATA
+}
+function silenceOthers(){
+  players.forEach((p,k)=>{ if(k!==cur){ try{ p.pause(); }catch(e){} } });
+}
+
+/* ---------- the pause between words ----------
+   `runs` is the clip's silence map from the server: [[from,to],...] seconds,
+   every quiet stretch that sits between two words rather than inside one. The
+   server found them with the same two-band envelope the word highlight is
+   built on, and pulled each one in by 18 ms at both ends, so a run's start is
+   already safely inside real silence and never on the tail of an s or an f.
+
+   Both players keep their own little state object, because online and offline
+   can never be speaking at the same time but the offline one has its own
+   audio element. `held` is the index of the run we have already waited in, so
+   we stop once per silence rather than once per frame. */
+function makeWG(){ return { hold:null, held:-1 }; }
+const WG = makeWG(), OWG = makeWG();
+function wgRunAt(runs, t){        /* binary search: zero cost per frame */
+  let lo = 0, hi = runs.length - 1;
+  while(lo <= hi){
+    const m = (lo + hi) >> 1;
+    if(t < runs[m][0]) hi = m - 1;
+    else if(t > runs[m][1]) lo = m + 1;
+    else return m;
+  }
+  return -1;
+}
+/* ---------- core playback ---------- */
+function startAt(i, viaHandoff){
+  atEnd = false;
+  stopOffline();
+  cancelGap(); i = clampIdx(i);
+  let el;
+  if(armed.idx === i && armed.slot >= 0 && armed.slot !== cur){
+    cur = armed.slot; el = players[cur];   /* already loaded and waiting */
+    armed = { slot:-1, idx:-1 };
+  } else {
+    cur = freeSlot(); el = players[cur];
+    if(armed.slot === cur) armed = { slot:-1, idx:-1 };
+    try{ el.pause(); }catch(e){}
+    el.onended = null; el.onerror = null;
+    el.src = clipSrc(i);
+  }
+  /* a jump or a fresh start silences everything else; a handover deliberately
+     does not, because on a negative gap the previous clip is still speaking */
+  if(!viaHandoff) silenceOthers();
+  try{ el.currentTime = 0; }catch(e){}
+  ST.idx = i; ST.playing = true; handedOff = false;
+  highlight(i, false); setPlayIcon(true);
+  el.playbackRate = ST.speed; el.volume = ST.volume/100;
+  const seq = ++playSeq;
+  el.onended = ()=> onEnded(i, seq);
+  el.onerror = ()=> setStatus("Could not load sentence "+(i+1)+".");
+  prefetchAhead(i);
+  armNext(i);
+  const p = el.play(); if(p && p.catch) p.catch(()=>{});
+  if(!rafId) rafId = requestAnimationFrame(follow);
+  setStatus("");
+}
+/* A text that has finished is FINISHED. Pressing play on it starts the text
+   again from the beginning rather than replaying the last sentence, which is
+   the only reading of the button that makes sense once the end is reached.
+   A FLAG rather than an inference: "on the last sentence and its audio has
+   ended" is also true after a deliberate jump to the last sentence, and those
+   two situations deserve different answers. */
+let atEnd = false;
+function onEnded(i, seq){
+  if(!ST.playing) return;
+  if(seq !== playSeq) return;   /* an overlapped predecessor finishing: ignore */
+  if(handedOff) return;         /* follow() already crossed over */
+  const ni = i + 1;
+  if(ni >= ST.sentences.length){
+    if(ST.loop){ startAt(0); return; }
+    atEnd = true;
+    ST.playing = false; setPlayIcon(false); highlight(i, true);
+    setStatus("Finished."); return;
+  }
+  if(ST.gap > 0){
+    highlight(i, true);
+    gapTimer = setTimeout(()=>{ gapTimer=null; if(ST.playing) startAt(ni); },
+                          ST.gap*1000);
+  } else { startAt(ni); }
+}
+function cancelGap(){ if(gapTimer){ clearTimeout(gapTimer); gapTimer=null; } }
+
+function resume(){
+  stopOffline();
+  if(atEnd){ atEnd = false; jumpTo(0, true); return; }
+  const el = active();
+  if(el.src && el.currentTime>0 && !el.ended){
+    ST.playing = true; setPlayIcon(true); highlight(ST.idx, false);
+    el.playbackRate = ST.speed; el.volume = ST.volume/100;
+
+    el.play(); if(!rafId) rafId = requestAnimationFrame(follow); setStatus("");
+    prefetchAhead(ST.idx); armNext(ST.idx);
+  } else { startAt(ST.idx); }
+}
+function pause(){
+  cancelGap(); ST.playing = false; setPlayIcon(false);
+  players.forEach(p=>{ try{ p.pause(); }catch(e){} });
+  highlight(ST.idx, true); setStatus("Paused.");
+}
+function togglePlay(){ if(ST.playing) pause(); else resume(); }
+function stop(){
+  /* deliberately NOT clearing atEnd: stopping a text that has already
+     finished leaves it finished, so play still starts it again from the top */
+  cancelGap(); ST.playing = false; setPlayIcon(false);
+  players.forEach(p=>{ try{ p.pause(); p.currentTime=0; }catch(e){} });
+  highlight(ST.idx, true);
+  $("#barFill").style.width = (ST.idx/Math.max(1,ST.sentences.length))*100 + "%";
+  setStatus("Stopped.");
+}
+function jumpTo(i, play){
+  atEnd = false;
+  i = clampIdx(i); ST.idx = i; cancelGap();
+  handedOff = false; armed = { slot:-1, idx:-1 };
+  if(play){ startAt(i); }
+  else{
+    players.forEach(p=>{ try{ p.pause(); }catch(e){} });
+    ST.playing=false; setPlayIcon(false); highlight(i, true);
+    setStatus("");
+  }
+}
+function prev(){ jumpTo(ST.idx-1, ST.playing); }
+function next(){ jumpTo(ST.idx+1, ST.playing); }
+
+/* ---------- tune ---------- */
+// Tidal-style transport glyphs: filled play triangle, two rounded pause bars
+const ICON_PLAY = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 5.5v13a1 1 0 0 0 1.53.85l10.2-6.5a1 1 0 0 0 0-1.7L8.53 4.65A1 1 0 0 0 7 5.5z"/></svg>';
+const ICON_PAUSE = '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6.4" y="4.8" width="3.9" height="14.4" rx="1.95"/><rect x="13.7" y="4.8" width="3.9" height="14.4" rx="1.95"/></svg>';
+function setPlayIcon(on){ $("#playBtn").innerHTML = on ? ICON_PAUSE : ICON_PLAY;
+  audioState(on); syncFloatPlay(); }
+
+/* ---------- what the rest of the phone sees ----------
+   Both readers funnel through setPlayIcon and offSetPlayIcon, so this is the
+   one place that knows whether sound is coming out of this app, and it is
+   where everything to do with the rest of the phone belongs.
+
+   Two things happen here. The media session is kept honest, so the lock
+   screen and a headphone button show and control the reader rather than
+   something stale. And when playing stops, the background music can be handed
+   back. See the note on /api/mediakey for why stopping the music is free and
+   starting it again is not. */
+let _bgWas = null;
+
+function audioState(on){
+  on = !!on;
+  try{
+    if("mediaSession" in navigator){
+      navigator.mediaSession.playbackState = on ? "playing" : "paused";
+    }
+  }catch(e){}
+  if(_bgWas === on) return;
+  const first = (_bgWas === null);
+  _bgWas = on;
+  /* only on the falling edge, and never on the very first paint */
+}
+
+function mediaSetup(){
+  if(!("mediaSession" in navigator)) return;
+  const ms = navigator.mediaSession;
+  const bind = (name, fn)=>{ try{ ms.setActionHandler(name, fn); }catch(e){} };
+  /* Whichever reader is actually sounding is the one a headphone button
+     drives. Falling back to which view is open would be wrong: the offline
+     reader can be playing while its list is on screen. */
+  const offOpen = ()=> OFF.playing ||
+    (!ST.playing && !$("#offlineReaderView").classList.contains("hidden"));
+  bind("play",  ()=> offOpen() ? offToggle() : togglePlay());
+  bind("pause", ()=> offOpen() ? offToggle() : togglePlay());
+  bind("previoustrack", ()=> offOpen() ? offPrev() : prev());
+  bind("nexttrack",     ()=> offOpen() ? offNext() : next());
+  bind("stop", ()=>{ try{ stop(); }catch(e){} try{ stopOffline(); }catch(e){} });
+}
+
+function mediaTitle(t, sub){
+  if(!("mediaSession" in navigator)) return;
+  try{
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: (t || "MA Reader").slice(0, 90),
+      artist: sub || "MA Reader",
+      album: "MA Reader"
+    });
+  }catch(e){}
+}
+function setText(sel, t){ const e=$(sel); if(e) e.textContent = t; }
+function applySpeed(){
+  const t = ST.speed.toFixed(2);
+  { const e=$("#speedVal"); if(e) e.innerHTML = t+"&times;"; }
+  setText("#spdNum", t); setText("#spdNum2", t);
+  players.forEach(p=>p.playbackRate = ST.speed);
+  try{ OFF.audio.playbackRate = ST.speed; OFF.audioB.playbackRate = ST.speed; }
+  catch(e){}
+  /* nothing to undo here in v3: the word pause never touches playbackRate,
+     so this is the only place in the app that sets it. */
+  try{ updateCounter(); }catch(e){}
+}
+function applyVolume(){
+  $("#volVal").textContent = ST.volume+"%"; $("#volRange").value = ST.volume;
+  players.forEach(p=>p.volume = ST.volume/100);
+  try{ OFF.audio.volume = ST.volume/100; OFF.audioB.volume = ST.volume/100; }
+  catch(e){}
+}
+function applyLag(){
+  setText("#lagNum", ST.lag.toFixed(2));
+}
+function applyGap(){
+  const t = ST.gap.toFixed(2);
+  setText("#gapVal", t); setText("#gapNum", t); setText("#gapNum2", t);
+  try{ updateCounter(); }catch(e){}
+}
+function applySize(){
+  const fs = 13 + ST.size*2;                 // 15..41 px
+  const col = 400 + ST.size*46;
+  document.documentElement.style.setProperty("--read", fs+"px");
+  document.documentElement.style.setProperty("--col", col+"px");
+  const sv=$("#sizeVal"); if(sv) sv.textContent = fs;
+  const sv2=$("#sizeVal2"); if(sv2) sv2.textContent = fs;
+}
+function applyFont(){
+  document.documentElement.style.setProperty("--read-font", FONTS[ST.font]||FONTS.serif);
+  document.querySelectorAll("#fontChips .chip").forEach(c=>
+    c.classList.toggle("on", c.dataset.font===ST.font));
+}
+function applySpacing(){
+  document.documentElement.style.setProperty("--read-lh", LH[ST.lineheight]||1.72);
+  $("#lhVal").textContent = ST.lineheight;
+}
+function applyTheme(){
+  document.body.dataset.theme = ST.theme;
+  document.querySelector('meta[name=theme-color]').setAttribute("content",
+    ST.theme==="day" ? "#f6f7fa" : ST.theme==="sepia" ? "#efe3cc" : "#080a10");
+  document.querySelectorAll("#themeChips .chip").forEach(c=>
+    c.classList.toggle("on", c.dataset.theme===ST.theme));
+  if(typeof applyHiColors==="function") applyHiColors();
+}
+// three typed RGB colours drive the highlight: the sentence background, the
+// word background, and the word's font colour. The active sentence's own text
+// colour is chosen automatically (dark on a light highlight, light on a dark
+// one) so the sentence always stays readable without a fourth control.
+function clamp255(n){ n=parseInt(n,10); if(isNaN(n)) n=0; return Math.max(0,Math.min(255,n)); }
+function rgbStr(a){ return "rgb("+a[0]+","+a[1]+","+a[2]+")"; }
+function rgbaStr(a,al){ return "rgba("+a[0]+","+a[1]+","+a[2]+","+al+")"; }
+function relLum(a){ return (0.299*a[0]+0.587*a[1]+0.114*a[2])/255; }
+function rgbArr(k){ return k==="sent"?ST.rgbSent : k==="word"?ST.rgbWord : k==="font"?ST.rgbFont : ST.rgbText; }
+function hexToRgb(h){
+  h=(h||"").trim().replace("#","");
+  if(h.length===3) h=h.split("").map(c=>c+c).join("");
+  if(h.length!==6 || /[^0-9a-fA-F]/.test(h)) return null;
+  return [parseInt(h.slice(0,2),16),parseInt(h.slice(2,4),16),parseInt(h.slice(4,6),16)];
+}
+// the reader text colour that the current theme would use, read live
+function themeTextRgb(){
+  return hexToRgb(getComputedStyle(document.body).getPropertyValue("--page-text")) || [205,208,214];
+}
+function syncRgbInputs(){
+  const textVals = Array.isArray(ST.rgbText) ? ST.rgbText : themeTextRgb();
+  [["sent",ST.rgbSent,"swSent"],["word",ST.rgbWord,"swWord"],
+   ["font",ST.rgbFont,"swFont"],["text",textVals,"swText"]]
+  .forEach(([k,a,sw])=>{
+    document.querySelectorAll('input[data-rgb="'+k+'"]').forEach(inp=>{
+      const i=+inp.dataset.i;
+      if(document.activeElement!==inp) inp.value = a[i];
+    });
+    const el=document.getElementById(sw); if(el) el.style.background=rgbStr(a);
+  });
+  const ab=document.getElementById("textAuto");
+  if(ab) ab.classList.toggle("on", !Array.isArray(ST.rgbText));
+}
+function applyHiColors(){
+  const s=ST.rgbSent, w=ST.rgbWord, f=ST.rgbFont, b=document.body.style;
+  // default reading text: explicit override, or leave it to the theme
+  if(Array.isArray(ST.rgbText)) b.setProperty("--page-text", rgbStr(ST.rgbText));
+  else b.removeProperty("--page-text");
+  b.setProperty("--sent", rgbStr(s));
+  b.setProperty("--sent-soft", rgbaStr(s,.34));
+  b.setProperty("--sent-fg", relLum(s)>0.55 ? "#14160c" : "#f4f6ee");
+  b.setProperty("--wordbg", rgbStr(w));
+  b.setProperty("--wordfg", rgbStr(f));
+  syncRgbInputs();
+}
+/* tap the number itself to come back to the resting value */
+function resetTune(kind){
+  if(kind==="speed"){ ST.speed = 1.0; applySpeed(); toast("Speed 1.00"); }
+  else if(kind==="gap"){ ST.gap = 0.0; applyGap(); toast("Sentence pause 0.00"); }
+  else if(kind==="lag"){ ST.lag = 0.0; applyLag(); toast("Jumps at once"); }
+
+  else return;
+  persist();
+}
+function step(kind, d){
+  if(kind==="speed"){
+    ST.speed = Math.max(SPEED_MIN, Math.min(SPEED_MAX,
+                 Math.round((ST.speed + d*SPEED_STEP)*100)/100));
+    applySpeed();
+  } else if(kind==="gap"){
+    ST.gap = Math.max(GAP_MIN, Math.min(GAP_MAX,
+               Math.round((ST.gap + d*GAP_STEP)*100)/100));
+    applyGap();
+  } else if(kind==="lag"){
+    ST.lag = Math.max(LAG_MIN, Math.min(LAG_MAX,
+                Math.round((ST.lag + d*LAG_STEP)*100)/100));
+    applyLag();
+  } else if(kind==="size"){
+    ST.size = Math.max(SIZE_MIN, Math.min(SIZE_MAX, ST.size + d)); applySize();
+  } else if(kind==="lh"){
+    ST.lineheight = Math.max(1, Math.min(5, ST.lineheight + d)); applySpacing();
+  }
+  persist();
+}
+
+/* ---------- modes / sheet ---------- */
+function refreshToggles(){
+  { const b=$("#fullPasteTog"); if(b) b.classList.toggle("on", !!ST.fullOnPaste); }
+  { const b=$("#hideTabsTog"); if(b) b.classList.toggle("on", !!ST.hideTabs); }
+  document.body.classList.toggle("notabs", !!ST.hideTabs);
+  { const b=$("#adbTog"); if(b) b.classList.toggle("on", !!ST.adbMode); }
+  { const b=$("#chromeTog"); if(b) b.classList.toggle("on", ST.browser !== "auto"); }
+  { const b=$("#voiceBarTog"); if(b) b.classList.toggle("on", !!ST.voiceBar); }
+  document.body.classList.toggle("nobar", !ST.voiceBar);
+  document.body.classList.toggle("hasfloat", !!ST.floatPaste);
+  document.body.classList.toggle("hasfloatf", !!ST.floatFull);
+  document.body.classList.toggle("hasfloats", !!ST.floatSwap);
+
+  $("#autoplayTog").classList.toggle("on", ST.autoplay);
+  { const r=$("#resumeTog"); if(r) r.classList.toggle("on", ST.resume); }
+  $("#focusTog").classList.toggle("on", ST.focus);
+  $("#readerView").classList.toggle("focus", ST.focus);
+  $("#loopBtn").classList.toggle("on", ST.loop);
+}
+function openSheet(){
+  $("#backdrop").classList.add("show"); $("#sheet").classList.add("show");
+  document.body.classList.add("sheetopen");
+}
+/* Closing a sheet SAVES. There is no Done button any more, so every way out,
+   the X, a tap outside, the back gesture, has to be a commit. Waiting for the
+   250 ms timer would be a quarter second in which the phone can be put away
+   and the change lost, which has happened before. */
+function closeSheet(){
+  $("#backdrop").classList.remove("show"); $("#sheet").classList.remove("show");
+  document.body.classList.remove("sheetopen");
+  try{ stopPreview(); }catch(e){}
+  try{ stopCroPreview(); }catch(e){}
+  try{ persistNow(); }catch(e){}
+}
+
+function setStatus(s){ $("#status").textContent = s || ""; }
+
+/* ---------- views ---------- */
+const V2_VIEWS = ["homeView","readerView","offlineView",
+                 "offlineReaderView","helpView"];
+function hideAllViews(){ setFullread(false);
+  V2_VIEWS.forEach(id=>{ const e=$("#"+id);
+  if(e) e.classList.add("hidden"); }); }
+function setTab(name){ document.querySelectorAll("#tabs .tab").forEach(t=>
+  t.classList.toggle("on", t.dataset.tab===name)); }
+function showHome(){ hideAllViews(); $("#homeView").classList.remove("hidden");
+  document.body.classList.remove("inreader");
+  document.body.classList.add("onhome"); setTab("home"); loadLibrary(); }
+function showReader(){ hideAllViews(); $("#readerView").classList.remove("hidden");
+  document.body.classList.remove("onhome");
+  document.body.classList.add("inreader"); setTab("home"); syncFloatPlay(); }
+function showOfflineList(){ hideAllViews();
+  $("#offlineView").classList.remove("hidden");
+  document.body.classList.remove("inreader","onhome"); setTab("offline"); loadOffline(); }
+function showOfflineReader(){ hideAllViews();
+  $("#offlineReaderView").classList.remove("hidden");
+  document.body.classList.remove("onhome","inreader"); setTab("offline");
+  syncFloatPlay(); }
+function showHelp(){ hideAllViews(); $("#helpView").classList.remove("hidden");
+  document.body.classList.remove("inreader","onhome"); setTab("help"); }
+function goTab(name){
+  if(name==="offline"){ showOfflineList(); }
+  else if(name==="help"){ showHelp(); }
+  else { showHome(); }
+}
+
+/* Done: stop everything, wipe the current reading session from memory, close
+   any open settings, and drop back to the paste screen ready for fresh text.
+   Settings (voice, speed, theme, fonts, etc.) are kept, only the text is reset. */
+function doneReset(){
+  cancelGap();
+  ST.playing = false; setPlayIcon(false);
+  players.forEach(p=>{ try{ p.pause(); p.currentTime=0; p.removeAttribute("src"); p.load(); }catch(e){} });
+  if(rafId){ cancelAnimationFrame(rafId); rafId=null; }
+  handedOff = false; clearWarm();
+  
+  ST.tid=""; ST.title=""; ST.sentences=[]; ST.idx=0;
+  $("#doc").innerHTML=""; $("#readerTitle").textContent="";
+  $("#barFill").style.width="0%"; updateCounter(); setStatus("");
+  // also close any offline session so the X clears everything
+  try{ stopOffline(); }catch(e){}
+  OFF.man=null; OFF.name=""; OFF.sents=[]; OFF.idx=0; OFF.lastWord=-2;
+  const od=$("#offDoc"); if(od) od.innerHTML="";
+  const ot=$("#offTitle"); if(ot) ot.textContent="";
+  markSession();
+  closeSheet();
+  $("#pasteBox").value=""; updatePasteHint();
+  showHome();
+  $("#pasteBox").focus();
+  toast("Ready for a new text.");
+}
+
+/* ---------- open / prepare ---------- */
+/* One place decides what /api/prepare is told. If the text is Markdown it is
+   parsed and its words wrapped FIRST, and the string built from those spans
+   travels with the request as `spoken`. The server splits THAT into sentences,
+   so the voice and the highlight can never be reading two different texts.
+   The parse is stashed for renderDoc, which moves the nodes into the page. */
+function prepareBody(text){
+  const pre = mdPrepare(text);
+  MD.pending = pre;
+  return JSON.stringify(pre ? {text: text, spoken: pre.spoken} : {text: text});
+}
+function openPayload(p, autoplay){
+  stopOnline(); stopOffline();
+  ST.tid = p.id; ST.title = p.title || "Untitled";
+  ST.sentences = p.sentences || []; ST.idx = 0;
+  /* What was pasted, markers and all. Older texts were saved already cleaned,
+     so their source is plain and the detector will say so. */
+  ST.source = p.source || "";
+  /* The exact string the voice is given, and where each sentence sits inside
+     it. Speech and highlight share these coordinates. */
+  ST.spoken = (typeof p.spoken === "string") ? p.spoken : "";
+  ST.spans  = Array.isArray(p.spans) ? p.spans : [];
+  handedOff = false; clearWarm();
+  $("#readerTitle").textContent = ST.title;
+  renderDoc(); markSession(); updateCounter(); showReader();
+  prefetchAhead(-1);
+  if(autoplay){ startAt(0); }
+  else{ highlight(0, true); setPlayIcon(false); ST.playing=false;
+        setStatus("Press play to start."); }
+}
+function readPasted(){
+  const text = $("#pasteBox").value;
+  if(!text.trim()){ toast("Paste some text first."); return; }
+  setStatus("Preparing...");
+  api("/api/prepare", {method:"POST", headers:{"Content-Type":"application/json"},
+       body: prepareBody(text)})
+    .then(r=>r.json().then(j=>({ok:r.ok,j})))
+    .then(({ok,j})=>{
+      if(!ok){ toast(j.error||"Could not prepare."); return; }
+      $("#pasteBox").value=""; updatePasteHint(); openPayload(j, ST.autoplay);
+    }).catch(()=>toast("Server error."));
+}
+
+/* ---------- library ---------- */
+let LIB_CACHE = [];
+let LIB_SELECTING=false; const LIB_SEL=new Set();
+function mkSelbox(sel){ const s=document.createElement("div");
+  s.className="selbox"+(sel?" sel":""); s.innerHTML=sel?"&#10003;":""; return s; }
+function libFiltered(){
+  const q=($("#libSearch").value||"").trim().toLowerCase();
+  return !q ? LIB_CACHE : LIB_CACHE.filter(m=>
+    ((m.title||"")+" "+(m.summary||"")).toLowerCase().includes(q));
+}
+function renderLibrary(){
+  const box = $("#libList"); box.innerHTML="";
+  box.classList.toggle("selecting", LIB_SELECTING);
+  const list = libFiltered();
+  if(!LIB_CACHE.length){
+    box.innerHTML = '<div class="empty">No saved texts yet. Paste something above and read it.</div>';
+    libPaintBar(); return;
+  }
+  if(!list.length){ box.innerHTML = '<div class="empty">Nothing matches that search.</div>'; libPaintBar(); return; }
+  list.forEach(m=>{
+    const row = document.createElement("div"); row.className="lib-row"; row.dataset.id=m.id;
+    const when = new Date((m.created||0)*1000)
+      .toLocaleDateString(undefined,{day:"2-digit",month:"short"});
+    const sum = m.summary ? `<div class="lsum"></div>` : "";
+    row.innerHTML =
+      `<div class="meta"><b></b><small>${when} &middot; ${m.units||0} sentences</small>${sum}</div>`;
+    row.querySelector("b").textContent = m.title || m.id;
+    if(m.summary) row.querySelector(".lsum").textContent = m.summary;
+    row.insertBefore(mkSelbox(LIB_SEL.has(m.id)), row.firstChild);
+    const btns = [
+      mkBtn("Open","iconbtn open",()=>openText(m.id)),
+      /* Export is gone with the rest of offline: it posts to /api/export,
+         which this app does not have, so the button was a 404 with a label
+         on it. It comes back when offline export does. */
+      ];
+    if(false){
+      btns.push(mkBtn("AI","iconbtn",()=>enrichText(m.id)));
+    }
+    btns.push(mkBtn("Delete","iconbtn del",()=>delText(m.id,m.title)));
+    row.append(...btns);
+    if(LIB_SELECTING) row.onclick=()=>libToggleOne(m.id);
+    box.appendChild(row);
+  });
+  libPaintBar();
+}
+function libPaintBar(){
+  const on=LIB_SELECTING, list=libFiltered(), selN=LIB_SEL.size;
+  const t=$("#libSelToggle"); if(t){ t.textContent=on?"Cancel":"Select"; t.classList.toggle("on",on); }
+  $("#libSelAll").classList.toggle("hidden",!on);
+  $("#libDelSel").classList.toggle("hidden",!on);
+  $("#libDelAll").classList.toggle("hidden",on);
+  const cnt=$("#libSelCount"); cnt.classList.toggle("hidden",!on);
+  $("#libDelSel").textContent="Delete ("+selN+")";
+  const allSel=list.length && list.every(m=>LIB_SEL.has(m.id));
+  $("#libSelAll").textContent=allSel?"Clear":"Select all";
+  if(on) cnt.textContent=selN+" selected";
+}
+function libToggleOne(id){ if(LIB_SEL.has(id)) LIB_SEL.delete(id); else LIB_SEL.add(id); renderLibrary(); }
+function libSelectToggle(){ LIB_SELECTING=!LIB_SELECTING; if(!LIB_SELECTING) LIB_SEL.clear(); renderLibrary(); }
+function libSelectAll(){
+  const list=libFiltered(); const allSel=list.length && list.every(m=>LIB_SEL.has(m.id));
+  list.forEach(m=> allSel?LIB_SEL.delete(m.id):LIB_SEL.add(m.id)); renderLibrary();
+}
+function libDeleteSelected(){
+  const ids=[...LIB_SEL]; if(!ids.length){ toast("Nothing selected."); return; }
+  if(!confirm("Delete "+ids.length+" text"+(ids.length>1?"s":"")+"?")) return;
+  api("/api/library/delete_bulk",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({ids})}).then(r=>r.json()).then(j=>{
+    if(ids.includes(ST.tid)){ stop(); ST.tid=""; }
+    LIB_SEL.clear(); LIB_SELECTING=false; loadLibrary();
+    toast("Deleted "+(j.deleted||ids.length)+".");
+  }).catch(()=>toast("Could not delete."));
+}
+function libDeleteAll(){
+  const n=LIB_CACHE.length; if(!n){ toast("Archive is empty."); return; }
+  if(!confirm("Delete ALL "+n+" saved text"+(n>1?"s":"")+"? This cannot be undone.")) return;
+  api("/api/library/delete_all",{method:"POST"}).then(r=>r.json()).then(j=>{
+    stop(); ST.tid=""; LIB_SEL.clear(); LIB_SELECTING=false; loadLibrary();
+    toast("Deleted all "+(j.deleted||n)+".");
+  }).catch(()=>toast("Could not delete."));
+}
+function loadLibrary(){
+  LIB_SELECTING=false; LIB_SEL.clear();
+  api("/api/library").then(r=>r.json()).then(list=>{
+    LIB_CACHE = list||[]; renderLibrary();
+  });
+}
+function enrichText(tid){
+  toast("Summarising...");
+  api("/api/library/"+tid+"/enrich",{method:"POST"})
+    .then(r=>r.json().then(j=>({ok:r.ok,j})))
+    .then(({ok,j})=>{
+      if(!ok){ toast(j.error||"Could not summarise this."); return; }
+      const m = LIB_CACHE.find(x=>x.id===tid);
+      if(m){ m.title=j.title||m.title; m.summary=j.summary||""; }
+      renderLibrary(); toast("Updated.");
+    }).catch(()=>toast("That request failed."));
+}
+function mkBtn(txt,cls,fn){ const b=document.createElement("button");
+  b.className=cls; b.textContent=txt; b.onclick=fn; return b; }
+function openText(tid){ api("/api/library/"+tid).then(r=>r.json())
+  .then(p=>openPayload(p, ST.autoplay)); }
+function delText(tid,title){
+  if(!confirm('Delete "'+(title||"this text")+'" ?')) return;
+  api("/api/library/"+tid+"/delete",{method:"POST"}).then(()=>{
+    if(tid===ST.tid){ stop(); ST.tid=""; } loadLibrary(); toast("Deleted.");
+  });
+}
+function exportText(tid){
+  const vn = (anyVoice(ST.voice)||{}).name||"";
+  toast("Exporting sentence clips, text and timing in "+vn+"...");
+  api("/api/export",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({tid, vkey:ST.vkey, meta:!!ST.aimeta})})
+    .then(r=>r.json().then(j=>({ok:r.ok,j})))
+    .then(({ok,j})=>{
+      if(!ok){ toast(j.error||"Export failed."); return; }
+      if(j.already){ toast("Already exported in "+(j.voice||vn)+"."); return; }
+      toast("Saved to MA Reader Audio"+(j.timing_source==="pcm"?" (waveform timing)":""));
+    }).catch(()=>toast("Export failed."));
+}
+
+function updatePasteHint(){
+  { const b=$("#pasteBox");
+    if(b) b.classList.toggle("port", !(b.value||"").trim()); }
+  const n = $("#pasteBox").value.length;
+  $("#pasteHint").textContent = n ? (n+" chars") : "";
+}
+
+/* ---------- persist settings ---------- */
+/* ---------- keeping settings ----------
+   The saving was debounced by a quarter second, which is right for a slider
+   being dragged and wrong for everything else, because on Android a tab that
+   goes to the background is FROZEN. Pending timers do not run. Switch away
+   from Chrome, or lock the phone, within that quarter second and the change
+   is simply gone, which is exactly what "my settings are not remembered"
+   looks like from the outside.
+
+   So: the timer still coalesces a burst of changes, but the state is also
+   flushed the moment the page is hidden or closed, and that flush uses
+   sendBeacon, which exists for precisely this and is delivered by the browser
+   even as the page is being torn down. A normal fetch at that moment is
+   allowed to be abandoned; a beacon is not.
+
+   The settings live in one file, ~/.maread-web/web_state.json, inside Termux
+   private storage. Nothing else on the phone can read or write it, and it is
+   carried out and put back whenever the app is reinstalled. */
+let persistT=null, persistDue=null;
+
+/* NOTHING may be saved until the saved settings have been read back and put
+   into ST. This is not a nicety, it was the bug.
+   bind() makes every control live at the very top of boot, but ST is not
+   filled in until five requests have come back, one of which asks Speechify
+   for its catalogue and can take seconds on a poor connection. In that window
+   the interface is running on FACTORY DEFAULTS, and any of the thirty four
+   places that call persist() would write those defaults straight over the
+   file. Change your settings, restart, touch one thing while it is still
+   loading, and everything is back to how it shipped.
+   So: the gate stays shut until boot has finished restoring. */
+let booted = false;
+function stateBody(){
+  return JSON.stringify({voice:ST.voice, speed:ST.speed, volume:ST.volume,
+        gap:ST.gap, lag:ST.lag, wgap:ST.wgap, loop:ST.loop, size:ST.size, autoplay:ST.autoplay,
+        focus:ST.focus, theme:ST.theme, font:ST.font,
+        lineheight:ST.lineheight, wordhl:ST.wordhl,
+        rgbSent:ST.rgbSent, rgbWord:ST.rgbWord, rgbFont:ST.rgbFont, rgbText:ST.rgbText,
+        wordoffsets:ST.wordoffsets, aimeta:ST.aimeta,
+        resume:ST.resume,
+        engine:ST.engine, spAccent:ST.spAccent, spVkey:ST.spVkey||"",
+        spSet:ST.spSet||0,
+        bothEngines:!!ST.bothEngines,
+        spPicked:(Array.isArray(ST.spPicked) ? ST.spPicked : null),
+        croVoice:ST.croVoice||"lesya", engVoice:ST.engVoice||"beatrice_32",
+        lang:ST.lang||"eng",
+        langAuto:ST.langAuto||"eng",
+        fullOnPaste:!!ST.fullOnPaste,
+        hideTabs:!!ST.hideTabs, mode:ST.mode||"read", pane:ST.pane||"app",
+        voiceBar:!!ST.voiceBar,
+        vscrollM:ST.vscrollM|0, vscrollF:ST.vscrollF|0,
+        floatPaste:!!ST.floatPaste, fpX:ST.fpX, fpY:ST.fpY,
+        floatFull:!!ST.floatFull, ffX:ST.ffX, ffY:ST.ffY,
+        floatSwap:!!ST.floatSwap, swapIsPlay:!!ST.swapIsPlay,
+        fsX:ST.fsX, fsY:ST.fsY,
+        adbMode:!!ST.adbMode,
+        enabledLangs:ST.enabledLangs});
+}
+
+/* Send it now, whatever else was pending. */
+function persistNow(){
+  if(!booted) return Promise.resolve();
+  clearTimeout(persistT); persistT = null;
+  const body = stateBody();
+  persistDue = null;
+  return api("/api/state", {method:"POST",
+      headers:{"Content-Type":"application/json"}, body: body}).catch(()=>{});
+}
+
+/* The last chance saloon: the page is going away, so use the one transport
+   that is guaranteed to leave. sendBeacon takes a Blob and needs no response,
+   which is why it survives an unload when a fetch does not. */
+function persistBeacon(){
+  if(!booted || !persistDue) return;
+  const body = persistDue;
+  persistDue = null;
+  clearTimeout(persistT); persistT = null;
+  /* NO BEACON HERE, AND THAT IS A CHANGE FROM THE APP THIS CAME FROM.
+     sendBeacon cannot carry a custom header, and this app refuses a write
+     that arrives without one. Worse, sendBeacon reports success the moment
+     the browser has QUEUED the request, so the refusal that came back would
+     never be seen and the last position of every reading would be quietly
+     lost. A keepalive fetch survives the page being torn down just as well
+     and can say who it is. */
+  try{
+    fetch(READER+"/api/state", {method:"POST", body: body, keepalive: true,
+      headers:{"Content-Type":"application/json", "X-Gtt-Local":"1"}})
+      .catch(()=>{});
+  }catch(e){}
+}
+
+function persist(){
+  if(!booted) return;                /* see the note above: this is the bug */
+  persistDue = stateBody();          /* remember it BEFORE the timer, so a
+                                        freeze cannot lose what was pending */
+  clearTimeout(persistT);
+  persistT = setTimeout(()=>{
+    persistT = null;
+    const body = persistDue; persistDue = null;
+    if(!body) return;
+    api("/api/state",{method:"POST",headers:{"Content-Type":"application/json"},
+      body: body}).catch(()=>{ persistDue = body; });
+  }, 250);
+}
+
+/* Every way a phone can take the page away. visibilitychange is the reliable
+   one on Android; pagehide covers the tab actually closing; blur catches the
+   app switcher on some builds. All three are cheap and idempotent. */
+function wirePersistFlush(){
+  document.addEventListener("visibilitychange", ()=>{
+    if(document.visibilityState === "hidden") persistBeacon();
+  });
+  window.addEventListener("pagehide", persistBeacon);
+  window.addEventListener("beforeunload", persistBeacon);
+  window.addEventListener("blur", persistBeacon);
+}
+
+/* ---------- wire up ---------- */
+/* press and hold on a stepper: wait a moment so a plain tap stays a tap, then
+   repeat, quickening after the first second */
+function holdRepeat(btn, fn){
+  let start=null, tick=null, n=0;
+  const stop = ()=>{ clearTimeout(start); clearInterval(tick);
+                     start=null; tick=null; n=0; };
+  btn.addEventListener("pointerdown", ()=>{
+    stop();
+    start = setTimeout(()=>{
+      tick = setInterval(()=>{ n++; fn(); if(n===12){ clearInterval(tick);
+        tick = setInterval(fn, 45); } }, 95);
+    }, 420);
+  });
+  ["pointerup","pointerleave","pointercancel"].forEach(ev=>
+    btn.addEventListener(ev, stop));
+}
+
+function bind(){
+  $("#readBtn").onclick = readPasted;
+  $("#clearBtn").onclick = ()=>{ $("#pasteBox").value=""; updatePasteHint(); };
+  $("#pasteBox").addEventListener("input", updatePasteHint);
+
+  /* Pressing the time clears the session and puts it back to zero. Nothing is
+     lost by it: every text that was read is already in the Archive below. */
+  { const clearIt = ()=>{ doneReset(); toast("Cleared. The text is in your Archive."); };
+    const a=$("#counter"), b=$("#offCounter");
+    if(a) a.onclick = clearIt;
+    if(b) b.onclick = clearIt;
+  }
+
+  /* The empty box IS the paste button. A tap on it, when there is nothing in
+     it, takes the clipboard and starts reading, and the keyboard is kept out
+     of the way because typing was plainly not the intention. Once there is
+     text in the box it behaves like any other box again. */
+  { const box=$("#pasteBox");
+    if(box) box.addEventListener("click", (e)=>{
+      if((box.value||"").trim()) return;         /* has text: leave it alone */
+      e.preventDefault();
+      try{ box.blur(); }catch(_){}
+      pasteFromClipboard();
+    });
+  }
+
+  $("#playBtn").onclick = togglePlay;
+  { const b=$("#nextBtn"); if(b) b.onclick = ()=>next(); }
+  /* the text is scrolled, not swiped */
+  $("#loopBtn").onclick = ()=>{ ST.loop=!ST.loop; refreshToggles(); persist();
+      toast("Loop "+(ST.loop?"on":"off")); };
+
+  /* every stepper repeats while held down, so a long way is one press, not
+     twenty, while a single tap stays a single fine nudge */
+  document.querySelectorAll("[data-step]").forEach(b=>{
+    const go = ()=> step(b.dataset.step, parseInt(b.dataset.d,10));
+    b.onclick = go;
+    holdRepeat(b, go);
+  });
+  /* the number between the minus and the plus is a button as well: tapping it
+     puts that control back where it started, so coming home from a long hold
+     is one tap rather than twenty */
+  document.querySelectorAll("[data-reset]").forEach(b=>{
+    b.onclick = ()=> resetTune(b.dataset.reset);
+  });
+
+  /* the two engine buttons at the top of Settings */
+  document.querySelectorAll("#engTabs .engtab").forEach(b=>{
+    b.onclick = ()=> setPane(b.dataset.pane);
+  });
+  /* The two head toggles. Bound once, outside the tab loop; they were inside
+     it, which set the same handler three times and left the engine toggle
+     unbound altogether. */
+  { const b=$("#dlBtn"); if(b) b.onclick = downloadOne; }
+  wireFloatTogs();
+  { const lb = $("#langBtn");
+    if(lb) lb.onclick = ()=> setLang(nextLang());
+  }
+  { const eb = $("#engBtn");
+    if(eb) eb.onclick = ()=>{
+      /* WHICH ENGINE SPEAKS, which is not the same question as which pane of
+         Settings is open. Changing it leaves the pane where it was. */
+      const want = (ST.engine === "speechify") ? "edge" : "speechify";
+
+      renderLangBtn();
+      soundChanged(want === "speechify" ? "Speechify is speaking"
+                                        : "Edge is speaking");
+    };
+  }
+  /* the Speechify key ring. The file is handed straight to the server; the
+     browser reads no key out of it and nothing is ever echoed back. */
+  { const kf = $("#spKeyFile");
+    if(kf) kf.onchange = e=>{
+      const f = e.target.files && e.target.files[0];
+      e.target.value = "";
+      if(!f) return;
+      const fd = new FormData(); fd.append("file", f);
+      const err = $("#spKeyErr"); if(err) err.textContent = "Testing the keys\u2026";
+      api("/api/speechify/keys", {method:"POST", body: fd})
+        .then(r=>r.json()).then(d=>{
+          if(d.error){ if(err) err.textContent = d.error; return; }
+          applySpInfo(d);
+          toast(d.ready ? "Speechify ready" : "Keys saved, none answered");
+
+        }).catch(()=>{ if(err) err.textContent = "Could not save the keys."; });
+    };
+  }
+  { const p = $("#spPrev"), n = $("#spNext");
+    if(p) p.onclick = ()=> spGoSet(ST.spSet - 1);
+    if(n) n.onclick = ()=> spGoSet(ST.spSet + 1);
+  }
+  { const rb = $("#spRefresh");
+    if(rb) rb.onclick = ()=>{
+      const err = $("#spKeyErr"); if(err) err.textContent = "Walking the ring\u2026";
+      api("/api/speechify/refresh", {method:"POST"})
+        .then(r=>r.json()).then(d=>{ applySpInfo(d);
+          const t = d.tested || {};
+          toast(d.ready ? ((t.WORKING||0) + " good, " + (t.REJECTED||0) + " dead")
+                        : "No key answered"); })
+        .catch(()=>{ if(err) err.textContent = "Could not reach Speechify."; });
+    };
+  }
+  { const fb = $("#spForget");
+    if(fb) fb.onclick = ()=>{
+      api("/api/speechify/forget", {method:"POST"})
+        .then(r=>r.json()).then(d=>{ applySpInfo(d);
+
+          toast("Speechify keys forgotten"); })
+        .catch(()=>{});
+    };
+  }
+  $("#volRange").addEventListener("input", e=>{
+    ST.volume = parseInt(e.target.value,10); applyVolume(); persist();
+  });
+
+  { const b=$("#fsBtn"), o=$("#offFsBtn"), x=$("#fsOut");
+    if(b) b.onclick = ()=> enterFull(false);
+    if(o) o.onclick = ()=> enterFull(false);
+    if(x) x.onclick = leaveFull;
+  }
+  { const b=$("#voiceBarTog");
+    if(b) b.onclick = ()=>{
+      ST.voiceBar = !ST.voiceBar;
+      refreshToggles(); renderVoices(); persist();
+      toast(ST.voiceBar ? "Voice buttons back on top"
+                        : "Voice buttons off. Choose the voice here.");
+    };
+  }
+  { const b=$("#chromeTog");
+    if(b) b.onclick = ()=>{
+      const mode = (ST.browser === "auto") ? "chrome" : "auto";
+      api("/api/browser", {method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body: JSON.stringify({mode: mode})})
+        .then(r=>r.json()).then(d=>{
+          ST.browser = d.mode || mode; refreshToggles();
+          toast(ST.browser === "chrome" ? "Chrome from now on"
+                                        : "Whatever the phone prefers");
+        }).catch(()=> toast("Could not save that."));
+    };
+  }
+  { const b=$("#adbTog");
+    if(b) b.onclick = ()=>{
+      ST.adbMode = !ST.adbMode;
+      refreshToggles(); persistNow();
+      /* persistNow, not persist: this is read by the LAUNCHER on the next
+         run, out of the settings file, so it has to be on disk before the
+         app is closed rather than a quarter second later. */
+      toast(ST.adbMode ? "ADB comes up on the next start"
+                       : "ADB will be left alone on the next start");
+    };
+  }
+  { const c=$("#catchGo"), x=$("#catchCancel"), b=$("#catchBox");
+    if(c) c.onclick = catcherTake;
+    if(x) x.onclick = closeCatcher;
+    if(b){
+      /* the instant something lands, go. No second press. */
+      b.addEventListener("paste", ()=> setTimeout(catcherTake, 30));
+      b.addEventListener("input", ()=>{ if((b.value||"").length > 40) catcherTake(); });
+    }
+    const w=$("#catchWrap");
+    if(w) w.addEventListener("click",(e)=>{ if(e.target===w) closeCatcher(); });
+  }
+  document.querySelectorAll("#modeRow .modebtn, #offModeRow .modebtn")
+    .forEach(b => { b.onclick = ()=> setMode(b.dataset.mode); });
+  { const b=$("#hideTabsTog");
+    if(b) b.onclick = ()=>{
+      ST.hideTabs = !ST.hideTabs;
+      refreshToggles(); persist();
+      toast(ST.hideTabs ? "Tabs hidden, the gear stays" : "Tabs back");
+    };
+  }
+  { const b=$("#fullPasteTog");
+    if(b) b.onclick = ()=>{
+      ST.fullOnPaste = !ST.fullOnPaste;
+      refreshToggles(); persist();
+      toast(ST.fullOnPaste ? "A paste goes full screen"
+                           : "A paste stays in the normal view");
+    };
+  }
+  $("#autoplayTog").onclick = ()=>{ ST.autoplay=!ST.autoplay; refreshToggles(); persist(); };
+  $("#focusTog").onclick = ()=>{ ST.focus=!ST.focus; refreshToggles(); persist(); };
+
+  $("#backdrop").onclick = closeSheet;
+  { const x=$("#sheetX"); if(x) x.onclick = closeSheet; }
+  document.querySelectorAll("#themeChips .chip").forEach(c=>
+    c.onclick = ()=>{ ST.theme=c.dataset.theme; applyTheme(); persist(); });
+  document.querySelectorAll("#fontChips .chip").forEach(c=>
+    c.onclick = ()=>{ ST.font=c.dataset.font; applyFont(); persist(); });
+  /* The word-highlight switch is gone with the thing it switched. */
+  document.querySelectorAll('.rgbrow input[data-rgb]').forEach(inp=>{
+    const key=inp.dataset.rgb, i=+inp.dataset.i;
+    const ensure = ()=>{ if(key==="text" && !Array.isArray(ST.rgbText)) ST.rgbText = themeTextRgb().slice(); };
+    inp.oninput = ()=>{
+      if(inp.value==="") return;            // let the field be empty mid-typing
+      ensure(); rgbArr(key)[i] = clamp255(inp.value);
+      applyHiColors(); persist();
+    };
+    inp.onchange = ()=>{                     // on blur, normalise the field
+      ensure(); const v = clamp255(inp.value); rgbArr(key)[i] = v; inp.value = v;
+      applyHiColors(); persist();
+    };
+  });
+  { const ta=$("#textAuto"); if(ta) ta.onclick = ()=>{ ST.rgbText=null; applyHiColors(); persist(); }; }
+  /* The sync slider nudged the word marker earlier or later per voice. With
+     no word marker there is nothing to nudge: a sentence is lit when its clip
+     starts, which is not a thing that can drift. */
+
+  document.addEventListener("keydown", e=>{
+    if(e.target.tagName==="TEXTAREA"||e.target.tagName==="INPUT") return;
+    const k = e.key.toLowerCase();
+    /* P works in every view, including Home: take the clipboard, replace the
+       box, start reading. Play/pause is the spacebar now that P is taken.
+       Cmd-P and Ctrl-P are left alone so Print still works. */
+    if(k==="p" && !e.metaKey && !e.ctrlKey && !e.altKey){
+      e.preventDefault(); pasteFromClipboard(); return;
+    }
+    if($("#readerView").classList.contains("hidden")) return;
+    if(k===" "){ e.preventDefault(); togglePlay(); }
+    else if(k===","||k==="arrowleft"){ prev(); }
+    else if(k==="."||k==="arrowright"){ next(); }
+    else if(k==="s"){ stop(); }
+    else if(k==="z"){ ST.loop=!ST.loop; refreshToggles(); persist(); }
+    else if(k==="-"||k==="_"){ step("size",-1); }     // shrink text
+    else if(k==="="||k==="+"){ step("size",1); }      // enlarge text
+    else if(k==="["){ step("speed",-1); }
+    else if(k==="]"){ step("speed",1); }
+    /* these two follow the right hand stepper on the player, which is now the
+       gap between words. The gap between sentences lives in Settings. */
+    else if(k===";"){ step("wgap",-1); }              // word gap, into the minus
+    else if(k==="'"){ step("wgap",1); }
+    else if(k==="0"){ jumpTo(0, ST.playing); }        // back to the first sentence
+    else if(k==="enter"){ toggleImmersive(false); }   // same as a centre double tap
+    else if(k==="f"){ ST.focus=!ST.focus; refreshToggles(); persist(); }
+    else if(k==="t"){ const i=(THEMES.indexOf(ST.theme)+1)%THEMES.length;
+                      ST.theme=THEMES[i]; applyTheme(); persist(); }
+    else if(k==="a"||k==="g"){ openSheet(); }
+    else if(k>="1"&&k<="4"){ setVoice(parseInt(k,10)); }
+    else if(k==="h"){ doneReset(); }
+  });
+}
+
+/* ---------- boot ---------- */
+
+/* ================= v4: exclusive playback, fullscreen, player jump ========= */
+/* Only one thing may speak at a time. Starting either player silences the
+   other; opening a new text stops whatever was playing before. */
+function stopOnline(){
+  try{ cancelGap(); }catch(e){}
+  ST.playing=false; try{ setPlayIcon(false); }catch(e){}
+  players.forEach(p=>{ try{ p.pause(); }catch(e){} });
+  if(rafId){ cancelAnimationFrame(rafId); rafId=null; }
+}
+function stopOffline(){
+  if(OFF.playing && ST.resume) saveOffPos();
+  try{ offCancelGap(); }catch(e){}
+  OFF.playing=false; try{ offSetPlayIcon(false); }catch(e){}
+  try{ OFF.audio.pause(); OFF.audioB.pause(); }catch(e){}
+  if(OFF.raf){ cancelAnimationFrame(OFF.raf); OFF.raf=null; }
+}
+function markSession(){
+  const has = !!(ST.sentences && ST.sentences.length) || !!OFF.man;
+  document.body.classList.toggle("hassession", has);
+}
+function jumpToPlayer(){
+  /* whichever is playing wins; else most recently loaded */
+  if(OFF.playing || (OFF.man && !ST.playing && !(ST.sentences||[]).length)){
+    if(OFF.man){ showOfflineReader(); return; }
+  }
+  if((ST.sentences||[]).length){ showReader(); return; }
+  if(OFF.man){ showOfflineReader(); return; }
+  toast("Nothing is loaded yet.");
+}
+/* ---------- fullscreen reading ---------- */
+/* ---------- read, text, edit ----------
+   READ is the app as it has always been: it speaks, and the word lights up.
+   TEXT strips every colour and marker so the page can simply be read with the
+   eye, scrolling like any article.
+   EDIT makes the text itself editable, to cut a header off or fix a mistype
+   before reading it.
+   Play belongs to READ alone: in the other two there is nothing to follow,
+   and a voice talking over an edit is a nuisance rather than a feature. */
+function setMode(m){
+  /* READ IS THE ONLY MODE NOW. The buttons are gone, so nothing can ask for
+     text or edit any more, but a settings file written by an older version
+     still can, and it would arrive in a mode with no way out of it. Anything
+     that is not read becomes read, here, once, at the door. */
+  m = "read";
+  if(m !== "read" && ST.playing){ try{ pause(); }catch(e){} }
+  if(ST.mode === "edit" && m !== "edit") commitEdit();
+  ST.mode = m;
+  document.body.classList.toggle("mode-text", m === "text");
+  document.body.classList.toggle("mode-edit", m === "edit");
+  document.querySelectorAll("#modeRow .modebtn, #offModeRow .modebtn")
+    .forEach(b => b.classList.toggle("on", b.dataset.mode === m));
+  applyEditable();
+  persist();
+}
+function applyEditable(){
+  const on = (ST.mode === "edit");
+  const box = $("#mdEdit"), doc = $("#doc");
+  /* A Markdown text is edited AS MARKDOWN. Making the rendered HTML
+     contentEditable would let a heading be typed into and then, on commit,
+     read back as flat text with every marker already consumed - the
+     formatting would quietly disappear the first time anything was fixed. */
+  const mdEdit = on && MD.on;
+  if(box){
+    box.classList.toggle("on", mdEdit);
+    if(mdEdit && box.value !== ST.source) box.value = ST.source || "";
+  }
+  if(doc) doc.classList.toggle("mdhidden", mdEdit);
+  ["#doc", "#offDoc"].forEach(sel => {
+    const el = $(sel); if(!el) return;
+    try{
+      /* Only ever the PLAIN document becomes editable in place. */
+      el.contentEditable = (on && !(sel === "#doc" && MD.on)) ? "true" : "false";
+      el.spellcheck = false;
+    }catch(e){}
+  });
+}
+/* Leaving EDIT keeps what was typed: the text is read back out of the page,
+   saved as a new text, and re-split into sentences so it can be spoken. */
+function commitEdit(){
+  /* Markdown: what was edited is the SOURCE, so that is what is committed,
+     and it goes back through the same road a paste takes - parsed, wrapped,
+     re-split - so the formatting and the highlight both come back. */
+  if(MD.on){
+    const ta = $("#mdEdit"); if(!ta) return;
+    const t = (ta.value || "").replace(/\u00a0/g, " ");
+    if(!t.trim()) return;
+    if(t === (ST.source || "")) return;    /* nothing was actually changed */
+    const box = $("#pasteBox"); if(box) box.value = t;
+    readTextNow(t);
+    return;
+  }
+  const el = $("#doc"); if(!el) return;
+  const t = (el.innerText || "").replace(/\u00a0/g, " ").trim();
+  if(!t) return;
+  const was = (ST.sentences || []).join(" ").trim();
+  if(t === was) return;                    /* nothing was actually changed */
+  const box = $("#pasteBox"); if(box) box.value = t;
+  readTextNow(t);
+}
+
+function setFullread(on){
+  document.body.classList.toggle("fullread", !!on);
+  paintFloat();
+}
+
+/* ---------- real full screen ----------
+   Hiding our own header was never going to be enough: the browser's own
+   furniture is not ours to hide. The Fullscreen API is, and it must be asked
+   for inside the gesture that wanted it, which is why the request goes out
+   before the clipboard is read rather than after.
+
+   It is still not bulletproof, because Chrome will put its bar back on a
+   gesture it does not like. The one thing that truly cannot be undone is
+   installing to the home screen: a standalone window has no browser interface
+   to pin anything to. The manifest is there for that, and Settings says so. */
+function fsElement(){
+  return document.fullscreenElement || document.webkitFullscreenElement || null;
+}
+/* Installed to the home screen there is no browser tab, so there is nothing
+   to hide and no reason to ask for full screen at all. That matters for one
+   reason above all: asking is what makes Chrome throw up its own banner
+   saying how to leave full screen, and that banner belongs to the browser,
+   sits above the page, and cannot be touched or dismissed from here. No
+   request, no banner. In a plain tab the request is still needed, and the
+   banner comes with it whether we like it or not. */
+function isStandalone(){
+  try{
+    if(window.navigator && window.navigator.standalone) return true;
+    return window.matchMedia("(display-mode: standalone)").matches ||
+           window.matchMedia("(display-mode: fullscreen)").matches ||
+           window.matchMedia("(display-mode: minimal-ui)").matches;
+  }catch(e){ return false; }
+}
+function reqFull(){
+  if(isStandalone()) return true;      /* already our own window */
+  const el = document.documentElement;
+  const f = el.requestFullscreen || el.webkitRequestFullscreen ||
+            el.webkitRequestFullScreen || el.mozRequestFullScreen ||
+            el.msRequestFullscreen;
+  if(!f) return false;
+  try{
+    const r = f.call(el, {navigationUI: "hide"});
+    if(r && r.catch) r.catch(()=>{});
+    return true;
+  }catch(e){
+    try{ const r2 = f.call(el); if(r2 && r2.catch) r2.catch(()=>{}); return true; }
+    catch(_){ return false; }
+  }
+}
+function dropFull(){
+  const f = document.exitFullscreen || document.webkitExitFullscreen ||
+            document.webkitCancelFullScreen || document.mozCancelFullScreen ||
+            document.msExitFullscreen;
+  if(!f) return;
+  try{ const r = f.call(document); if(r && r.catch) r.catch(()=>{}); }catch(e){}
+}
+
+/* Full screen IS reading. Going in starts the voice, coming out stops it,
+   because that is the one gesture the whole workflow turns on. */
+function enterFull(play){
+  reqFull();
+  setFullread(true);
+  if(play !== false && !ST.playing && ST.sentences && ST.sentences.length){
+    try{ resume(); }catch(e){}
+  }
+}
+function leaveFull(){
+  dropFull();
+  setFullread(false);
+  if(ST.playing){ try{ pause(); }catch(e){} }
+  if(typeof OFF === "object" && OFF && OFF.playing){
+    try{ offToggle(); }catch(e){}
+  }
+}
+/* The system can drop us out of full screen on its own: the back gesture, a
+   notification, a swipe Chrome decided it liked. Treat that exactly like
+   pressing the button, or the app would carry on reading into a page the
+   person has already left. */
+function wireFsWatch(){
+  const onChange = ()=>{
+    const on = !!fsElement();
+    if(!on && document.body.classList.contains("fullread")){
+      setFullread(false);
+      if(ST.playing){ try{ pause(); }catch(e){} }
+    } else if(on){
+      setFullread(true);
+    }
+  };
+  ["fullscreenchange","webkitfullscreenchange","mozfullscreenchange",
+   "MSFullscreenChange"].forEach(e=> document.addEventListener(e, onChange));
+}
+function isFullread(){ return document.body.classList.contains("fullread"); }
+/* The gesture that opens the book also closes it. A double tap in the middle
+   of the page strips away every control and starts speaking; a double tap in
+   the same place puts the controls back and pauses, so you always finish
+   where you stopped reading. */
+function inCenterZone(x, y){
+  const w = window.innerWidth, h = window.innerHeight;
+  return x > w*0.27 && x < w*0.73 && y > h*0.30 && y < h*0.70;
+}
+function toggleImmersive(isOffline){
+  const on = !isFullread();
+  setFullread(on);
+  if(on){
+    if(isOffline){ if(!OFF.playing) offPlay(); }
+    else { if(!ST.playing) resume(); }
+  } else {
+    if(isOffline){ if(OFF.playing) offPause(); }
+    else { if(ST.playing) pause(); }
+  }
+}
+function toggleFullread(){ toggleImmersive(false); }
+/* ---------- THE ONE GESTURE ON THE TEXT ----------
+   A tap steps one sentence on. Anywhere on the reading area, immersive or
+   not, on a word or in the margin beside it, in either reader.
+
+   It used to mean three different things at once - jump to THIS sentence out
+   at the edges, play/pause on the sentence already speaking, play/pause
+   everywhere once immersive - and you could not perform it without first
+   working out which of the three you were about to get. One text, one tap,
+   one meaning. Play and pause moved out to the floating button, which is the
+   only control that survives immersive and so is reachable from wherever the
+   tap is now busy.
+
+   Two things still have to be told apart from it.
+
+   A DOUBLE tap in the middle still opens and closes immersive, so a tap that
+   lands in the centre is held back a quarter of a second in case a second one
+   follows; it must not also skip a sentence on the way in. A tap anywhere
+   else fires at once, because nothing is waiting on it.
+
+   And a finger that MOVED was scrolling, not tapping. That guard is the whole
+   reason a tap is allowed to mean something everywhere: without it, every
+   flick of a long text would skip a sentence, which is the accident the old
+   code went out of its way to avoid by claiming as little of the screen as it
+   could. Claim the screen, then be strict about what counts as a tap. */
+const TAP_SLOP = 12;          /* px a finger may drift and still be a tap */
+const TAP_WAIT = 260;         /* ms a centre tap waits for its twin */
+function wireCenterTaps(scrollSel, isOffline){
+  const sc=$(scrollSel); if(!sc) return;
+  let tapT=null, downX=0, downY=0, moved=false;
+  sc.addEventListener("pointerdown", (e)=>{
+    downX=e.clientX; downY=e.clientY; moved=false;
+  }, true);
+  sc.addEventListener("pointermove", (e)=>{
+    if(moved) return;
+    if(Math.abs(e.clientX-downX) > TAP_SLOP ||
+       Math.abs(e.clientY-downY) > TAP_SLOP) moved=true;
+  }, true);
+  sc.addEventListener("click", (e)=>{
+    const step = ()=>{ if(isOffline){ offNext(); } else { next(); } };
+    /* Editing the source is typing, not reading, and a thing that is itself a
+       control answers for itself. Neither is our gesture. */
+    if(document.body.classList.contains("mode-edit")) return;
+    if(e.target && e.target.closest &&
+       e.target.closest("textarea, input, select, button, a")) return;
+    if(moved){ moved=false; return; }      /* that was a scroll */
+
+    e.stopPropagation(); e.preventDefault();
+    const inZ = inCenterZone(e.clientX, e.clientY);
+    if(tapT){                              /* second tap inside the window */
+      clearTimeout(tapT); tapT=null;
+      if(inZ){ toggleImmersive(isOffline); return; }
+    }
+    if(!inZ){ step(); return; }            /* nothing waits on an edge tap */
+    tapT=setTimeout(()=>{ tapT=null; step(); }, TAP_WAIT);
+  }, true);
+}
+/* ---------- clipboard paste ---------- */
+/* Quick turnaround: a new text should cost one action, not four. Paste
+   REPLACES whatever was in the box (it used to append) and starts reading
+   straight away, so pasting is the whole gesture. Reachable three ways: the
+   Paste button, the P key from anywhere, and Read for text typed by hand. */
+function readTextNow(text){
+  if(!text || !text.trim()){ toast("Nothing to read."); return; }
+  autoDetect(text);              /* a new text is the moment to ask */
+  setStatus("Preparing...");
+  api("/api/prepare", {method:"POST", headers:{"Content-Type":"application/json"},
+       body: prepareBody(text)})
+    .then(r=>r.json().then(j=>({ok:r.ok,j})))
+    .then(({ok,j})=>{
+      if(!ok){ toast(j.error||"Could not prepare."); return; }
+      $("#pasteBox").value=""; updatePasteHint();
+      openPayload(j, true);          /* always play: that is the point */
+    }).catch(()=>toast("Server error."));
+}
+/* Whatever arrives, from whichever route, ends the same way: it REPLACES
+   what was loaded and starts speaking from the beginning. */
+function acceptPaste(t){
+  if(!t || !t.trim()) return false;
+  const box=$("#pasteBox");
+  if(box){ box.value = t; }
+  if(typeof updatePasteHint==="function") updatePasteHint();
+  readTextNow(t);
+  return true;
+}
+/* If the clipboard came back empty, or the catcher was cancelled, we are
+   sitting in a full screen we asked for and never used. Come back out. */
+function unwindFull(){
+  if(document.body.classList.contains("fullread") &&
+     !(ST.sentences && ST.sentences.length)){
+    dropFull(); setFullread(false);
+  }
+}
+
+/* The catcher: the path that cannot fail, because it is only a text field.
+   Opened whenever the quick way is refused. */
+function openCatcher(){
+  const w=$("#catchWrap"), b=$("#catchBox");
+  if(!w || !b) { toast("Paste into the box on the Read tab."); return; }
+  b.value = "";
+  w.classList.add("on");
+  setTimeout(()=>{ try{ b.focus(); }catch(e){} }, 40);
+}
+function closeCatcher(){
+  const w=$("#catchWrap"); if(w) w.classList.remove("on");
+  const b=$("#catchBox"); if(b){ try{ b.blur(); }catch(e){} }
+  unwindFull();
+}
+function catcherTake(){
+  const b=$("#catchBox"); if(!b) return;
+  const t=b.value;
+  if(!t || !t.trim()){ toast("Nothing there yet."); return; }
+  closeCatcher(); acceptPaste(t);
+}
+
+/* One press, the quick way first. If the browser will not give up the
+   clipboard, fall through to the catcher instead of shrugging. */
+function pasteFromClipboard(){
+  if(!(navigator.clipboard && navigator.clipboard.readText)){
+    openCatcher(); return;
+  }
+  let settled = false;
+  const fallback = ()=>{ if(!settled){ settled = true; openCatcher(); } };
+  try{
+    navigator.clipboard.readText().then(t=>{
+      if(settled) return;
+      settled = true;
+      if(!acceptPaste(t)) openCatcher();
+    }).catch(fallback);
+  }catch(e){ fallback(); return; }
+  /* Some browsers neither resolve nor reject: they simply never answer,
+     which is what makes a press feel like nothing happened at all. */
+  setTimeout(fallback, 1200);
+}
+
+/* ---------- the floating P ---------- */
+/* Both floaters share the drag, the clamp and the remembering. The only
+   things that differ are which element, which two numbers it stores, and what
+   a press does, so those are the only things passed in. */
+function clampFloatEl(el, x, y){
+  const s=(el&&el.offsetWidth)||56;
+  const w=window.innerWidth, h=window.innerHeight;
+  return [Math.max(4, Math.min(w-s-4, x)), Math.max(4, Math.min(h-s-4, y))];
+}
+function wireDrag(el, onPress, save){
+  if(!el) return;
+  let sx=0, sy=0, ox=0, oy=0, moved=false, id=null;
+  el.addEventListener("pointerdown",(e)=>{
+    id=e.pointerId; moved=false; sx=e.clientX; sy=e.clientY;
+    const r=el.getBoundingClientRect(); ox=sx-r.left; oy=sy-r.top;
+    try{ el.setPointerCapture(id); }catch(_){}
+    el.classList.add("moving");
+  });
+  el.addEventListener("pointermove",(e)=>{
+    if(id===null || e.pointerId!==id) return;
+    if(!moved && Math.abs(e.clientX-sx)+Math.abs(e.clientY-sy) < 7) return;
+    moved=true;
+    const [x,y]=clampFloatEl(el, e.clientX-ox, e.clientY-oy);
+    el.style.left=x+"px"; el.style.top=y+"px";
+  });
+  const done=(e)=>{
+    if(id===null) return;
+    try{ el.releasePointerCapture(id); }catch(_){}
+    id=null; el.classList.remove("moving");
+    if(moved){
+      const r=el.getBoundingClientRect();
+      save(r.left/Math.max(1,window.innerWidth),
+           r.top/Math.max(1,window.innerHeight));
+      persist();
+    } else {
+      onPress();
+    }
+  };
+  el.addEventListener("pointerup", done);
+  el.addEventListener("pointercancel", done);
+}
+function placeFloatF(){
+  const el=$("#floatF"); if(!el) return;
+  const fx=(typeof ST.ffX==="number")?ST.ffX:0.82;
+  const fy=(typeof ST.ffY==="number")?ST.ffY:0.58;
+  const [x,y]=clampFloatEl(el, fx*window.innerWidth, fy*window.innerHeight);
+  el.style.left=x+"px"; el.style.top=y+"px";
+}
+/* ITS ONLY JOB. In full screen it leaves and pauses, exactly as the P does,
+   so the two never disagree about what leaving means. Out of full screen it
+   asks for the browser's full screen inside the gesture, which is the only
+   moment the request is allowed. */
+function floatFullPress(){
+  if(document.body.classList.contains("fullread")){ leaveFull(); return; }
+  reqFull();
+  setFullread(true);
+}
+function wireFloatF(){
+  const el=$("#floatF"); if(!el) return;
+  placeFloatF();
+  wireDrag(el, floatFullPress, (x,y)=>{ ST.ffX=x; ST.ffY=y; });
+}
+function placeFloatS(){
+  const el=$("#floatS"); if(!el) return;
+  const fx=(typeof ST.fsX==="number")?ST.fsX:0.82;
+  const fy=(typeof ST.fsY==="number")?ST.fsY:0.44;
+  const [x,y]=clampFloatEl(el, fx*window.innerWidth, fy*window.innerHeight);
+  el.style.left=x+"px"; el.style.top=y+"px";
+}
+/* Which of the two readers is on screen. There is one floating button and
+   there are two players behind it, so every press and every icon has to ask
+   this first. */
+function floatOnOffline(){
+  const v=$("#offlineReaderView");
+  return !!(v && !v.classList.contains("hidden"));
+}
+/* Play and pause, for whichever reader is showing. */
+function floatPlayPress(){
+  if(floatOnOffline()) offToggle(); else togglePlay();
+}
+/* The button wears the state it will put you in, the same way the one on the
+   player bar does: a triangle while it is silent, two bars while it speaks.
+   Both readers funnel their icon through here, so the floater and the bar can
+   never disagree about whether sound is coming out. */
+function syncFloatPlay(){
+  const el=$("#floatS"); if(!el) return;
+  const on = floatOnOffline() ? !!OFF.playing : !!ST.playing;
+  el.innerHTML = on ? ICON_PAUSE : ICON_PLAY;
+  el.title = (on ? "Pause" : "Play") + ". Drag to move.";
+}
+function wireFloatS(){
+  const el=$("#floatS"); if(!el) return;
+  placeFloatS();
+  wireDrag(el, floatPlayPress, (x,y)=>{ ST.fsX=x; ST.fsY=y; });
+  syncFloatPlay();
+}
+function clampFloat(x, y){
+  const el=$("#floatP"); const s=(el&&el.offsetWidth)||56;
+  const w=window.innerWidth, h=window.innerHeight;
+  return [Math.max(4, Math.min(w-s-4, x)), Math.max(4, Math.min(h-s-4, y))];
+}
+function placeFloat(){
+  const el=$("#floatP"); if(!el) return;
+  const w=window.innerWidth, h=window.innerHeight;
+  const fx=(typeof ST.fpX==="number")?ST.fpX:0.82, fy=(typeof ST.fpY==="number")?ST.fpY:0.72;
+  const [x,y]=clampFloat(fx*w, fy*h);
+  el.style.left=x+"px"; el.style.top=y+"px";
+}
+const FS_GLYPH = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"' +
+  ' stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+  '<path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3' +
+  'M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3"/></svg>';
+
+/* One button, two faces, because it is one loop: paste, read, come back out,
+   paste the next. Out of full screen it offers the clipboard. In full screen
+   the clipboard is not what you want, leaving is. */
+function paintFloat(){
+  const el=$("#floatP"); if(!el) return;
+  /* P STAYS P. It used to become the exit glyph inside full screen, which
+     made two buttons that both left full screen and no way to paste a second
+     article without leaving first. Leaving is the dot's one job; pasting is
+     P's one job; neither borrows the other's. */
+  el.innerHTML = "P";
+  el.title = "Paste and read. Drag to move.";
+}
+function floatPress(){
+  /* No early return for full screen any more: pasting a fresh article while
+     already in full screen is the whole point of reading this way. */
+  /* The app always opens normal. Full screen is a consequence of PASTING, not
+     of launching, and only when asked for: reading a fresh article is the
+     moment the furniture stops helping, and it is a moment he chose.
+
+     When it is wanted, ask HERE, inside the gesture, before anything async.
+     Requested after the clipboard resolves it would be refused, because the
+     user activation is spent by then. */
+  if(ST.fullOnPaste && !document.body.classList.contains("fullread")){
+    reqFull();
+    setFullread(true);
+  }
+  pasteFromClipboard();
+}
+function wireFloat(){
+  const el=$("#floatP"); if(!el) return;
+  paintFloat();
+  let sx=0, sy=0, ox=0, oy=0, moved=false, id=null;
+  el.addEventListener("pointerdown",(e)=>{
+    id=e.pointerId; moved=false;
+    sx=e.clientX; sy=e.clientY;
+    const r=el.getBoundingClientRect(); ox=sx-r.left; oy=sy-r.top;
+    try{ el.setPointerCapture(id); }catch(_){}
+    el.classList.add("moving");
+  });
+  el.addEventListener("pointermove",(e)=>{
+    if(id===null || e.pointerId!==id) return;
+    if(!moved && Math.abs(e.clientX-sx)+Math.abs(e.clientY-sy) < 7) return;
+    moved=true;
+    const [x,y]=clampFloat(e.clientX-ox, e.clientY-oy);
+    el.style.left=x+"px"; el.style.top=y+"px";
+  });
+  const done=(e)=>{
+    if(id===null) return;
+    try{ el.releasePointerCapture(id); }catch(_){}
+    id=null; el.classList.remove("moving");
+    if(moved){
+      /* remember where the thumb wants it, as a fraction so it survives a
+         turn of the phone */
+      const r=el.getBoundingClientRect();
+      ST.fpX = r.left/Math.max(1,window.innerWidth);
+      ST.fpY = r.top/Math.max(1,window.innerHeight);
+      persist();
+    } else {
+      floatPress();               /* a press, not a drag */
+    }
+  };
+  el.addEventListener("pointerup", done);
+  el.addEventListener("pointercancel", done);
+  window.addEventListener("resize", ()=>{ placeFloat(); placeFloatF(); placeFloatS(); });
+  placeFloat();
+}
+
+/* ================= v3 helpers ================= */
+function makeOffline(){
+  const text=($("#pasteBox").value||"").trim();
+  if(!text){ toast("Paste some text first."); return; }
+  const vn=(anyVoice(ST.voice)||{}).name||"";
+  const btn=$("#saveOfflineBtn"); const old=btn.textContent;
+  btn.disabled=true; btn.textContent="Working...";
+  toast("Saving to Offline in "+vn+"...");
+  api("/api/prepare",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:(function(){ const b = prepareBody(text); MD.pending = null; return b; })()})
+    .then(r=>r.json())
+    .then(p=> api("/api/export",{method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({tid:p.id, vkey:ST.vkey, meta:!!ST.aimeta})})
+        .then(r=>r.json().then(j=>({ok:r.ok,j}))))
+    .then(({ok,j})=>{
+      btn.disabled=false; btn.textContent=old;
+      if(!ok){ toast(j.error||"Could not build offline files."); return; }
+      $("#pasteBox").value=""; if(typeof updatePasteHint==="function") updatePasteHint();
+      if(j.already){ toast("Already in Offline ("+(j.voice||vn)+")."); }
+      else { toast("Saved to Offline"+(j.timing_source==="pcm"?" (waveform timing)":"")); }
+      showOfflineList();
+    }).catch(()=>{ btn.disabled=false; btn.textContent=old;
+      toast("Could not build offline files."); });
+}
+
+function saveOffPos(){
+  if(!OFF.name) return;
+  const pos=OFF.idx||0;              /* resume by sentence, not by seconds */
+  api("/api/offline/pos",{method:"POST",headers:{"Content-Type":"application/json"},
+     body:JSON.stringify({name:OFF.name, pos})}).catch(()=>{});
+}
+
+
+/* ================= v9: offline reader (one sentence at a time) ============ */
+/* The offline player mirrors the online Read tab. Each sentence is its own
+   small mp3 clip. To read a sentence we light up the WHOLE sentence first, then
+   set the audio source to that sentence's clip and play it. When the clip ends
+   we advance to the next sentence and do the same. Because every clip stands
+   alone and starts at zero, there is no cross-file timing to drift and the
+   highlight can never jump to the end. Word highlighting, when enabled, uses
+   the clip's own word times (already relative to that clip). */
+const OFF = {
+  audio: new Audio(), audioB: new Audio(),
+  name:"", man:null, sents:[], idx:0, playing:false,
+  raf:null, lastWord:-2, spans:[], dur:0, loop:false, _lastSave:0,
+  gapTimer:null, armed:-1, handedOff:false,
+};
+OFF.audio.preload = "auto"; OFF.audioB.preload = "auto";
+/* the offline player gets the same two-element handoff as the online one, so
+   a sentence never waits on a file being opened, and a negative gap can let
+   two clips overlap */
+function offSwap(){ const t = OFF.audio; OFF.audio = OFF.audioB; OFF.audioB = t; }
+function offArmNext(){
+  const ni = OFF.idx + 1;
+  if(ni >= OFF.sents.length){ OFF.armed = -1; return; }
+  try{ OFF.audioB.pause(); }catch(e){}
+  OFF.audioB.onended = null; OFF.audioB.onerror = null;
+  OFF.audioB.src = offClipUrl(ni);
+  OFF.audioB.playbackRate = ST.speed; OFF.audioB.volume = ST.volume/100;
+  try{ OFF.audioB.load(); }catch(e){}
+  OFF.armed = ni;
+}
+function offNextReady(ni){
+  return OFF.armed === ni && OFF.audioB.readyState >= 3;
+}
+let OFF_CACHE = [];
+
+function offClipUrl(i){
+  return "/api/offline/clip/"+encodeURIComponent(OFF.name)+"/"+i+".mp3";
+}
+function offCancelGap(){ if(OFF.gapTimer){ clearTimeout(OFF.gapTimer); OFF.gapTimer=null; } }
+
+function fmtDur(s){ s=Math.max(0,Math.round(s||0)); const m=Math.floor(s/60);
+  return m+":"+String(s%60).padStart(2,"0"); }
+
+function loadOffline(){
+  OFF_SELECTING=false; OFF_SEL.clear();
+  api("/api/offline/list").then(r=>r.json()).then(list=>{
+    OFF_CACHE = list||[]; renderOffline();
+  }).catch(()=>{ $("#offList").innerHTML =
+    '<div class="empty">Could not read the audio folder.</div>'; });
+}
+let OFF_SELECTING=false; const OFF_SEL=new Set();
+function offFiltered(){
+  const q=($("#offSearch").value||"").trim().toLowerCase();
+  return !q ? OFF_CACHE : OFF_CACHE.filter(m=>
+    ((m.title||"")+" "+(m.ai_title||"")+" "+(m.summary||"")).toLowerCase().includes(q));
+}
+function renderOffline(){
+  const box = $("#offList"); box.innerHTML="";
+  box.classList.toggle("selecting", OFF_SELECTING);
+  const list = offFiltered();
+  if(!OFF_CACHE.length){
+    box.innerHTML = '<div class="empty">No exported texts yet. Open a text, then press Export to save it offline.</div>';
+    offPaintBar(); return;
+  }
+  if(!list.length){ box.innerHTML = '<div class="empty">Nothing matches that search.</div>'; offPaintBar(); return; }
+  list.forEach(m=>{
+    const row = document.createElement("div");
+    row.className = "off-row" + (m.ready?"":" pending"); row.dataset.name=m.name;
+    const when = new Date((m.created||0)*1000)
+      .toLocaleDateString(undefined,{day:"2-digit",month:"short"});
+    const sum = m.summary ? `<div class="osum"></div>` : "";
+    row.innerHTML = `<div class="ometa"><b></b>`+
+      `<small>${when} &middot; ${m.voice||""} &middot; ${fmtDur(m.duration)} &middot; ${m.count||0} sentences</small>${sum}</div>`;
+    row.querySelector("b").textContent = m.title || m.name;
+    if(m.summary) row.querySelector(".osum").textContent = m.summary;
+    row.insertBefore(mkSelbox(OFF_SEL.has(m.name)), row.firstChild);
+    if(m.ready){
+      row.append(mkBtn("Play","iconbtn open",()=>openOffline(m.name)));
+    } else {
+      const w=document.createElement("small"); w.style.color="var(--faint)";
+      w.style.marginRight="6px";
+      w.textContent = m.legacy ? "old format" : "incomplete"; row.append(w);
+    }
+    row.append(mkBtn("Delete","iconbtn del",()=>offDelOne(m.name,m.title)));
+    if(OFF_SELECTING) row.onclick=()=>offToggleOne(m.name);
+    box.appendChild(row);
+  });
+  offPaintBar();
+}
+function offPaintBar(){
+  const on=OFF_SELECTING, list=offFiltered(), selN=OFF_SEL.size;
+  const t=$("#offSelToggle"); if(t){ t.textContent=on?"Cancel":"Select"; t.classList.toggle("on",on); }
+  $("#offSelAll").classList.toggle("hidden",!on);
+  $("#offDelSel").classList.toggle("hidden",!on);
+  $("#offDelAll").classList.toggle("hidden",on);
+  const cnt=$("#offSelCount"); cnt.classList.toggle("hidden",!on);
+  $("#offDelSel").textContent="Delete ("+selN+")";
+  const allSel=list.length && list.every(m=>OFF_SEL.has(m.name));
+  $("#offSelAll").textContent=allSel?"Clear":"Select all";
+  if(on) cnt.textContent=selN+" selected";
+}
+function offToggleOne(name){ if(OFF_SEL.has(name)) OFF_SEL.delete(name); else OFF_SEL.add(name); renderOffline(); }
+function offSelectToggle(){ OFF_SELECTING=!OFF_SELECTING; if(!OFF_SELECTING) OFF_SEL.clear(); renderOffline(); }
+function offSelectAll(){
+  const list=offFiltered(); const allSel=list.length && list.every(m=>OFF_SEL.has(m.name));
+  list.forEach(m=> allSel?OFF_SEL.delete(m.name):OFF_SEL.add(m.name)); renderOffline();
+}
+function offDelOne(name,title){
+  if(!confirm('Delete "'+(title||name)+'" ?')) return;
+  api("/api/offline/delete",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({name})}).then(()=>{ loadOffline(); toast("Deleted."); })
+      .catch(()=>toast("Could not delete."));
+}
+function offDeleteSelected(){
+  const names=[...OFF_SEL]; if(!names.length){ toast("Nothing selected."); return; }
+  if(!confirm("Delete "+names.length+" export"+(names.length>1?"s":"")+"?")) return;
+  api("/api/offline/delete_bulk",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({names})}).then(r=>r.json()).then(j=>{
+    OFF_SEL.clear(); OFF_SELECTING=false; loadOffline();
+    toast("Deleted "+(j.deleted||names.length)+".");
+  }).catch(()=>toast("Could not delete."));
+}
+function offDeleteAll(){
+  const n=OFF_CACHE.length; if(!n){ toast("Nothing exported yet."); return; }
+  if(!confirm("Delete ALL "+n+" export"+(n>1?"s":"")+"? This removes their clips too.")) return;
+  api("/api/offline/delete_all",{method:"POST"}).then(r=>r.json()).then(j=>{
+    OFF_SEL.clear(); OFF_SELECTING=false; loadOffline();
+    toast("Deleted all "+(j.deleted||n)+".");
+  }).catch(()=>toast("Could not delete."));
+}
+
+function openOffline(name){
+  stopOnline(); stopOffline();
+  setOffStatus("Loading...");
+  api("/api/offline/open/"+encodeURIComponent(name))
+    .then(r=>r.json().then(j=>({ok:r.ok,j})))
+    .then(({ok,j})=>{
+      if(!ok || !j.sentences){ toast(j.error||"Could not open that text."); return; }
+      if(j.schema && j.schema.indexOf("/3")<0){
+        toast("This text was exported in the old format. Export it again."); return; }
+      OFF.name = name; OFF.man = j; OFF.sents = j.sentences||[];
+      markSession();
+      OFF.dur = j.duration || 0;
+      OFF.idx = 0; OFF.lastWord = -2;
+      $("#offTitle").textContent = j.title || name;
+      offRenderDoc();
+      OFF.audio.playbackRate = ST.speed; OFF.audio.volume = ST.volume/100;
+      offSetPlayIcon(false); OFF.playing=false;
+      showOfflineReader();
+      const startAtIdx = (i)=>{
+        OFF.idx = clampOff(i);
+        offHighlightSentence(OFF.idx, true); offUpdateCounter(); offSetSeek();
+        if(ST.autoplay){ offPlay(); } else { setOffStatus("Press play to start."); }
+      };
+      if(ST.resume){
+        api("/api/offline/pos/"+encodeURIComponent(name)).then(r=>r.json())
+          .then(pp=>{ let i=Math.round(pp.pos||0);
+            if(i>=OFF.sents.length-0.5 || i<0) i=0; startAtIdx(i); })
+          .catch(()=>startAtIdx(0));
+      } else { startAtIdx(0); }
+    }).catch(()=>toast("Could not open that text."));
+}
+function clampOff(i){ return Math.max(0, Math.min(i, OFF.sents.length-1)); }
+function offSetSeek(){
+  const seek=$("#offSeek"); if(!seek) return;
+  const n=Math.max(1, OFF.sents.length-1);
+  if(!seek.matches(":active")) seek.value=Math.round(OFF.idx/n*1000);
+}
+
+function offRenderDoc(){
+  const doc = $("#offDoc"); doc.innerHTML=""; OFF.spans=[];
+  OFF.sents.forEach((s,i)=>{
+    const sent = document.createElement("span");
+    sent.className="sent"; sent.dataset.i=i;
+    const text = s.text||""; const words = s.words||[];
+    const wspans=[]; let p=0;
+    words.forEach(w=>{
+      const a=w.s|0, b=w.e|0;
+      if(a>p) sent.appendChild(document.createTextNode(text.slice(p,a)));
+      const ws=document.createElement("span"); ws.className="w";
+      ws.textContent=text.slice(a,b); sent.appendChild(ws);
+      wspans.push({el:ws, t:w.t, d:(w.d!=null?w.d:w.t)}); p=b;
+    });
+    if(p<text.length) sent.appendChild(document.createTextNode(text.slice(p)));
+    sent.appendChild(document.createTextNode(" "));
+    sent.onclick = ()=> offJump(i, OFF.playing);
+    doc.appendChild(sent);
+    OFF.spans.push(wspans);
+  });
+}
+function offSentEl(i){ return $(`#offDoc .sent[data-i="${i}"]`); }
+
+function offHighlightSentence(i, paused){
+  document.querySelectorAll("#offDoc .sent.active, #offDoc .sent.paused")
+    .forEach(e=>e.classList.remove("active","paused"));
+  const el=offSentEl(i); if(!el) return;
+  el.classList.add(paused?"paused":"active");
+  sentenceToTop(el, "#offReaderScroll");
+}
+/* v11: the offline player gets the same drift-corrected clock as the online
+   reader (its own instance, so the two never fight), plus the per-voice sync
+   nudge from Settings, applied via the voice stored in the manifest. Together
+   with the server-side waveform timing this is what keeps the red word glued
+   to the speech. */
+const OFFCLK = { pred:0, lastWall:0, lastObs:-1, ready:false };
+function offClockReset(t){
+  OFFCLK.pred = t||0;
+  OFFCLK.lastWall = (performance.now?performance.now():Date.now());
+  OFFCLK.lastObs = -1; OFFCLK.ready = true;
+}
+function offClockSample(observed, rate, playing){
+  const now = (performance.now?performance.now():Date.now());
+  if(!OFFCLK.ready){ offClockReset(observed); return OFFCLK.pred; }
+  const dt = (now - OFFCLK.lastWall)/1000; OFFCLK.lastWall = now;
+  if(playing) OFFCLK.pred += dt * (rate||1);
+  if(observed !== OFFCLK.lastObs){
+    OFFCLK.lastObs = observed;
+    const err = observed - OFFCLK.pred;
+    if(Math.abs(err) > 0.35) OFFCLK.pred = observed;
+    else OFFCLK.pred += err * 0.5;
+  }
+  if(OFFCLK.pred < 0) OFFCLK.pred = 0;
+  return OFFCLK.pred;
+}
+/* the offline map rides in the manifest, written at export time. A book
+   exported before v26 has none, so word gap simply does nothing there until
+   it is exported again; it never guesses. */
+function offSil(i){
+  const s = OFF.man && OFF.man.sentences && OFF.man.sentences[i];
+  return (s && s.sil) || null;
+}
+/* word highlight loop: drives the red word inside the CURRENT clip only, using
+   the smoothed clip clock. Sentence-level highlight is already lit by
+   offPlaySentence, so this is purely cosmetic and never advances sentences. */
+function offFollow(){
+  OFF.raf=null; if(!OFF.playing) return;
+  const owf = 1;
+  if(ST.wordhl){
+    const t = offClockSample(OFF.audio.currentTime||0, ST.speed*owf, owf!==0);
+
+  }
+  const dur = OFF.audio.duration;
+  if(!OFF.handedOff && ST.gap <= 0 && dur && isFinite(dur)){
+    const ni = OFF.idx + 1;
+    const cross = dur + Math.min(ST.gap, -HANDOFF_LEAD);
+    if(ni < OFF.sents.length && OFF.audio.currentTime >= cross && offNextReady(ni)){
+      try{ OFF.audio.playbackRate = ST.speed; }catch(e){}
+      OFF.handedOff = true; offPlaySentence(ni, true); return;
+    }
+  }
+  OFF.raf=requestAnimationFrame(offFollow);
+}
+function offUpdateCounter(){
+  { const el=$("#offCounter"), n=OFF.sents.length;
+    if(el){
+      /* offline clips are already on disk but their lengths are not read
+         until played, so this is the plain estimate */
+      let sec=0; const sp=Math.max(0.25, ST.speed||1);
+      for(let i=OFF.idx; i<n; i++) sec += ((OFF.sents[i]||"").length/14.5)/sp;
+      sec += Math.max(0, n-OFF.idx-1)*(ST.gap||0);
+      el.innerHTML = (n?(OFF.idx+1):0) + " / " + n +
+                     "<b>" + (n? fmtTime(Math.max(0,sec)) : "0:00") + "</b>";
+    } }
+}
+function offSetPlayIcon(on){ $("#offPlay").innerHTML = on ? ICON_PAUSE : ICON_PLAY;
+  audioState(on); syncFloatPlay(); }
+function setOffStatus(s){ $("#offStatus").textContent=s||""; }
+
+/* Light up the whole sentence FIRST, then load and play its clip. */
+function offPlaySentence(i, viaHandoff){
+  OFF.atEnd = false;
+  offCancelGap();
+  OFF.idx = clampOff(i);
+  
+  offHighlightSentence(OFF.idx, false);       /* highlight before any audio */
+  offUpdateCounter(); offSetSeek();
+  if(ST.resume) saveOffPos();
+  if(OFF.armed === OFF.idx){
+    offSwap();                                /* already decoded and waiting */
+    OFF.audioB.onended = null;
+  } else {
+    try{ OFF.audio.pause(); }catch(e){}
+    OFF.audio.src = offClipUrl(OFF.idx);
+  }
+  OFF.armed = -1; OFF.handedOff = false;
+  if(!viaHandoff){ try{ OFF.audioB.pause(); }catch(e){} }
+  try{ OFF.audio.currentTime = 0; }catch(e){}
+  OFF.audio.playbackRate = ST.speed; OFF.audio.volume = ST.volume/100;
+  OFF.audio.onerror = ()=> setOffStatus("Could not load sentence "+(OFF.idx+1)+".");
+  OFF.audio.onended = offEnded;
+  offClockReset(0);                              /* fresh clip: clock from zero */
+  const p = OFF.audio.play(); if(p&&p.catch) p.catch(()=>{});
+  offArmNext();
+  if(!OFF.raf) OFF.raf=requestAnimationFrame(offFollow);
+}
+function offEnded(){
+  if(!OFF.playing || OFF.handedOff) return;
+  
+  const ni = OFF.idx + 1;
+  if(ni < OFF.sents.length){
+    if(ST.gap > 0){
+      offHighlightSentence(OFF.idx, true);
+      OFF.gapTimer = setTimeout(()=>{ OFF.gapTimer=null;
+        if(OFF.playing) offPlaySentence(ni); }, ST.gap*1000);
+    } else { offPlaySentence(ni); }
+    return;
+  }
+  if(ST.loop){ offPlaySentence(0); return; }
+  OFF.atEnd = true;
+  OFF.playing=false; offSetPlayIcon(false);
+  offHighlightSentence(OFF.idx,true); offSetSeek();
+  if(ST.resume) saveOffPos(); setOffStatus("Finished.");
+}
+function offPlay(){
+  if(!OFF.man) return;
+  stopOnline();
+  if(OFF.atEnd){ OFF.atEnd = false; offPlaySentence(0); return; }
+  OFF.playing=true; offSetPlayIcon(true); setOffStatus("");
+  /* resume the same clip if we paused mid-sentence, else start it fresh */
+  if(OFF.audio.src && OFF.audio.currentTime>0 && !OFF.audio.ended){
+    OFF.audio.playbackRate=ST.speed; OFF.audio.volume=ST.volume/100;
+    offHighlightSentence(OFF.idx,false);
+    offClockReset(OFF.audio.currentTime||0);     /* resume from where we paused */
+    OFF.audio.onended = offEnded;
+    const p=OFF.audio.play(); if(p&&p.catch) p.catch(()=>{});
+    offArmNext();
+    if(!OFF.raf) OFF.raf=requestAnimationFrame(offFollow);
+  } else {
+    offPlaySentence(OFF.idx);
+  }
+}
+function offPause(){
+  offCancelGap();
+  OFF.playing=false; offSetPlayIcon(false);
+  try{ OFF.audio.pause(); }catch(e){}
+  if(ST.resume) saveOffPos();
+  offHighlightSentence(OFF.idx,true); setOffStatus("Paused.");
+}
+function offToggle(){ if(OFF.playing) offPause(); else offPlay(); }
+function offStop(){
+  offCancelGap();
+  OFF.playing=false; offSetPlayIcon(false);
+  try{ OFF.audio.pause(); OFF.audio.removeAttribute("src"); OFF.audio.load();
+       OFF.audioB.pause(); OFF.audioB.removeAttribute("src"); OFF.audioB.load();
+  }catch(e){}
+  OFF.armed=-1; OFF.handedOff=false;
+  OFF.idx=0;  offHighlightSentence(0,true);
+  offSetSeek(); offUpdateCounter(); setOffStatus("Stopped.");
+}
+function offJump(i, play){
+  offCancelGap();
+  i=clampOff(i);
+   OFF.idx=i;
+  OFF.armed=-1; OFF.handedOff=false;
+  try{ OFF.audio.pause(); OFF.audio.removeAttribute("src"); OFF.audio.load();
+       OFF.audioB.pause(); OFF.audioB.removeAttribute("src"); OFF.audioB.load();
+  }catch(e){}
+  offHighlightSentence(i, !play); offUpdateCounter(); offSetSeek();
+  if(ST.resume) saveOffPos();
+  if(play){ offPlay(); }
+}
+function offPrev(){ offJump(OFF.idx-1, OFF.playing); }
+function offNext(){ offJump(OFF.idx+1, OFF.playing); }
+function offBack(){
+  if(ST.resume) saveOffPos();
+  offCancelGap();
+  OFF.playing=false; try{ OFF.audio.pause(); OFF.audioB.pause(); }catch(e){}
+  if(OFF.raf){ cancelAnimationFrame(OFF.raf); OFF.raf=null; }
+  OFF.armed=-1; OFF.handedOff=false;
+  OFF.audio.removeAttribute("src"); OFF.audio.load();
+  OFF.audioB.removeAttribute("src"); OFF.audioB.load();
+  OFF.man=null; OFF.sents=[]; OFF.spans=[]; $("#offDoc").innerHTML="";
+  markSession();
+  showOfflineList();
+}
+
+function bindV2(){
+  document.querySelectorAll("#tabs .tab").forEach(t=>{
+    if(t.id==="playerJump"){ t.onclick=jumpToPlayer; return; }
+    t.onclick=()=>goTab(t.dataset.tab); });
+  $("#gearCorner").onclick=openSheet;
+  $("#pasteTab").onclick=()=>{ showHome(); pasteFromClipboard(); };
+  wireCenterTaps("#readerScroll", false);
+  wireCenterTaps("#offReaderScroll", true);
+  $("#libSearch").addEventListener("input", renderLibrary);
+  $("#offSearch").addEventListener("input", renderOffline);
+
+  $("#libSelToggle").onclick=libSelectToggle;
+  $("#libSelAll").onclick=libSelectAll;
+  $("#libDelSel").onclick=libDeleteSelected;
+  $("#libDelAll").onclick=libDeleteAll;
+  $("#offSelToggle").onclick=offSelectToggle;
+  $("#offSelAll").onclick=offSelectAll;
+  $("#offDelSel").onclick=offDeleteSelected;
+  $("#offDelAll").onclick=offDeleteAll;
+
+  $("#offPlay").onclick=offToggle;
+  { const b=$("#offNextBtn"); if(b) b.onclick = ()=>offNext(); }
+  /* Guarded, because the button is gone: there is no offline export here yet,
+     and an unguarded onclick on a missing element throws during boot and
+     takes the whole page down with it. */
+  { const b=$("#saveOfflineBtn"); if(b) b.onclick=makeOffline; }
+  const rt=$("#resumeTog"); if(rt) rt.onclick=()=>{ ST.resume=!ST.resume;
+    refreshToggles(); persist(); };
+  $("#offSeek").addEventListener("input", e=>{
+    const n=Math.max(1, OFF.sents.length-1);
+    const i=clampOff(Math.round((e.target.value/1000)*n));
+    if(i!==OFF.idx) offJump(i, OFF.playing);
+  });
+
+  const la=$("#langAll"); if(la) la.onclick=()=>setAllLangs(true);
+  const ln=$("#langNone"); if(ln) ln.onclick=()=>setAllLangs(false);
+}
+
+function boot(){
+  bind();
+  /* one source of truth for the version: the Help span, copied up into
+     the Settings sheet so the number is never typed twice */
+  const _v = $("#appVer"), _vt = $("#appVerTop");
+  if(_v && _vt) _vt.textContent = _v.textContent;
+  Promise.all([
+    api("/api/voices").then(r=>r.json()),
+    api("/api/state").then(r=>r.json()),
+    api("/api/langs").then(r=>r.json()).catch(()=>({langs:[],default:["en","hr"]})),
+    /* Raced against a clock. This one asks Speechify for its catalogue and
+       can be slow or hang on a poor connection, and the settings behind it
+       must not wait: better to start with no Speechify voices, which the
+       Settings sheet can refresh, than to sit on defaults. */
+    Promise.race([
+      api("/api/speechify/status").then(r=>r.json()).catch(()=>null),
+      new Promise(r=>setTimeout(()=>r(null), 4000))
+    ]),
+    api("/api/browser").then(r=>r.json()).catch(()=>({mode:"chrome"})),
+  ]).then(([voices, st, lc, sp, br])=>{
+    ST.browser = (br && br.mode) || "chrome";
+    ST.voices = voices;
+    ST.langs = (lc && lc.langs) || [];
+    // validate saved languages against the catalogue, keep catalogue order.
+    // an explicit empty list is honoured (zero languages); only a missing or
+    // malformed value falls back to the default pair.
+    if(Array.isArray(st.enabledLangs)){
+      ST.enabledLangs = ST.langs.map(l=>l.key).filter(k=>st.enabledLangs.includes(k));
+    } else {
+      const def = (lc && lc.default) || ["en","hr"];
+      ST.enabledLangs = ST.langs.map(l=>l.key).filter(k=>def.includes(k));
+    }
+    /* the Speechify half, before a voice is chosen, so a remembered
+       Speechify voice is actually there to be found */
+    ST.engine  = (st.engine === "speechify") ? "speechify" : "edge";
+    ST.spAccent = (st.spAccent === "us") ? "us" : "uk";
+    ST.spVkey  = st.spVkey || "";
+    ST.spSet   = Math.max(0, st.spSet | 0);
+
+    ST.bothEngines = !!st.bothEngines;
+    ST.spPicked = Array.isArray(st.spPicked) ? st.spPicked.slice() : null;
+    ST.croVoice = st.croVoice || "lesya";
+    ST.engVoice = st.engVoice || "beatrice_32";
+    ST.lang = (st.lang === "hr" || st.lang === "auto") ? st.lang : "eng";
+    ST.langAuto = (st.langAuto === "hr") ? "hr" : "eng";
+    ST.fullOnPaste = (st.fullOnPaste === undefined) ? true : !!st.fullOnPaste;
+    ST.hideTabs = !!st.hideTabs;
+    ST.pane = (st.pane === "edge" || st.pane === "speechify") ? st.pane : "app";
+    /* EDIT is never restored: coming back into a text editor you did not ask
+       for is a surprise, and an unsaved edit from a previous session is not
+       something to pretend to remember. */
+    ST.mode = (st.mode === "text") ? "text" : "read";
+    ST.voiceBar = (st.voiceBar === undefined) ? true : !!st.voiceBar;
+    /* where the two wheels were left standing */
+    ST.vscrollM = (typeof st.vscrollM === "number") ? st.vscrollM : 0;
+    ST.vscrollF = (typeof st.vscrollF === "number") ? st.vscrollF : 0;
+    ST.floatPaste = (st.floatPaste === undefined) ? true : !!st.floatPaste;
+    ST.floatFull = (st.floatFull !== false);
+    if(typeof st.ffX === "number") ST.ffX = st.ffX;
+    if(typeof st.ffY === "number") ST.ffY = st.ffY;
+    ST.floatSwap = (st.floatSwap !== false);
+    /* ONE-TIME MIGRATION. This floater used to switch Android apps: a job
+       that needed a privileged shell, so plenty of people met it as a dim
+       button that did nothing and switched it off. It is play and pause now,
+       and since a tap on the text means "next sentence" it is the only pause
+       there is once you are immersive. So it comes back on once, for anyone
+       who turned the OLD job off, and the flag then stops us ever overruling
+       the choice again - after this, off means off.
+
+       Nothing is saved from here: persist() is deaf until boot finishes. It
+       does not need to be. The flag rides out on the next save of anything,
+       and switching this button off is itself a save, so the one action that
+       would make a second migration wrong is the very action that prevents
+       it. */
+    if(!st.swapIsPlay){ ST.floatSwap = true; }
+    ST.swapIsPlay = true;
+    ST.adbMode = (st.adbMode !== false);
+    if(typeof st.fsX === "number") ST.fsX = st.fsX;
+    if(typeof st.fsY === "number") ST.fsY = st.fsY;
+    if(typeof st.fpX === "number") ST.fpX = st.fpX;
+    if(typeof st.fpY === "number") ST.fpY = st.fpY;
+    if(sp){ ST.spInfo = sp; ST.spVoices = sp.voices || [];
+            if(sp.perSet) ST.spPerSet = sp.perSet;
+            if(sp.accent) ST.spAccent = sp.accent; }
+    spClampSet();
+    /* Only when it has NEVER been chosen. An empty array is a choice and is
+       honoured: no Speechify voices on top, and they stay off. */
+    if(ST.spPicked === null && (ST.spVoices||[]).length){
+      ST.spPicked = ST.spVoices.slice(0, ST.spPerSet || 4).map(v=>v.vkey);
+    }
+    /* a saved Speechify engine with no voices behind it (no key yet, or no
+       network) quietly falls back to Edge rather than showing an empty strip */
+    if(ST.engine === "speechify" && !(ST.spVoices||[]).length) ST.engine = "edge";
+
+    let v = anyVoice(st.voice||1);
+    if(ST.engine === "speechify"){
+      v = (ST.spVkey && ST.spVoices.find(x=>x.vkey===ST.spVkey))
+          || ST.spVoices.find(x=>x.id===(st.voice||0)) || ST.spVoices[0];
+      /* open on the page the remembered voice actually lives on, or it would
+         not be among the four at the top and could not be seen at all */
+      if(v){
+        const at = ST.spVoices.indexOf(v);
+        if(at >= 0) ST.spSet = Math.floor(at / (ST.spPerSet || 4));
+      }
+    }
+    if(!v) v = voices[0];
+    ST.emotion = st.emotion || "Neutral";
+    ST.pace = st.pace || "normal";
+    ST.voice = v.id;
+    /* built, not taken from the row: the row was made before the remembered
+       direction was read back, so its key says Neutral whatever was chosen */
+    ST.vkey = vkeyNow();
+    ST.speed = st.speed||1.0; ST.volume = st.volume??100;
+    ST.gap = Math.max(GAP_MIN, Math.min(GAP_MAX,
+               (typeof st.gap === "number") ? st.gap : 0.0));
+    ST.lag = Math.max(LAG_MIN, Math.min(LAG_MAX,
+               (typeof st.lag === "number") ? st.lag : 0.0));
+    ST.speed = Math.max(SPEED_MIN, Math.min(SPEED_MAX, ST.speed));
+    ST.loop = !!st.loop;
+    ST.size = st.size||13; ST.autoplay = (st.autoplay!==false); ST.focus = !!st.focus;
+    ST.theme = THEMES.includes(st.theme) ? st.theme : "night";
+    ST.font = FONTS[st.font] ? st.font : "sans";
+    ST.lineheight = st.lineheight || 3;
+    ST.wordhl = st.wordhl!==false;
+    const okRgb = (v,d)=> (Array.isArray(v)&&v.length===3) ? v.map(clamp255) : d.slice();
+    ST.rgbSent = okRgb(st.rgbSent, [255,217,59]);
+    ST.rgbWord = okRgb(st.rgbWord, [226,59,78]);
+    ST.rgbFont = okRgb(st.rgbFont, [255,255,255]);
+    ST.rgbText = (Array.isArray(st.rgbText) && st.rgbText.length===3) ? st.rgbText.map(clamp255) : null;
+    ST.wordoffsets = (st.wordoffsets && typeof st.wordoffsets==="object")
+        ? st.wordoffsets : {};
+    // if the remembered voice belongs to a language that is not enabled,
+    // fall back to the first voice of the first enabled language
+    const _vis = topSp().concat(topEdge());
+    if(!_vis.some(x=>x.id===ST.voice)){
+      const first = _vis[0];
+      if(first){ ST.voice = first.id; ST.vkey = first.vkey; }
+    }
+    applyEngineCards(); renderSpAccents(); renderSpGrid(); renderSpKeys();
+    renderEdgeGrid(); renderSpKeyList(); renderSpDead(); loadCroVoices();
+    renderGroq(); wireGroq(); renderKeyList(); wireKeys();
+    loadDirection();
+    mediaSetup(); wireFloat(); wireFloatF(); wireFloatS(); wireFsWatch(); wirePersistFlush();
+    renderVoices(); renderLangList();
+    applySpeed(); applyVolume(); applyGap(); applyLag(); applySize();
+    applyFont(); applySpacing(); applyTheme(); applyHiColors();
+    ST.aimeta = !!st.aimeta; ST.resume = (st.resume!==false);
+    /* Everything is restored. From here it is safe to write. */
+    booted = true;
+    bindV2(); refreshToggles(); setMode(ST.mode); showHome();
+    /* Deliberately nothing about full screen here. The app always opens in
+       the normal view, whatever the setting says. Full screen belongs to the
+       act of pasting, which is a gesture, which is also the only thing the
+       browser will accept a full screen request from. Doing it at load would
+       have been both unwanted and, in a tab, impossible. */
+  }).catch(()=>{ setStatus("Could not reach the server."); });
+}
+boot();
+</script>
+</body>
+</html>
+GTT_READER_HTML_EOF
+mv -f "$APPHOME/static/reader.html.new" "$APPHOME/static/reader.html"
+chmod 644 "$APPHOME/static/reader.html"
+
+cat > "$APPHOME/static/marked.umd.js.new" <<'GTT_MARKED_EOF'
+/**
+ * marked v18.0.10 - a markdown parser
+ * Copyright (c) 2018-2026, MarkedJS. (MIT License)
+ * Copyright (c) 2011-2018, Christopher Jeffrey. (MIT License)
+ * https://github.com/markedjs/marked
+ */
+
+/**
+ * DO NOT EDIT THIS FILE
+ * The code in this file is generated from files in ./src/
+ */
+(function(g,f){if(typeof exports=="object"&&typeof module<"u"){module.exports=f()}else if("function"==typeof define && define.amd){define("marked",f)}else {g["marked"]=f()}}(typeof globalThis < "u" ? globalThis : typeof self < "u" ? self : this,function(){var exports={};var __exports=exports;var module={exports};
+"use strict";var j=Object.defineProperty;var we=Object.getOwnPropertyDescriptor;var ye=Object.getOwnPropertyNames;var Pe=Object.prototype.hasOwnProperty;var Se=(l,e)=>{for(var t in e)j(l,t,{get:e[t],enumerable:!0})},_e=(l,e,t,n)=>{if(e&&typeof e=="object"||typeof e=="function")for(let s of ye(e))!Pe.call(l,s)&&s!==t&&j(l,s,{get:()=>e[s],enumerable:!(n=we(e,s))||n.enumerable});return l};var $e=l=>_e(j({},"__esModule",{value:!0}),l);var Lt={};Se(Lt,{Hooks:()=>P,Lexer:()=>x,Marked:()=>D,Parser:()=>b,Renderer:()=>y,TextRenderer:()=>_,Tokenizer:()=>w,defaults:()=>R,getDefaults:()=>z,lexer:()=>$t,marked:()=>g,options:()=>Ot,parse:()=>St,parseInline:()=>Pt,parser:()=>_t,setOptions:()=>wt,use:()=>Re,walkTokens:()=>yt});module.exports=$e(Lt);function z(){return{async:!1,breaks:!1,extensions:null,gfm:!0,hooks:null,pedantic:!1,renderer:null,silent:!1,tokenizer:null,walkTokens:null}}var R=z();function F(l){R=l}var E={exec:()=>null};function A(l){let e=[];return t=>{let n=Math.max(0,Math.min(3,t-1)),s=e[n];return s||(s=l(n),e[n]=s),s}}function d(l,e=""){let t=typeof l=="string"?l:l.source,n={replace:(s,r)=>{let i=typeof r=="string"?r:r.source;return i=i.replace(m.caret,"$1"),t=t.replace(s,i),n},getRegex:()=>new RegExp(t,e)};return n}var Le=((l="")=>{try{return!!new RegExp("(?<=1)(?<!1)"+l)}catch{return!1}})(),m={codeRemoveIndent:/^(?: {1,4}| {0,3}\t)/gm,outputLinkReplace:/\\([\[\]])/g,indentCodeCompensation:/^(\s+)(?:```)/,beginningSpace:/^\s+/,endingHash:/#$/,startingSpaceChar:/^ /,endingSpaceChar:/ $/,nonSpaceChar:/[^ ]/,newLineCharGlobal:/\n/g,tabCharGlobal:/\t/g,multipleSpaceGlobal:/\s+/g,blankLine:/^[ \t]*$/,doubleBlankLine:/\n[ \t]*\n[ \t]*$/,blockquoteStart:/^ {0,3}>/,blockquoteSetextReplace:/\n {0,3}((?:=+|-+) *)(?=\n|$)/g,blockquoteSetextReplace2:/^ {0,3}>[ \t]?/gm,listReplaceNesting:/^ {1,4}(?=( {4})*[^ ])/g,listIsTask:/^\[[ xX]\] +\S/,listReplaceTask:/^\[[ xX]\] +/,listTaskCheckbox:/\[[ xX]\]/,anyLine:/\n.*\n/,hrefBrackets:/^<(.*)>$/,tableDelimiter:/[:|]/,tableAlignChars:/^\||\| *$/g,tableRowBlankLine:/\n[ \t]*$/,tableAlignRight:/^ *-+: *$/,tableAlignCenter:/^ *:-+: *$/,tableAlignLeft:/^ *:-+ *$/,startATag:/^<a /i,endATag:/^<\/a>/i,startPreScriptTag:/^<(pre|code|kbd|script)(\s|>)/i,endPreScriptTag:/^<\/(pre|code|kbd|script)(\s|>)/i,startAngleBracket:/^</,endAngleBracket:/>$/,pedanticHrefTitle:/^([^'"]*[^\s])\s+(['"])(.*)\2/,unicodeAlphaNumeric:/[\p{L}\p{N}]/u,escapeTest:/[&<>"']/,escapeReplace:/[&<>"']/g,escapeTestNoEncode:/[<>"']|&(?!(#\d{1,7}|#[Xx][a-fA-F0-9]{1,6}|\w+);)/,escapeReplaceNoEncode:/[<>"']|&(?!(#\d{1,7}|#[Xx][a-fA-F0-9]{1,6}|\w+);)/g,caret:/(^|[^\[])\^/g,percentDecode:/%25/g,findPipe:/\|/g,splitPipe:/ \|/,slashPipe:/\\\|/g,carriageReturn:/\r\n|\r/g,spaceLine:/^ +$/gm,notSpaceStart:/^\S*/,endingNewline:/\n$/,listItemRegex:l=>new RegExp(`^( {0,3}${l})((?:[	 ][^\\n]*)?(?:\\n|$))`),nextBulletRegex:A(l=>new RegExp(`^ {0,${l}}(?:[*+-]|\\d{1,9}[.)])((?:[ 	][^\\n]*)?(?:\\n|$))`)),hrRegex:A(l=>new RegExp(`^ {0,${l}}((?:- *){3,}|(?:_ *){3,}|(?:\\* *){3,})(?:\\n+|$)`)),fencesBeginRegex:A(l=>new RegExp(`^ {0,${l}}(?:\`\`\`|~~~)`)),headingBeginRegex:A(l=>new RegExp(`^ {0,${l}}#`)),htmlBeginRegex:A(l=>new RegExp(`^ {0,${l}}<(?:[a-z].*>|!--)`,"i")),blockquoteBeginRegex:A(l=>new RegExp(`^ {0,${l}}>`))},Me=/^(?:[ \t]*(?:\n|$))+/,ze=/^((?: {4}| {0,3}\t)[^\n]+(?:\n(?:[ \t]*(?:\n|$))*)?)+/,Ee=/^ {0,3}(`{3,}(?=[^`\n]*(?:\n|$))|~{3,})([^\n]*)(?:\n|$)(?:|([\s\S]*?)(?:\n|$))(?: {0,3}\1[~`]* *(?=\n|$)|$)/,v=/^ {0,3}((?:-[\t ]*){3,}|(?:_[ \t]*){3,}|(?:\*[ \t]*){3,})(?:\n+|$)/,Ce=/^ {0,3}(#{1,6})(?=\s|$)(.*)(?:\n+|$)/,K=/ {0,3}(?:[*+-]|\d{1,9}[.)])/,ae=/^(?!bull |blockCode|fences|blockquote|heading|html|table)((?:.|\n(?!\s*?\n|bull |blockCode|fences|blockquote|heading|html|table))+?)\n {0,3}(=+|-+) *(?:\n+|$)/,le=d(ae).replace(/bull/g,K).replace(/blockCode/g,/(?: {4}| {0,3}\t)/).replace(/fences/g,/ {0,3}(?:`{3,}|~{3,})/).replace(/blockquote/g,/ {0,3}>/).replace(/heading/g,/ {0,3}#{1,6}(?:\s|$)/).replace(/html/g,/ {0,3}<[^\n>]+>\n/).replace(/\|table/g,"").getRegex(),Ae=d(ae).replace(/bull/g,K).replace(/blockCode/g,/(?: {4}| {0,3}\t)/).replace(/fences/g,/ {0,3}(?:`{3,}|~{3,})/).replace(/blockquote/g,/ {0,3}>/).replace(/heading/g,/ {0,3}#{1,6}(?:\s|$)/).replace(/html/g,/ {0,3}<[^\n>]+>\n/).replace(/table/g,/ {0,3}\|?(?:[:\- ]*\|)+[\:\- ]*\n/).getRegex(),W=/^([^\n]+(?:\n(?!hr|heading|lheading|blockquote|fences|list|html|table|[ \t]+\n)[^\n]+)*)/,Ie=/^[^\n]+/,X=/(?!\s*\])(?:\\[\s\S]|[^\[\]\\])+/,Be=d(/^ {0,3}\[(label)\]: *(?:\n[ \t]*)?([^<\s][^\s]*|<.*?>)(?:(?: +(?:\n[ \t]*)?| *\n[ \t]*)(title))? *(?:\n+|$)/).replace("label",X).replace("title",/(?:"(?:\\"?|[^"\\])*"|'[^'\n]*(?:\n[^'\n]+)*\n?'|\([^()]*\))/).getRegex(),De=d(/^(bull)([ \t][^\n]*?)?(?:\n|$)/).replace(/bull/g,K).getRegex(),Q="address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|meta|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul",J=/<!--(?:-?>|[\s\S]*?(?:-->|$))/,qe=d("^ {0,3}(?:<(script|pre|style|textarea)[\\s>][\\s\\S]*?(?:</\\1>[^\\n]*\\n*|$)|comment[^\\n]*(\\n+|$)|<\\?[\\s\\S]*?(?:\\?>[^\\n]*\\n*|$)|<![A-Z][\\s\\S]*?(?:>[^\\n]*\\n*|$)|<!\\[CDATA\\[[\\s\\S]*?(?:\\]\\]>[^\\n]*\\n*|$)|</?(tag)(?: +|\\n|/?>)[\\s\\S]*?(?:(?:\\n[ 	]*)+\\n|$)|<(?!script|pre|style|textarea)([a-z][\\w-]*)(?:attribute)*? */?>(?=[ \\t]*(?:\\n|$))[\\s\\S]*?(?:(?:\\n[ 	]*)+\\n|$)|</(?!script|pre|style|textarea)[a-z][\\w-]*\\s*>(?=[ \\t]*(?:\\n|$))[\\s\\S]*?(?:(?:\\n[ 	]*)+\\n|$))","i").replace("comment",J).replace("tag",Q).replace("attribute",/ +[a-zA-Z:_][\w.:-]*(?: *= *"[^"\n]*"| *= *'[^'\n]*'| *= *[^\s"'=<>`]+)?/).getRegex(),pe=l=>d(W).replace("hr",v).replace("heading"," {0,3}#{1,6}(?:\\s|$)").replace("|lheading","").replace("|table","").replace("blockquote"," {0,3}>").replace("fences"," {0,3}(?:`{3,}(?=[^`\\n]*(?:\\n|$))|~~~)[^\\n]*(?:\\n|$)").replace("list",l).replace("html","</?(?:tag)(?: +|\\n|/?>)|<(?:script|pre|style|textarea|!--)").replace("tag",Q).getRegex(),ve=pe(/ {0,3}(?:[*+-]|1[.)])[ \t]+[^ \t\n]/),He=pe(/ {0,3}(?:[*+-]|\d{1,9}[.)])(?:[ \t]|\n|$)/),Ze=d(/^( {0,3}> ?(paragraph|[^\n]*)(?:\n|$))+/).replace("paragraph",He).getRegex(),V={blockquote:Ze,code:ze,def:Be,fences:Ee,heading:Ce,hr:v,html:qe,lheading:le,list:De,newline:Me,paragraph:ve,table:E,text:Ie},ie=d("^ *([^\\n ].*)\\n {0,3}((?:\\| *)?:?-+:? *(?:\\| *:?-+:? *)*(?:\\| *)?)(?:\\n((?:(?! *\\n|hr|heading|blockquote|code|fences|list|html).*(?:\\n|$))*)\\n*|$)").replace("hr",v).replace("heading"," {0,3}#{1,6}(?:\\s|$)").replace("blockquote"," {0,3}>").replace("code","(?: {4}| {0,3}	)[^\\n]").replace("fences"," {0,3}(?:`{3,}(?=[^`\\n]*(?:\\n|$))|~~~)[^\\n]*(?:\\n|$)").replace("list"," {0,3}(?:[*+-]|1[.)])[ \\t]").replace("html","</?(?:tag)(?: +|\\n|/?>)|<(?:script|pre|style|textarea|!--)").replace("tag",Q).getRegex(),Ge={...V,lheading:Ae,table:ie,paragraph:d(W).replace("hr",v).replace("heading"," {0,3}#{1,6}(?:\\s|$)").replace("|lheading","").replace("table",ie).replace("blockquote"," {0,3}>").replace("fences"," {0,3}(?:`{3,}(?=[^`\\n]*(?:\\n|$))|~~~)[^\\n]*(?:\\n|$)").replace("list"," {0,3}(?:[*+-]|1[.)])[ \\t]+[^ \\t\\n]").replace("html","</?(?:tag)(?: +|\\n|/?>)|<(?:script|pre|style|textarea|!--)").replace("tag",Q).getRegex()},Qe={...V,html:d(`^ *(?:comment *(?:\\n|\\s*$)|<(tag)[\\s\\S]+?</\\1> *(?:\\n{2,}|\\s*$)|<tag(?:"[^"]*"|'[^']*'|\\s[^'"/>\\s]*)*?/?> *(?:\\n{2,}|\\s*$))`).replace("comment",J).replace(/tag/g,"(?!(?:a|em|strong|small|s|cite|q|dfn|abbr|data|time|code|var|samp|kbd|sub|sup|i|b|u|mark|ruby|rt|rp|bdi|bdo|span|br|wbr|ins|del|img)\\b)\\w+(?!:|[^\\w\\s@]*@)\\b").getRegex(),def:/^ *\[([^\]]+)\]: *<?([^\s>]+)>?(?: +(["(][^\n]+[")]))? *(?:\n+|$)/,heading:/^(#{1,6})(.*)(?:\n+|$)/,fences:E,lheading:/^(.+?)\n {0,3}(=+|-+) *(?:\n+|$)/,paragraph:d(W).replace("hr",v).replace("heading",` *#{1,6} *[^
+]`).replace("lheading",le).replace("|table","").replace("blockquote"," {0,3}>").replace("|fences","").replace("|list","").replace("|html","").replace("|tag","").getRegex()},Ne=/^\\([!"#$%&'()*+,\-./:;<=>?@\[\]\\^_`{|}~])/,je=/^(`+)([^`]|[^`][\s\S]*?[^`])\1(?!`)/,ue=/^( {2,}|\\)\n(?!\s*$)/,Fe=/^(`+|[^`])(?:(?= {2,}\n)|[\s\S]*?(?:(?=[\\<!\[`*_]|\b_|$)|[^ ](?= {2,}\n)))/,$=/[\p{P}\p{S}]/u,I=/[\s\p{P}\p{S}]/u,H=/[^\s\p{P}\p{S}]/u,Ue=d(/^((?![*_])punctSpace)/,"u").replace(/punctSpace/g,I).getRegex(),Ke=/[\p{Pi}\p{Ps}"']/u,ce=/(?!~)[\p{P}\p{S}]/u,We=/(?!~)[\s\p{P}\p{S}]/u,Xe=/(?:[^\s\p{P}\p{S}]|~)/u,Je=d(/link|precode-code|html/,"g").replace("link",/\[(?:[^\[\]`]|(?<a>`+)[^`]+\k<a>(?!`))*?\]\((?:\\[\s\S]|[^\\\(\)]|\((?:\\[\s\S]|[^\\\(\)])*\))*\)/).replace("precode-",Le?"(?<!`)()":"(^^|[^`])").replace("code",/(?<b>`+)[^`]+\k<b>(?!`)/).replace("html",/<(?! )[^<>]*?>/).getRegex(),he=/^(?:\*+(?:((?!\*)punct)|([^\s*]))?)|^_+(?:((?!_)punct)|([^\s_]))?/,Ve=d(he,"u").replace(/punct/g,$).getRegex(),Ye=d(he,"u").replace(/punct/g,ce).getRegex(),et=/^(?:\*+(?:((?!\*)(?!openQuote)punct)|([^\s*]))?)|^_+(?:((?!_)(?!openQuote)punct)|([^\s_]))?/,tt=d(et,"u").replace(/openQuote/g,Ke).replace(/punct/g,$).getRegex(),de="^[^_*]*?__[^_*]*?\\*[^_*]*?(?=__)|[^*]+(?=[^*])|(?!\\*)punct(\\*+)(?=[\\s]|$)|notPunctSpace(\\*+)(?!\\*)(?=punctSpace|$)|(?!\\*)punctSpace(\\*+)(?=notPunctSpace)|[\\s](\\*+)(?!\\*)(?=punct)|(?!\\*)punct(\\*+)(?!\\*)(?=punct)|notPunctSpace(\\*+)(?=notPunctSpace)",nt=d(de,"gu").replace(/notPunctSpace/g,H).replace(/punctSpace/g,I).replace(/punct/g,$).getRegex(),rt=d(de,"gu").replace(/notPunctSpace/g,Xe).replace(/punctSpace/g,We).replace(/punct/g,ce).getRegex(),st="^[^_*]*?__[^_*]*?\\*[^_*]*?(?=__)|[^*]+(?=[^*])|(?!\\*)punct(\\*+)(?=[\\s]|$)|notPunctSpace(\\*+)(?!\\*)(?=punctSpace|$)|(?!\\*)[\\s](\\*+)(?=notPunctSpace)|[\\s](\\*+)(?!\\*)(?=punct)|(?!\\*)punct(\\*+)(?!\\*)(?=punct)|(?:(?!\\*)punct|notPunctSpace)(\\*+)(?!\\*)(?=notPunctSpace)",it=d(st,"gu").replace(/notPunctSpace/g,H).replace(/punctSpace/g,I).replace(/punct/g,$).getRegex(),ot=d("^[^_*]*?\\*\\*[^_*]*?_[^_*]*?(?=\\*\\*)|[^_]+(?=[^_])|(?!_)punct(_+)(?=[\\s]|$)|notPunctSpace(_+)(?!_)(?=punctSpace|$)|(?!_)punctSpace(_+)(?=notPunctSpace)|[\\s](_+)(?!_)(?=punct)|(?!_)punct(_+)(?!_)(?=punct)","gu").replace(/notPunctSpace/g,H).replace(/punctSpace/g,I).replace(/punct/g,$).getRegex(),at="^[^_*]*?\\*\\*[^_*]*?_[^_*]*?(?=\\*\\*)|[^_]+(?=[^_])|(?!_)punct(_+)(?=[\\s]|$)|notPunctSpace(_+)(?!_)(?=punctSpace|$)|(?!_)[\\s](_+)(?=notPunctSpace)|[\\s](_+)(?!_)(?=punct)|(?!_)punct(_+)(?!_)(?=punct)|(?:(?!_)punct|notPunctSpace)(_+)(?!_)(?=notPunctSpace)",lt=d(at,"gu").replace(/notPunctSpace/g,H).replace(/punctSpace/g,I).replace(/punct/g,$).getRegex(),pt=d(/^~~?(?:((?!~)punct)|[^\s~])/,"u").replace(/punct/g,$).getRegex(),ut="^[^~]+(?=[^~])|(?!~)punct(~~?)(?=[\\s]|$)|notPunctSpace(~~?)(?!~)(?=punctSpace|$)|(?!~)punctSpace(~~?)(?=notPunctSpace)|[\\s](~~?)(?!~)(?=punct)|(?!~)punct(~~?)(?!~)(?=punct)|notPunctSpace(~~?)(?=notPunctSpace)",ct=d(ut,"gu").replace(/notPunctSpace/g,H).replace(/punctSpace/g,I).replace(/punct/g,$).getRegex(),ht=d(/\\(punct)/,"gu").replace(/punct/g,$).getRegex(),dt=d(/^<(scheme:[^\s\x00-\x1f<>]*|email)>/).replace("scheme",/[a-zA-Z][a-zA-Z0-9+.-]{1,31}/).replace("email",/[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+(@)[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+(?![-_])/).getRegex(),kt=d(J).replace("(?:-->|$)","-->").getRegex(),gt=d("^comment|^</[a-zA-Z][\\w:-]*\\s*>|^<[a-zA-Z][\\w-]*(?:attribute)*?\\s*/?>|^<\\?[\\s\\S]*?\\?>|^<![a-zA-Z]+\\s[\\s\\S]*?>|^<!\\[CDATA\\[[\\s\\S]*?\\]\\]>").replace("comment",kt).replace("attribute",/\s+[a-zA-Z:_][\w.:-]*(?:\s*=\s*"[^"]*"|\s*=\s*'[^']*'|\s*=\s*[^\s"'=<>`]+)?/).getRegex(),G=/(?:\[(?:\\[\s\S]|[^\[\]\\])*\]|\\[\s\S]|`+(?!`)[^`]*?`+(?!`)|``+(?=\])|[^\[\]\\`])*?/,ft=d(/^!?\[(label)\]\(\s*(href)(?:(?:[ \t]+(?:\n[ \t]*)?|\n[ \t]*)(title))?\s*\)/).replace("label",G).replace("href",/<(?:\\.|[^\n<>\\])+>|[^ \t\n\x00-\x1f]+|(?=\))/).replace("title",/"(?:\\"?|[^"\\])*"|'(?:\\'?|[^'\\])*'|\((?:\\\)?|[^)\\])*\)/).getRegex(),ke=d(/^!?\[(label)\]\[(ref)\]/).replace("label",G).replace("ref",X).getRegex(),ge=d(/^!?\[(ref)\](?:\[\])?/).replace("ref",X).getRegex(),mt=d("reflink|nolink(?!\\()","g").replace("reflink",ke).replace("nolink",ge).getRegex(),oe=/[hH][tT][tT][pP][sS]?|[fF][tT][pP]/,Y={_backpedal:E,anyPunctuation:ht,autolink:dt,blockSkip:Je,br:ue,code:je,del:E,delLDelim:E,delRDelim:E,emStrongLDelim:Ve,emStrongRDelimAst:nt,emStrongRDelimUnd:ot,escape:Ne,link:ft,nolink:ge,punctuation:Ue,reflink:ke,reflinkSearch:mt,tag:gt,text:Fe,url:E},xt={...Y,emStrongLDelim:tt,emStrongRDelimAst:it,emStrongRDelimUnd:lt,link:d(/^!?\[(label)\]\((.*?)\)/).replace("label",G).getRegex(),reflink:d(/^!?\[(label)\]\s*\[([^\]]*)\]/).replace("label",G).getRegex()},U={...Y,emStrongRDelimAst:rt,emStrongLDelim:Ye,delLDelim:pt,delRDelim:ct,url:d(/^((?:protocol):\/\/|www\.)(?:[a-zA-Z0-9\-]+\.?)+[^\s<]*|^email/).replace("protocol",oe).replace("email",/[A-Za-z0-9._+-]+(@)[a-zA-Z0-9-_]+(?:\.[a-zA-Z0-9-_]*[a-zA-Z0-9])+(?![-_])/).getRegex(),_backpedal:/(?:[^?!.,:;*_'"~()&]+|\([^)]*\)|&(?![a-zA-Z0-9]+;$)|[?!.,:;*_'"~)]+(?!$))+/,del:/^(~~?)(?=[^\s~])((?:\\[\s\S]|[^\\])*?(?:\\[\s\S]|[^\s~\\]))\1(?=[^~]|$)/,text:d(/^(`+|~+|[^`~])(?:(?=[`~])|(?= {2,}\n)|(?=[a-zA-Z0-9.!#$%&'*+\/=?_`{\|}~-]+@)|[\s\S]*?(?:(?=[\\<!\[`*~_]|\b_|protocol:\/\/|www\.|$)|[^ ](?= {2,}\n)|[^a-zA-Z0-9.!#$%&'*+\/=?_`{\|}~-](?=[a-zA-Z0-9.!#$%&'*+\/=?_`{\|}~-]+@)))/).replace("protocol",oe).getRegex()},bt={...U,br:d(ue).replace("{2,}","*").getRegex(),text:d(U.text).replace("\\b_","\\b_| {2,}\\n").replace(/\{2,\}/g,"*").getRegex()},Z={normal:V,gfm:Ge,pedantic:Qe},B={normal:Y,gfm:U,breaks:bt,pedantic:xt};var Rt={"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"},fe=l=>Rt[l];function O(l,e){if(e){if(m.escapeTest.test(l))return l.replace(m.escapeReplace,fe)}else if(m.escapeTestNoEncode.test(l))return l.replace(m.escapeReplaceNoEncode,fe);return l}function ee(l){try{l=encodeURI(l).replace(m.percentDecode,"%")}catch{return null}return l}function te(l,e){let t=l.replace(m.findPipe,(r,i,o)=>{let p=!1,a=i;for(;--a>=0&&o[a]==="\\";)p=!p;return p?"|":" |"}),n=t.split(m.splitPipe),s=0;if(n[0].trim()||n.shift(),n.length>0&&!n.at(-1)?.trim()&&n.pop(),e)if(n.length>e)n.splice(e);else for(;n.length<e;)n.push("");for(;s<n.length;s++)n[s]=n[s].trim().replace(m.slashPipe,"|");return n}function L(l,e,t){let n=l.length;if(n===0)return"";let s=0;for(;s<n;){let r=l.charAt(n-s-1);if(r===e&&!t)s++;else if(r!==e&&t)s++;else break}return l.slice(0,n-s)}function ne(l){let e=l.split(`
+`),t=e.length-1;for(;t>=0&&m.blankLine.test(e[t]);)t--;return e.length-t<=2?l:e.slice(0,t+1).join(`
+`)}function me(l,e){if(l.indexOf(e[1])===-1)return-1;let t=0;for(let n=0;n<l.length;n++)if(l[n]==="\\")n++;else if(l[n]===e[0])t++;else if(l[n]===e[1]&&(t--,t<0))return n;return t>0?-2:-1}function xe(l,e=0){let t=e,n="";for(let s of l)if(s==="	"){let r=4-t%4;n+=" ".repeat(r),t+=r}else n+=s,t++;return n}function be(l,e,t,n,s){let r=e.href,i=e.title||null,o=l[1].replace(s.other.outputLinkReplace,"$1");n.state.inLink=!0;let p={type:l[0].charAt(0)==="!"?"image":"link",raw:t,href:r,title:i,text:o,tokens:n.inlineTokens(o)};return n.state.inLink=!1,p}function Tt(l,e,t){let n=l.match(t.other.indentCodeCompensation);if(n===null)return e;let s=n[1];return e.split(`
+`).map(r=>{let i=r.match(t.other.beginningSpace);if(i===null)return r;let[o]=i;return o.length>=s.length?r.slice(s.length):r}).join(`
+`)}var w=class{options;rules;lexer;constructor(e){this.options=e||R}space(e){let t=this.rules.block.newline.exec(e);if(t&&t[0].length>0)return{type:"space",raw:t[0]}}code(e){let t=this.rules.block.code.exec(e);if(t){let n=this.options.pedantic?t[0]:ne(t[0]),s=n.replace(this.rules.other.codeRemoveIndent,"");return{type:"code",raw:n,codeBlockStyle:"indented",text:s}}}fences(e){let t=this.rules.block.fences.exec(e);if(t){let n=t[0],s=Tt(n,t[3]||"",this.rules);return{type:"code",raw:n,lang:t[2]?t[2].trim().replace(this.rules.inline.anyPunctuation,"$1"):t[2],text:s}}}heading(e){let t=this.rules.block.heading.exec(e);if(t){let n=t[2].trim();if(this.rules.other.endingHash.test(n)){let s=L(n,"#");(this.options.pedantic||!s||this.rules.other.endingSpaceChar.test(s))&&(n=s.trim())}return{type:"heading",raw:L(t[0],`
+`),depth:t[1].length,text:n,tokens:this.lexer.inline(n)}}}hr(e){let t=this.rules.block.hr.exec(e);if(t)return{type:"hr",raw:L(t[0],`
+`)}}blockquote(e){let t=this.rules.block.blockquote.exec(e);if(t){let n=L(t[0],`
+`).split(`
+`),s="",r="",i=[];for(;n.length>0;){let o=!1,p=[],a;for(a=0;a<n.length;a++)if(this.rules.other.blockquoteStart.test(n[a]))p.push(n[a]),o=!0;else if(!o)p.push(n[a]);else break;n=n.slice(a);let u=p.join(`
+`),c=u.replace(this.rules.other.blockquoteSetextReplace,`
+    $1`).replace(this.rules.other.blockquoteSetextReplace2,"");s=s?`${s}
+${u}`:u,r=r?`${r}
+${c}`:c;let h=this.lexer.state.top;if(this.lexer.state.top=!0,this.lexer.blockTokens(c,i,!0),this.lexer.state.top=h,n.length===0)break;let k=i.at(-1);if(k?.type==="code")break;if(k?.type==="blockquote"){let T=k,f=n.join(`
+`),S=T.raw+`
+`+f.replace(this.rules.other.blockquoteSetextReplace2,""),M=this.blockquote(S);i[i.length-1]=M,s=`${s}
+${f}`,r=r.substring(0,r.length-T.text.length)+M.text;break}else if(k?.type==="list"){let T=k,f=T.raw+`
+`+n.join(`
+`),S=this.list(f);i[i.length-1]=S,s=s.substring(0,s.length-k.raw.length)+S.raw,r=r.substring(0,r.length-T.raw.length)+S.raw,n=f.substring(i.at(-1).raw.length).split(`
+`);continue}}return{type:"blockquote",raw:s,tokens:i,text:r}}}list(e){let t=this.rules.block.list.exec(e);if(t){let n=t[1].trim(),s=n.length>1,r={type:"list",raw:"",ordered:s,start:s?+n.slice(0,-1):"",loose:!1,items:[]};n=s?`\\d{1,9}\\${n.slice(-1)}`:`\\${n}`,this.options.pedantic&&(n=s?n:"[*+-]");let i=this.rules.other.listItemRegex(n),o=!1;for(;e;){let a=!1,u="",c="";if(!(t=i.exec(e))||this.rules.block.hr.test(e))break;u=t[0],e=e.substring(u.length);let h=xe(t[2].split(`
+`,1)[0],t[1].length),k=e.split(`
+`,1)[0],T=!h.trim(),f=0;if(this.options.pedantic?(f=2,c=h.trimStart()):T?f=t[1].length+1:(f=h.search(this.rules.other.nonSpaceChar),f=f>4?1:f,c=h.slice(f),f+=t[1].length),T&&this.rules.other.blankLine.test(k)&&(u+=k+`
+`,e=e.substring(k.length+1),a=!0),!a){let S=this.rules.other.nextBulletRegex(f),M=this.rules.other.hrRegex(f),re=this.rules.other.fencesBeginRegex(f),se=this.rules.other.headingBeginRegex(f),Te=this.rules.other.htmlBeginRegex(f),Oe=this.rules.other.blockquoteBeginRegex(f);for(;e;){let N=e.split(`
+`,1)[0],q;if(k=N,this.options.pedantic?(k=k.replace(this.rules.other.listReplaceNesting,"  "),q=k):q=k.replace(this.rules.other.tabCharGlobal,"    "),re.test(k)||se.test(k)||Te.test(k)||Oe.test(k)||S.test(k)||M.test(k))break;if(q.search(this.rules.other.nonSpaceChar)>=f||!k.trim())c+=`
+`+q.slice(f);else{if(T||h.replace(this.rules.other.tabCharGlobal,"    ").search(this.rules.other.nonSpaceChar)>=4||re.test(h)||se.test(h)||M.test(h))break;c+=`
+`+k}T=!k.trim(),u+=N+`
+`,e=e.substring(N.length+1),h=q.slice(f)}}r.loose||(o?r.loose=!0:this.rules.other.doubleBlankLine.test(u)&&(o=!0)),r.items.push({type:"list_item",raw:u,task:!!this.options.gfm&&this.rules.other.listIsTask.test(c),loose:!1,text:c,tokens:[]}),r.raw+=u}let p=r.items.at(-1);if(p)p.raw=p.raw.trimEnd(),p.text=p.text.trimEnd();else return;r.raw=r.raw.trimEnd();for(let a of r.items)if(this.lexer.state.top=!1,a.tokens=this.lexer.blockTokens(a.text,[]),!r.loose){let u=a.tokens.filter(h=>h.type==="space"),c=u.length>0&&u.some(h=>this.rules.other.anyLine.test(h.raw));r.loose=c}for(let a of r.items){let u=a.tokens[0];if(a.task&&(u?.type==="text"||u?.type==="paragraph")){a.text=a.text.replace(this.rules.other.listReplaceTask,""),u.raw=u.raw.replace(this.rules.other.listReplaceTask,""),u.text=u.text.replace(this.rules.other.listReplaceTask,"");for(let h=this.lexer.inlineQueue.length-1;h>=0;h--)if(this.rules.other.listIsTask.test(this.lexer.inlineQueue[h].src)){this.lexer.inlineQueue[h].src=this.lexer.inlineQueue[h].src.replace(this.rules.other.listReplaceTask,"");break}let c=this.rules.other.listTaskCheckbox.exec(a.raw);if(c){let h={type:"checkbox",raw:c[0]+" ",checked:c[0]!=="[ ]"};a.checked=h.checked,r.loose?a.tokens[0]&&["paragraph","text"].includes(a.tokens[0].type)&&"tokens"in a.tokens[0]&&a.tokens[0].tokens?(a.tokens[0].raw=h.raw+a.tokens[0].raw,a.tokens[0].text=h.raw+a.tokens[0].text,a.tokens[0].tokens.unshift(h)):a.tokens.unshift({type:"paragraph",raw:h.raw,text:h.raw,tokens:[h]}):a.tokens.unshift(h)}}else a.task&&(a.task=!1)}if(r.loose)for(let a of r.items){a.loose=!0;for(let u of a.tokens)u.type==="text"&&(u.type="paragraph")}return r}}html(e){let t=this.rules.block.html.exec(e);if(t){let n=ne(t[0]);return{type:"html",block:!0,raw:n,pre:t[1]==="pre"||t[1]==="script"||t[1]==="style",text:n}}}def(e){let t=this.rules.block.def.exec(e);if(t){let n=t[1].toLowerCase().replace(this.rules.other.multipleSpaceGlobal," "),s=t[2]?t[2].replace(this.rules.other.hrefBrackets,"$1").replace(this.rules.inline.anyPunctuation,"$1"):"",r=t[3]?t[3].substring(1,t[3].length-1).replace(this.rules.inline.anyPunctuation,"$1"):t[3];return{type:"def",tag:n,raw:L(t[0],`
+`),href:s,title:r}}}table(e){let t=this.rules.block.table.exec(e);if(!t||!this.rules.other.tableDelimiter.test(t[2]))return;let n=te(t[1]),s=t[2].replace(this.rules.other.tableAlignChars,"").split("|"),r=t[3]?.trim()?t[3].replace(this.rules.other.tableRowBlankLine,"").split(`
+`):[],i={type:"table",raw:L(t[0],`
+`),header:[],align:[],rows:[]};if(n.length===s.length){for(let o of s)this.rules.other.tableAlignRight.test(o)?i.align.push("right"):this.rules.other.tableAlignCenter.test(o)?i.align.push("center"):this.rules.other.tableAlignLeft.test(o)?i.align.push("left"):i.align.push(null);for(let o=0;o<n.length;o++)i.header.push({text:n[o],tokens:this.lexer.inline(n[o]),header:!0,align:i.align[o]});for(let o of r)i.rows.push(te(o,i.header.length).map((p,a)=>({text:p,tokens:this.lexer.inline(p),header:!1,align:i.align[a]})));return i}}lheading(e){let t=this.rules.block.lheading.exec(e);if(t){let n=t[1].trim();return{type:"heading",raw:L(t[0],`
+`),depth:t[2].charAt(0)==="="?1:2,text:n,tokens:this.lexer.inline(n)}}}paragraph(e){let t=this.rules.block.paragraph.exec(e);if(t){let n=t[1].charAt(t[1].length-1)===`
+`?t[1].slice(0,-1):t[1];return{type:"paragraph",raw:t[0],text:n,tokens:this.lexer.inline(n)}}}text(e){let t=this.rules.block.text.exec(e);if(t)return{type:"text",raw:t[0],text:t[0],tokens:this.lexer.inline(t[0])}}escape(e){let t=this.rules.inline.escape.exec(e);if(t)return{type:"escape",raw:t[0],text:t[1]}}tag(e){let t=this.rules.inline.tag.exec(e);if(t)return!this.lexer.state.inLink&&this.rules.other.startATag.test(t[0])?this.lexer.state.inLink=!0:this.lexer.state.inLink&&this.rules.other.endATag.test(t[0])&&(this.lexer.state.inLink=!1),!this.lexer.state.inRawBlock&&this.rules.other.startPreScriptTag.test(t[0])?this.lexer.state.inRawBlock=!0:this.lexer.state.inRawBlock&&this.rules.other.endPreScriptTag.test(t[0])&&(this.lexer.state.inRawBlock=!1),{type:"html",raw:t[0],inLink:this.lexer.state.inLink,inRawBlock:this.lexer.state.inRawBlock,block:!1,text:t[0]}}link(e){let t=this.rules.inline.link.exec(e);if(t){let n=t[2].trim();if(!this.options.pedantic&&this.rules.other.startAngleBracket.test(n)){if(!this.rules.other.endAngleBracket.test(n))return;let i=L(n.slice(0,-1),"\\");if((n.length-i.length)%2===0)return}else{let i=me(t[2],"()");if(i===-2)return;if(i>-1){let p=(t[0].indexOf("!")===0?5:4)+t[1].length+i;t[2]=t[2].substring(0,i),t[0]=t[0].substring(0,p).trim(),t[3]=""}}let s=t[2],r="";if(this.options.pedantic){let i=this.rules.other.pedanticHrefTitle.exec(s);i&&(s=i[1],r=i[3])}else r=t[3]?t[3].slice(1,-1):"";return s=s.trim(),this.rules.other.startAngleBracket.test(s)&&(this.options.pedantic&&!this.rules.other.endAngleBracket.test(n)?s=s.slice(1):s=s.slice(1,-1)),be(t,{href:s&&s.replace(this.rules.inline.anyPunctuation,"$1"),title:r&&r.replace(this.rules.inline.anyPunctuation,"$1")},t[0],this.lexer,this.rules)}}reflink(e,t){let n;if((n=this.rules.inline.reflink.exec(e))||(n=this.rules.inline.nolink.exec(e))){let s=(n[2]||n[1]).replace(this.rules.other.multipleSpaceGlobal," "),r=t[s.toLowerCase()];if(!r){let i=n[0].charAt(0);return{type:"text",raw:i,text:i}}return be(n,r,n[0],this.lexer,this.rules)}}emStrong(e,t,n=""){let s=this.rules.inline.emStrongLDelim.exec(e);if(!s||!s[1]&&!s[2]&&!s[3]&&!s[4]||s[4]&&n.match(this.rules.other.unicodeAlphaNumeric))return;if(!(s[1]||s[3]||"")||!n||this.rules.inline.punctuation.exec(n)){let i=[...s[0]].length-1,o,p,a=i,u=0,c=s[0][0],h=n===c,k=c==="*"?this.rules.inline.emStrongRDelimAst:this.rules.inline.emStrongRDelimUnd;for(k.lastIndex=0,t=t.slice(-1*e.length+i);(s=k.exec(t))!==null;){if(o=s[1]||s[2]||s[3]||s[4]||s[5]||s[6],!o)continue;if(p=[...o].length,s[3]||s[4]){a+=p;continue}else if(s[5]||s[6]){if(i%3&&!((i+p)%3)){u+=p;continue}if(h)break}if(a-=p,a>0)continue;p=Math.min(p,p+a+u);let T=[...s[0]][0].length,f=e.slice(0,i+s.index+T+p);if(Math.min(i,p)%2){let M=f.slice(1,-1);return{type:"em",raw:f,text:M,tokens:this.lexer.inlineTokens(M)}}let S=f.slice(2,-2);return{type:"strong",raw:f,text:S,tokens:this.lexer.inlineTokens(S)}}}}codespan(e){let t=this.rules.inline.code.exec(e);if(t){let n=t[2].replace(this.rules.other.newLineCharGlobal," "),s=this.rules.other.nonSpaceChar.test(n),r=this.rules.other.startingSpaceChar.test(n)&&this.rules.other.endingSpaceChar.test(n);return s&&r&&(n=n.substring(1,n.length-1)),{type:"codespan",raw:t[0],text:n}}}br(e){let t=this.rules.inline.br.exec(e);if(t)return{type:"br",raw:t[0]}}del(e,t,n=""){let s=this.rules.inline.delLDelim.exec(e);if(!s)return;if(!(s[1]||"")||!n||this.rules.inline.punctuation.exec(n)){let i=[...s[0]].length-1,o,p,a=i,u=this.rules.inline.delRDelim;for(u.lastIndex=0,t=t.slice(-1*e.length+i);(s=u.exec(t))!==null;){if(o=s[1]||s[2]||s[3]||s[4]||s[5]||s[6],!o||(p=[...o].length,p!==i))continue;if(s[3]||s[4]){a+=p;continue}if(a-=p,a>0)continue;p=Math.min(p,p+a);let c=[...s[0]][0].length,h=e.slice(0,i+s.index+c+p),k=h.slice(i,-i);return{type:"del",raw:h,text:k,tokens:this.lexer.inlineTokens(k)}}}}autolink(e){let t=this.rules.inline.autolink.exec(e);if(t){let n,s;return t[2]==="@"?(n=t[1],s="mailto:"+n):(n=t[1],s=n),{type:"link",raw:t[0],text:n,href:s,tokens:[{type:"text",raw:n,text:n}]}}}url(e){let t;if(t=this.rules.inline.url.exec(e)){let n,s;if(t[2]==="@")n=t[0],s="mailto:"+n;else{let r;do r=t[0],t[0]=this.rules.inline._backpedal.exec(t[0])?.[0]??"";while(r!==t[0]);n=t[0],t[1]==="www."?s="http://"+t[0]:s=t[0]}return{type:"link",raw:t[0],text:n,href:s,tokens:[{type:"text",raw:n,text:n}]}}}inlineText(e){let t=this.rules.inline.text.exec(e);if(t){let n=this.lexer.state.inRawBlock;return{type:"text",raw:t[0],text:t[0],escaped:n}}}};var x=class l{tokens;options;state;inlineQueue;tokenizer;constructor(e){this.tokens=[],this.tokens.links=Object.create(null),this.options=e||R,this.options.tokenizer=this.options.tokenizer||new w,this.tokenizer=this.options.tokenizer,this.tokenizer.options=this.options,this.tokenizer.lexer=this,this.inlineQueue=[],this.state={inLink:!1,inRawBlock:!1,top:!0};let t={other:m,block:Z.normal,inline:B.normal};this.options.pedantic?(t.block=Z.pedantic,t.inline=B.pedantic):this.options.gfm&&(t.block=Z.gfm,this.options.breaks?t.inline=B.breaks:t.inline=B.gfm),this.tokenizer.rules=t}static get rules(){return{block:Z,inline:B}}static lex(e,t){return new l(t).lex(e)}static lexInline(e,t){return new l(t).inlineTokens(e)}lex(e){e=e.replace(m.carriageReturn,`
+`),this.blockTokens(e,this.tokens);for(let t=0;t<this.inlineQueue.length;t++){let n=this.inlineQueue[t];this.inlineTokens(n.src,n.tokens)}return this.inlineQueue=[],this.tokens}blockTokens(e,t=[],n=!1){this.tokenizer.lexer=this,this.options.pedantic&&(e=e.replace(m.tabCharGlobal,"    ").replace(m.spaceLine,""));let s=1/0;for(;e;){if(e.length<s)s=e.length;else{this.infiniteLoopError(e.charCodeAt(0));break}let r;if(this.options.extensions?.block?.some(o=>(r=o.call({lexer:this},e,t))?(e=e.substring(r.raw.length),t.push(r),!0):!1))continue;if(r=this.tokenizer.space(e)){e=e.substring(r.raw.length);let o=t.at(-1);r.raw.length===1&&o!==void 0?o.raw+=`
+`:t.push(r);continue}if(r=this.tokenizer.code(e)){e=e.substring(r.raw.length);let o=t.at(-1);o?.type==="paragraph"||o?.type==="text"?(o.raw+=(o.raw.endsWith(`
+`)?"":`
+`)+r.raw,o.text+=`
+`+r.text,this.inlineQueue.at(-1).src=o.text):t.push(r);continue}if(r=this.tokenizer.fences(e)){e=e.substring(r.raw.length),t.push(r);continue}if(r=this.tokenizer.heading(e)){e=e.substring(r.raw.length),t.push(r);continue}if(r=this.tokenizer.hr(e)){e=e.substring(r.raw.length),t.push(r);continue}if(r=this.tokenizer.blockquote(e)){e=e.substring(r.raw.length),t.push(r);continue}if(r=this.tokenizer.list(e)){e=e.substring(r.raw.length),t.push(r);continue}if(r=this.tokenizer.html(e)){e=e.substring(r.raw.length),t.push(r);continue}if(r=this.tokenizer.def(e)){e=e.substring(r.raw.length);let o=t.at(-1);o?.type==="paragraph"||o?.type==="text"?(o.raw+=(o.raw.endsWith(`
+`)?"":`
+`)+r.raw,o.text+=`
+`+r.raw,this.inlineQueue.at(-1).src=o.text):this.tokens.links[r.tag]||(this.tokens.links[r.tag]={href:r.href,title:r.title},t.push(r));continue}if(r=this.tokenizer.table(e)){e=e.substring(r.raw.length),t.push(r);continue}if(r=this.tokenizer.lheading(e)){e=e.substring(r.raw.length),t.push(r);continue}let i=e;if(this.options.extensions?.startBlock){let o=1/0,p=e.slice(1),a;this.options.extensions.startBlock.forEach(u=>{a=u.call({lexer:this},p),typeof a=="number"&&a>=0&&(o=Math.min(o,a))}),o<1/0&&o>=0&&(i=e.substring(0,o+1))}if(this.state.top&&(r=this.tokenizer.paragraph(i))){let o=t.at(-1);n&&o?.type==="paragraph"?(o.raw+=(o.raw.endsWith(`
+`)?"":`
+`)+r.raw,o.text+=`
+`+r.text,this.inlineQueue.pop(),this.inlineQueue.at(-1).src=o.text):t.push(r),n=i.length!==e.length,e=e.substring(r.raw.length);continue}if(r=this.tokenizer.text(e)){e=e.substring(r.raw.length);let o=t.at(-1);o?.type==="text"?(o.raw+=(o.raw.endsWith(`
+`)?"":`
+`)+r.raw,o.text+=`
+`+r.text,this.inlineQueue.pop(),this.inlineQueue.at(-1).src=o.text):t.push(r);continue}if(e){this.infiniteLoopError(e.charCodeAt(0));break}}return this.state.top=!0,t}inline(e,t=[]){return this.inlineQueue.push({src:e,tokens:t}),t}inlineTokens(e,t=[]){this.tokenizer.lexer=this;let n=e;if(this.tokens.links){let o=Object.keys(this.tokens.links);o.length>0&&(n=n.replace(this.tokenizer.rules.inline.reflinkSearch,p=>o.includes(p.slice(p.lastIndexOf("[")+1,-1))?"["+"a".repeat(p.length-2)+"]":p))}n=n.replace(this.tokenizer.rules.inline.anyPunctuation,o=>"+".repeat(o.length)),n=n.replace(this.tokenizer.rules.inline.blockSkip,(o,p,a)=>{let u=a?a.length:0;return o.slice(0,u)+"["+"a".repeat(o.length-u-2)+"]"}),n=this.options.hooks?.emStrongMask?.call({lexer:this},n)??n;let s=!1,r="",i=1/0;for(;e;){if(e.length<i)i=e.length;else{this.infiniteLoopError(e.charCodeAt(0));break}s||(r=""),s=!1;let o;if(this.options.extensions?.inline?.some(a=>(o=a.call({lexer:this},e,t))?(e=e.substring(o.raw.length),t.push(o),!0):!1))continue;if(o=this.tokenizer.escape(e)){e=e.substring(o.raw.length),t.push(o);continue}if(o=this.tokenizer.tag(e)){e=e.substring(o.raw.length),t.push(o);continue}if(o=this.tokenizer.link(e)){e=e.substring(o.raw.length),t.push(o);continue}if(o=this.tokenizer.reflink(e,this.tokens.links)){e=e.substring(o.raw.length);let a=t.at(-1);o.type==="text"&&a?.type==="text"?(a.raw+=o.raw,a.text+=o.text):t.push(o);continue}if(o=this.tokenizer.emStrong(e,n,r)){e=e.substring(o.raw.length),t.push(o);continue}if(o=this.tokenizer.codespan(e)){e=e.substring(o.raw.length),t.push(o);continue}if(o=this.tokenizer.br(e)){e=e.substring(o.raw.length),t.push(o);continue}if(o=this.tokenizer.del(e,n,r)){e=e.substring(o.raw.length),t.push(o);continue}if(o=this.tokenizer.autolink(e)){e=e.substring(o.raw.length),t.push(o);continue}if(!this.state.inLink&&(o=this.tokenizer.url(e))){e=e.substring(o.raw.length),t.push(o);continue}let p=e;if(this.options.extensions?.startInline){let a=1/0,u=e.slice(1),c;this.options.extensions.startInline.forEach(h=>{c=h.call({lexer:this},u),typeof c=="number"&&c>=0&&(a=Math.min(a,c))}),a<1/0&&a>=0&&(p=e.substring(0,a+1))}if(o=this.tokenizer.inlineText(p)){e=e.substring(o.raw.length),o.raw.slice(-1)!=="_"&&(r=o.raw.slice(-1)),s=!0;let a=t.at(-1);a?.type==="text"?(a.raw+=o.raw,a.text+=o.text):t.push(o);continue}if(e){this.infiniteLoopError(e.charCodeAt(0));break}}return t}infiniteLoopError(e){let t="Infinite loop on byte: "+e;if(this.options.silent)console.error(t);else throw new Error(t)}};var y=class{options;parser;constructor(e){this.options=e||R}space(e){return""}code({text:e,lang:t,escaped:n}){let s=(t||"").match(m.notSpaceStart)?.[0],r=e.replace(m.endingNewline,"")+`
+`;return s?'<pre><code class="language-'+O(s)+'">'+(n?r:O(r,!0))+`</code></pre>
+`:"<pre><code>"+(n?r:O(r,!0))+`</code></pre>
+`}blockquote({tokens:e}){return`<blockquote>
+${this.parser.parse(e)}</blockquote>
+`}html({text:e}){return e}def(e){return""}heading({tokens:e,depth:t}){return`<h${t}>${this.parser.parseInline(e)}</h${t}>
+`}hr(e){return`<hr>
+`}list(e){let t=e.ordered,n=e.start,s="";for(let o=0;o<e.items.length;o++){let p=e.items[o];s+=this.listitem(p)}let r=t?"ol":"ul",i=t&&n!==1?' start="'+n+'"':"";return"<"+r+i+`>
+`+s+"</"+r+`>
+`}listitem(e){return`<li>${this.parser.parse(e.tokens)}</li>
+`}checkbox({checked:e}){return"<input "+(e?'checked="" ':"")+'disabled="" type="checkbox"> '}paragraph({tokens:e}){return`<p>${this.parser.parseInline(e)}</p>
+`}table(e){let t="",n="";for(let r=0;r<e.header.length;r++)n+=this.tablecell(e.header[r]);t+=this.tablerow({text:n});let s="";for(let r=0;r<e.rows.length;r++){let i=e.rows[r];n="";for(let o=0;o<i.length;o++)n+=this.tablecell(i[o]);s+=this.tablerow({text:n})}return s&&(s=`<tbody>${s}</tbody>`),`<table>
+<thead>
+`+t+`</thead>
+`+s+`</table>
+`}tablerow({text:e}){return`<tr>
+${e}</tr>
+`}tablecell(e){let t=this.parser.parseInline(e.tokens),n=e.header?"th":"td";return(e.align?`<${n} align="${e.align}">`:`<${n}>`)+t+`</${n}>
+`}strong({tokens:e}){return`<strong>${this.parser.parseInline(e)}</strong>`}em({tokens:e}){return`<em>${this.parser.parseInline(e)}</em>`}codespan({text:e}){return`<code>${O(e,!0)}</code>`}br(e){return"<br>"}del({tokens:e}){return`<del>${this.parser.parseInline(e)}</del>`}link({href:e,title:t,tokens:n}){let s=this.parser.parseInline(n),r=ee(e);if(r===null)return s;e=r;let i='<a href="'+e+'"';return t&&(i+=' title="'+O(t)+'"'),i+=">"+s+"</a>",i}image({href:e,title:t,text:n,tokens:s}){s&&(n=this.parser.parseInline(s,this.parser.textRenderer));let r=ee(e);if(r===null)return O(n);e=r;let i=`<img src="${e}" alt="${O(n)}"`;return t&&(i+=` title="${O(t)}"`),i+=">",i}text(e){return"tokens"in e&&e.tokens?this.parser.parseInline(e.tokens):"escaped"in e&&e.escaped?e.text:O(e.text)}};var _=class{strong({text:e}){return e}em({text:e}){return e}codespan({text:e}){return e}del({text:e}){return e}html({text:e}){return e}text({text:e}){return e}link({text:e}){return""+e}image({text:e}){return""+e}br(){return""}checkbox({raw:e}){return e}};var b=class l{options;renderer;textRenderer;constructor(e){this.options=e||R,this.options.renderer=this.options.renderer||new y,this.renderer=this.options.renderer,this.renderer.options=this.options,this.renderer.parser=this,this.textRenderer=new _}static parse(e,t){return new l(t).parse(e)}static parseInline(e,t){return new l(t).parseInline(e)}parse(e){this.renderer.parser=this;let t="";for(let n=0;n<e.length;n++){let s=e[n];if(this.options.extensions?.renderers?.[s.type]){let i=s,o=this.options.extensions.renderers[i.type].call({parser:this},i);if(o!==!1||!["space","hr","heading","code","table","blockquote","list","checkbox","html","def","paragraph","text"].includes(i.type)){t+=o||"";continue}}let r=s;switch(r.type){case"space":{t+=this.renderer.space(r);break}case"hr":{t+=this.renderer.hr(r);break}case"heading":{t+=this.renderer.heading(r);break}case"code":{t+=this.renderer.code(r);break}case"table":{t+=this.renderer.table(r);break}case"blockquote":{t+=this.renderer.blockquote(r);break}case"list":{t+=this.renderer.list(r);break}case"checkbox":{t+=this.renderer.checkbox(r);break}case"html":{t+=this.renderer.html(r);break}case"def":{t+=this.renderer.def(r);break}case"paragraph":{t+=this.renderer.paragraph(r);break}case"text":{t+=this.renderer.text(r);break}default:{let i='Token with "'+r.type+'" type was not found.';if(this.options.silent)return console.error(i),"";throw new Error(i)}}}return t}parseInline(e,t=this.renderer){this.renderer.parser=this;let n="";for(let s=0;s<e.length;s++){let r=e[s];if(this.options.extensions?.renderers?.[r.type]){let o=this.options.extensions.renderers[r.type].call({parser:this},r);if(o!==!1||!["escape","html","link","image","checkbox","strong","em","codespan","br","del","text"].includes(r.type)){n+=o||"";continue}}let i=r;switch(i.type){case"escape":{n+=t.text(i);break}case"html":{n+=t.html(i);break}case"link":{n+=t.link(i);break}case"image":{n+=t.image(i);break}case"checkbox":{n+=t.checkbox(i);break}case"strong":{n+=t.strong(i);break}case"em":{n+=t.em(i);break}case"codespan":{n+=t.codespan(i);break}case"br":{n+=t.br(i);break}case"del":{n+=t.del(i);break}case"text":{n+=t.text(i);break}default:{let o='Token with "'+i.type+'" type was not found.';if(this.options.silent)return console.error(o),"";throw new Error(o)}}}return n}};var P=class{options;block;constructor(e){this.options=e||R}static passThroughHooks=new Set(["preprocess","postprocess","processAllTokens","emStrongMask"]);static passThroughHooksRespectAsync=new Set(["preprocess","postprocess","processAllTokens"]);preprocess(e){return e}postprocess(e){return e}processAllTokens(e){return e}emStrongMask(e){return e}provideLexer(e=this.block){return e?x.lex:x.lexInline}provideParser(e=this.block){return e?b.parse:b.parseInline}};var D=class{defaults=z();options=this.setOptions;parse=this.parseMarkdown(!0);parseInline=this.parseMarkdown(!1);Parser=b;Renderer=y;TextRenderer=_;Lexer=x;Tokenizer=w;Hooks=P;constructor(...e){this.use(...e)}walkTokens(e,t){let n=[];for(let s of e)switch(n=n.concat(t.call(this,s)),s.type){case"table":{let r=s;for(let i of r.header)n=n.concat(this.walkTokens(i.tokens,t));for(let i of r.rows)for(let o of i)n=n.concat(this.walkTokens(o.tokens,t));break}case"list":{let r=s;n=n.concat(this.walkTokens(r.items,t));break}default:{let r=s;this.defaults.extensions?.childTokens?.[r.type]?this.defaults.extensions.childTokens[r.type].forEach(i=>{let o=r[i].flat(1/0);n=n.concat(this.walkTokens(o,t))}):r.tokens&&(n=n.concat(this.walkTokens(r.tokens,t)))}}return n}use(...e){let t=this.defaults.extensions||{renderers:{},childTokens:{}};return e.forEach(n=>{let s={...n};if(s.async=this.defaults.async||s.async||!1,n.extensions&&(n.extensions.forEach(r=>{if(!r.name)throw new Error("extension name required");if("renderer"in r){let i=t.renderers[r.name];i?t.renderers[r.name]=function(...o){let p=r.renderer.apply(this,o);return p===!1&&(p=i.apply(this,o)),p}:t.renderers[r.name]=r.renderer}if("tokenizer"in r){if(!r.level||r.level!=="block"&&r.level!=="inline")throw new Error("extension level must be 'block' or 'inline'");let i=t[r.level];i?i.unshift(r.tokenizer):t[r.level]=[r.tokenizer],r.start&&(r.level==="block"?t.startBlock?t.startBlock.push(r.start):t.startBlock=[r.start]:r.level==="inline"&&(t.startInline?t.startInline.push(r.start):t.startInline=[r.start]))}"childTokens"in r&&r.childTokens&&(t.childTokens[r.name]=r.childTokens)}),s.extensions=t),n.renderer){let r=this.defaults.renderer||new y(this.defaults);for(let i in n.renderer){if(!(i in r))throw new Error(`renderer '${i}' does not exist`);if(["options","parser"].includes(i))continue;let o=i,p=n.renderer[o],a=r[o];r[o]=(...u)=>{let c=p.apply(r,u);return c===!1&&(c=a.apply(r,u)),c||""}}s.renderer=r}if(n.tokenizer){let r=this.defaults.tokenizer||new w(this.defaults);for(let i in n.tokenizer){if(!(i in r))throw new Error(`tokenizer '${i}' does not exist`);if(["options","rules","lexer"].includes(i))continue;let o=i,p=n.tokenizer[o],a=r[o];r[o]=(...u)=>{let c=p.apply(r,u);return c===!1&&(c=a.apply(r,u)),c}}s.tokenizer=r}if(n.hooks){let r=this.defaults.hooks||new P;for(let i in n.hooks){if(!(i in r))throw new Error(`hook '${i}' does not exist`);if(["options","block"].includes(i))continue;let o=i,p=n.hooks[o],a=r[o];P.passThroughHooks.has(i)?r[o]=u=>{if(this.defaults.async&&P.passThroughHooksRespectAsync.has(i))return(async()=>{let h=await p.call(r,u);return a.call(r,h)})();let c=p.call(r,u);return a.call(r,c)}:r[o]=(...u)=>{if(this.defaults.async)return(async()=>{let h=await p.apply(r,u);return h===!1&&(h=await a.apply(r,u)),h})();let c=p.apply(r,u);return c===!1&&(c=a.apply(r,u)),c}}s.hooks=r}if(n.walkTokens){let r=this.defaults.walkTokens,i=n.walkTokens;s.walkTokens=function(o){let p=[];return p.push(i.call(this,o)),r&&(p=p.concat(r.call(this,o))),p}}this.defaults={...this.defaults,...s}}),this}setOptions(e){return this.defaults={...this.defaults,...e},this}lexer(e,t){return x.lex(e,t??this.defaults)}parser(e,t){return b.parse(e,t??this.defaults)}parseMarkdown(e){return(n,s)=>{let r={...s},i={...this.defaults,...r},o=this.onError(!!i.silent,!!i.async);if(this.defaults.async===!0&&r.async===!1)return o(new Error("marked(): The async option was set to true by an extension. Remove async: false from the parse options object to return a Promise."));if(typeof n>"u"||n===null)return o(new Error("marked(): input parameter is undefined or null"));if(typeof n!="string")return o(new Error("marked(): input parameter is of type "+Object.prototype.toString.call(n)+", string expected"));if(i.hooks&&(i.hooks.options=i,i.hooks.block=e),i.async)return(async()=>{let p=i.hooks?await i.hooks.preprocess(n):n,u=await(i.hooks?await i.hooks.provideLexer(e):e?x.lex:x.lexInline)(p,i),c=i.hooks?await i.hooks.processAllTokens(u):u;i.walkTokens&&await Promise.all(this.walkTokens(c,i.walkTokens));let k=await(i.hooks?await i.hooks.provideParser(e):e?b.parse:b.parseInline)(c,i);return i.hooks?await i.hooks.postprocess(k):k})().catch(o);try{i.hooks&&(n=i.hooks.preprocess(n));let a=(i.hooks?i.hooks.provideLexer(e):e?x.lex:x.lexInline)(n,i);i.hooks&&(a=i.hooks.processAllTokens(a)),i.walkTokens&&this.walkTokens(a,i.walkTokens);let c=(i.hooks?i.hooks.provideParser(e):e?b.parse:b.parseInline)(a,i);return i.hooks&&(c=i.hooks.postprocess(c)),c}catch(p){return o(p)}}}onError(e,t){return n=>{if(n.message+=`
+Please report this to https://github.com/markedjs/marked.`,e){let s="<p>An error occurred:</p><pre>"+O(n.message+"",!0)+"</pre>";return t?Promise.resolve(s):s}if(t)return Promise.reject(n);throw n}}};var C=new D;function g(l,e){return C.parse(l,e)}g.options=g.setOptions=function(l){return C.setOptions(l),g.defaults=C.defaults,F(g.defaults),g};g.getDefaults=z;g.defaults=R;function Re(...l){return C.use(...l),g.defaults=C.defaults,F(g.defaults),g}g.use=Re;g.walkTokens=function(l,e){return C.walkTokens(l,e)};g.parseInline=C.parseInline;g.Parser=b;g.parser=b.parse;g.Renderer=y;g.TextRenderer=_;g.Lexer=x;g.lexer=x.lex;g.Tokenizer=w;g.Hooks=P;g.parse=g;var Ot=g.options,wt=g.setOptions,yt=g.walkTokens,Pt=g.parseInline,St=g,_t=b.parse,$t=x.lex;
+
+if(__exports != exports)module.exports = exports;return module.exports}));
+//# sourceMappingURL=marked.umd.js.map
+GTT_MARKED_EOF
+mv -f "$APPHOME/static/marked.umd.js.new" "$APPHOME/static/marked.umd.js"
+chmod 644 "$APPHOME/static/marked.umd.js"
+
+cat > "$APPHOME/static/icon.svg.new" <<'GTT_ICON_EOF'
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img"
+     aria-label="MA Reader">
+  <!-- Three lines of text with the one being read lit. That is the whole app
+       in one glyph, and it is the only shape that survives 16 pixels: an
+       earlier version broke the middle line into separate words and they
+       merged into mush in a browser tab. -->
+  <rect width="64" height="64" rx="14" fill="#0a0d14"/>
+  <rect x="11" y="15" width="42" height="6" rx="3" fill="#3f4557"/>
+  <rect x="11" y="28" width="30" height="9" rx="4.5" fill="#ebcd2d"/>
+  <rect x="11" y="44" width="34" height="6" rx="3" fill="#3f4557"/>
+</svg>
+GTT_ICON_EOF
+mv -f "$APPHOME/static/icon.svg.new" "$APPHOME/static/icon.svg"
+chmod 644 "$APPHOME/static/icon.svg"
+done_
+
+# ------------------------------------------------------- which voice is which
+# NEVER OVERWRITTEN. Google publishes no gender for the thirty voices, so this
+# table was MEASURED — the median pitch of each voice's own audio — and it is
+# shipped so that a new install has the two voice rows without spending
+# sixteen syntheses out of a ten-a-day budget to find out what they are.
+#
+# But it is also where a voice moved by hand is recorded, and that is somebody
+# deciding something the measurement could not. So an existing file is left
+# exactly alone: shipped as a starting point, never as a correction.
+step "voice rows"
+if [ -f "$APPHOME/voice_sex.json" ]; then
+  printf "kept yours\n"
+else
+  cat > "$APPHOME/voice_sex.json.new" <<'GTT_VOICESEX_JSON_EOF'
+{
+ "Achernar": {
+  "borderline": false,
+  "by": "measured",
+  "f0": 186.0,
+  "frames": 45,
+  "free": true,
+  "sex": "F"
+ },
+ "Achird": {
+  "borderline": false,
+  "by": "measured",
+  "f0": 136.8,
+  "frames": 46,
+  "free": true,
+  "sex": "M"
+ },
+ "Algenib": {
+  "borderline": false,
+  "by": "measured",
+  "f0": 105.3,
+  "frames": 46,
+  "free": true,
+  "sex": "M"
+ },
+ "Algieba": {
+  "borderline": false,
+  "by": "measured",
+  "f0": 104.6,
+  "frames": 43,
+  "free": true,
+  "sex": "M"
+ },
+ "Alnilam": {
+  "borderline": false,
+  "by": "measured",
+  "f0": 103.2,
+  "frames": 51,
+  "free": true,
+  "sex": "M"
+ },
+ "Aoede": {
+  "borderline": false,
+  "by": "measured",
+  "f0": 188.2,
+  "frames": 50,
+  "free": true,
+  "sex": "F"
+ },
+ "Autonoe": {
+  "borderline": false,
+  "by": "measured",
+  "f0": 262.3,
+  "frames": 50,
+  "free": true,
+  "sex": "F"
+ },
+ "Callirrhoe": {
+  "borderline": false,
+  "by": "measured",
+  "f0": 228.6,
+  "frames": 60,
+  "free": true,
+  "sex": "F"
+ },
+ "Charon": {
+  "borderline": false,
+  "by": "measured",
+  "f0": 92.5,
+  "frames": 21,
+  "free": true,
+  "sex": "M"
+ },
+ "Despina": {
+  "borderline": false,
+  "by": "measured",
+  "f0": 246.2,
+  "frames": 50,
+  "free": true,
+  "sex": "F"
+ },
+ "Enceladus": {
+  "borderline": false,
+  "by": "measured",
+  "f0": 87.0,
+  "frames": 38,
+  "free": true,
+  "sex": "M"
+ },
+ "Erinome": {
+  "borderline": false,
+  "by": "measured",
+  "f0": 238.8,
+  "frames": 56,
+  "free": true,
+  "sex": "F"
+ },
+ "Fenrir": {
+  "borderline": false,
+  "by": "measured",
+  "f0": 111.9,
+  "frames": 52,
+  "free": false,
+  "sex": "M"
+ },
+ "Gacrux": {
+  "borderline": false,
+  "by": "measured",
+  "f0": 135.6,
+  "frames": 47,
+  "free": false,
+  "sex": "M"
+ },
+ "Iapetus": {
+  "borderline": true,
+  "by": "hand",
+  "f0": 155.3,
+  "frames": 49,
+  "free": false,
+  "sex": "M"
+ },
+ "Kore": {
+  "borderline": false,
+  "by": "measured",
+  "f0": 213.3,
+  "frames": 39,
+  "free": false,
+  "sex": "F"
+ },
+ "Laomedeia": {
+  "borderline": false,
+  "by": "measured",
+  "f0": 195.1,
+  "frames": 72,
+  "free": false,
+  "sex": "F"
+ },
+ "Leda": {
+  "borderline": false,
+  "by": "measured",
+  "f0": 213.3,
+  "frames": 45,
+  "free": true,
+  "sex": "F"
+ },
+ "Orus": {
+  "borderline": false,
+  "by": "measured",
+  "f0": 135.6,
+  "frames": 49,
+  "free": false,
+  "sex": "M"
+ },
+ "Puck": {
+  "borderline": false,
+  "by": "measured",
+  "f0": 127.0,
+  "frames": 40,
+  "free": true,
+  "sex": "M"
+ },
+ "Pulcherrima": {
+  "borderline": false,
+  "by": "measured",
+  "f0": 126.0,
+  "frames": 68,
+  "free": false,
+  "sex": "M"
+ },
+ "Rasalgethi": {
+  "borderline": false,
+  "by": "measured",
+  "f0": 139.1,
+  "frames": 58,
+  "free": false,
+  "sex": "M"
+ },
+ "Sadachbia": {
+  "borderline": false,
+  "by": "measured",
+  "f0": 119.4,
+  "frames": 57,
+  "free": false,
+  "sex": "M"
+ },
+ "Sadaltager": {
+  "borderline": false,
+  "by": "measured",
+  "f0": 133.3,
+  "frames": 58,
+  "free": false,
+  "sex": "M"
+ },
+ "Schedar": {
+  "borderline": false,
+  "by": "measured",
+  "f0": 129.0,
+  "frames": 47,
+  "free": false,
+  "sex": "M"
+ },
+ "Sulafat": {
+  "borderline": false,
+  "by": "measured",
+  "f0": 205.1,
+  "frames": 53,
+  "free": false,
+  "sex": "F"
+ },
+ "Umbriel": {
+  "borderline": false,
+  "by": "measured",
+  "f0": 106.0,
+  "frames": 56,
+  "free": false,
+  "sex": "M"
+ },
+ "Vindemiatrix": {
+  "borderline": false,
+  "by": "measured",
+  "f0": 183.9,
+  "frames": 89,
+  "free": false,
+  "sex": "F"
+ },
+ "Zephyr": {
+  "borderline": false,
+  "by": "measured",
+  "f0": 175.8,
+  "frames": 41,
+  "free": false,
+  "sex": "F"
+ },
+ "Zubenelgenubi": {
+  "borderline": true,
+  "by": "measured",
+  "f0": 160.0,
+  "frames": 67,
+  "free": false,
+  "sex": "F"
+ }
+}
+GTT_VOICESEX_JSON_EOF
+  mv -f "$APPHOME/voice_sex.json.new" "$APPHOME/voice_sex.json"
+  chmod 644 "$APPHOME/voice_sex.json"
+  printf "30 measured\n"
+fi
 
 # ------------------------------------------------------------ preview cache
 # A preview is the same request every time, so the first press does not have to
