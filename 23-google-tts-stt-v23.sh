@@ -8,9 +8,9 @@
 #   src/10_app.py    9e4f2c4b39bb
 #   src/15_page.html 8968972cd977
 #   src/20_tail.sh   299ff8ca57a5
-#   src/41_reader.py     c738a9b8dcbf
+#   src/41_reader.py     b3295dfbd6fb
 #   src/42_voicesex.py   693670981a6d
-#   src/45_reader.html   b9c77678a684
+#   src/45_reader.html   097d59fdf651
 #   src/46_marked.umd.js eaccee2fb9fb
 #   src/47_icon.svg      231dd5038e47
 #   src/voice_sex.json   35dcb92926b5
@@ -5835,6 +5835,10 @@ _DEFAULT_STATE = {
     "floatPaste": True, "floatFull": True, "floatSwap": True,
     "swapIsPlay": True, "fpX": 0.82, "fpY": 0.72, "ffX": 0.82, "ffY": 0.58,
     "fsX": 0.82, "fsY": 0.44, "fullOnPaste": False, "voiceBar": True,
+    # The browser's own header goes on the first touch. It is two lines of
+    # Chrome's, drawn outside the page, and full screen is the only thing that
+    # takes them away.
+    "hideBar": True,
     # where each of the two voice wheels was left standing
     "vscrollM": 0, "vscrollF": 0,
     "rgbSent": [255, 217, 59], "rgbWord": [226, 59, 78],
@@ -7324,6 +7328,7 @@ body.fullread .reader-scroll{position:fixed; inset:0; max-height:none;
 
   <!-- One engine, so nothing here hides on account of which one. -->
   <div class="chips toprow" id="bothWrap" style="margin:0 0 14px">
+    <button class="chip" id="barTog">Hide the browser bar</button>
     <button class="chip" id="fullPasteTog">Go full screen</button>
     <button class="chip" id="hideTabsTog">Hide the tabs</button>
     <div class="ytstep setstep">
@@ -7619,7 +7624,7 @@ const ST = {
   spSet: 0, spPerSet: 4, bothEngines: false,
   floatPaste: true, fpX: 0.82, fpY: 0.72,
   floatFull: true, ffX: 0.82, ffY: 0.58,
-  emotion: "Neutral", pace: "normal", vscrollM: 0, vscrollF: 0,
+  emotion: "Neutral", pace: "normal", vscrollM: 0, vscrollF: 0, hideBar: true,
   floatSwap: true, swapIsPlay: false, fsX: 0.82, fsY: 0.44,
   adbMode: true, browser: "chrome",
   /* null means never chosen, so the first four can be offered. An empty
@@ -9636,6 +9641,7 @@ function step(kind, d){
 /* ---------- modes / sheet ---------- */
 function refreshToggles(){
   { const b=$("#fullPasteTog"); if(b) b.classList.toggle("on", !!ST.fullOnPaste); }
+  { const b=$("#barTog"); if(b) b.classList.toggle("on", !!ST.hideBar); }
   { const b=$("#hideTabsTog"); if(b) b.classList.toggle("on", !!ST.hideTabs); }
   document.body.classList.toggle("notabs", !!ST.hideTabs);
   { const b=$("#adbTog"); if(b) b.classList.toggle("on", !!ST.adbMode); }
@@ -9945,7 +9951,7 @@ function stateBody(){
         fullOnPaste:!!ST.fullOnPaste,
         hideTabs:!!ST.hideTabs, mode:ST.mode||"read", pane:ST.pane||"app",
         voiceBar:!!ST.voiceBar,
-        vscrollM:ST.vscrollM|0, vscrollF:ST.vscrollF|0,
+        vscrollM:ST.vscrollM|0, vscrollF:ST.vscrollF|0, hideBar:!!ST.hideBar,
         floatPaste:!!ST.floatPaste, fpX:ST.fpX, fpY:ST.fpY,
         floatFull:!!ST.floatFull, ffX:ST.ffX, ffY:ST.ffY,
         floatSwap:!!ST.floatSwap, swapIsPlay:!!ST.swapIsPlay,
@@ -10202,6 +10208,21 @@ function bind(){
       toast(ST.hideTabs ? "Tabs hidden, the gear stays" : "Tabs back");
     };
   }
+  { const b=$("#barTog");
+    if(b) b.onclick = ()=>{
+      ST.hideBar = !ST.hideBar;
+      refreshToggles(); persist();
+      if(ST.hideBar){
+        /* this press IS a gesture, so the bar can go now rather than on the
+           next load */
+        try{ reqFull(); }catch(e){}
+        toast("The browser bar goes on the first touch");
+      } else {
+        try{ leaveFull(); }catch(e){}
+        toast("The browser bar stays");
+      }
+    };
+  }
   { const b=$("#fullPasteTog");
     if(b) b.onclick = ()=>{
       ST.fullOnPaste = !ST.fullOnPaste;
@@ -10399,6 +10420,38 @@ function fsElement(){
    sits above the page, and cannot be touched or dismissed from here. No
    request, no banner. In a plain tab the request is still needed, and the
    banner comes with it whether we like it or not. */
+/* ---------- THE BROWSER'S OWN BAR ----------
+   Android opens this in a custom tab, whose header is two lines: the page
+   title, and under it the address. Both are Chrome's, drawn outside the page,
+   and NOTHING IN HERE CAN HIDE THEM — a page cannot rewrite the browser's
+   security UI, and it should not be able to. Putting the address in the title
+   only got it printed twice.
+
+   What a page CAN do is ask for full screen, which takes the whole header
+   away, both lines of it, along with the navigation bar. That has to be asked
+   for inside a user gesture: a browser will not let a page go full screen
+   just because it loaded, and it is right not to.
+
+   So it is armed on the FIRST touch. One listener, fired once, removed
+   immediately — the first time a finger lands anywhere, the bar goes, and
+   from then on the reader has the whole screen. Nothing is hijacked: the tap
+   still does whatever it was going to do, because this listens in the capture
+   phase and does not stop it.
+
+   Leaving full screen afterwards is honoured and not undone. The one-shot has
+   already fired, so pressing escape or swiping down gives the bar back and it
+   stays back until the page is loaded again. */
+function armBarHide(){
+  if(!ST.hideBar) return;
+  if(isStandalone()) return;         /* a home-screen launch has no bar */
+  const go = ()=>{
+    document.removeEventListener("pointerdown", go, true);
+    document.removeEventListener("keydown", go, true);
+    try{ reqFull(); }catch(e){}
+  };
+  document.addEventListener("pointerdown", go, true);
+  document.addEventListener("keydown", go, true);
+}
 function isStandalone(){
   try{
     if(window.navigator && window.navigator.standalone) return true;
@@ -11301,6 +11354,7 @@ function boot(){
     ST.mode = (st.mode === "text") ? "text" : "read";
     ST.voiceBar = (st.voiceBar === undefined) ? true : !!st.voiceBar;
     /* where the two wheels were left standing */
+    ST.hideBar = (st.hideBar === undefined) ? true : !!st.hideBar;
     ST.vscrollM = (typeof st.vscrollM === "number") ? st.vscrollM : 0;
     ST.vscrollF = (typeof st.vscrollF === "number") ? st.vscrollF : 0;
     ST.floatPaste = (st.floatPaste === undefined) ? true : !!st.floatPaste;
@@ -11388,7 +11442,7 @@ function boot(){
     applyEngineCards(); renderSpAccents(); renderSpGrid(); renderSpKeys();
     renderEdgeGrid(); renderSpKeyList(); renderSpDead(); loadCroVoices();
     renderGroq(); wireGroq(); renderKeyList(); wireKeys();
-    loadDirection();
+    loadDirection(); armBarHide();
     mediaSetup(); wireFloat(); wireFloatF(); wireFloatS(); wireFsWatch(); wirePersistFlush();
     renderVoices(); renderLangList();
     applySpeed(); applyVolume(); applyGap(); applyLag(); applySize();

@@ -415,6 +415,10 @@ _DEFAULT_STATE = {
     "floatPaste": True, "floatFull": True, "floatSwap": True,
     "swapIsPlay": True, "fpX": 0.82, "fpY": 0.72, "ffX": 0.82, "ffY": 0.58,
     "fsX": 0.82, "fsY": 0.44, "fullOnPaste": False, "voiceBar": True,
+    # The browser's own header goes on the first touch. It is two lines of
+    # Chrome's, drawn outside the page, and full screen is the only thing that
+    # takes them away.
+    "hideBar": True,
     # where each of the two voice wheels was left standing
     "vscrollM": 0, "vscrollF": 0,
     "rgbSent": [255, 217, 59], "rgbWord": [226, 59, 78],
