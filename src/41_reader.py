@@ -655,6 +655,7 @@ def mount(app_module, flask_app):
         """
         d = app_module.read_ledger()
         dead = d.get("dead", {})
+        wall = d.get("wall", {})
         rows = []
         for label, key in app_module.load_ring():
             per, left_total, used_total = [], 0, 0
@@ -669,14 +670,24 @@ def mount(app_module, flask_app):
                             "measured": (app_module.LIMITS.get(model, {})
                                          .get("rpd") is not None)})
             why = dead.get(label)
+            walled = all(wall.get("%s|%s" % (label, m)) for m in app_module.TTS_CHAIN)
+            # THREE STATES, AND THE MIDDLE ONE IS THE POINT.
+            #   dead     the key itself is bad
+            #   refused  the provider said no today; it will not be asked again
+            #   spent    OUR COUNT says it is finished, which is a guess. It is
+            #            still asked, last, because the count has been wrong
+            #   ok       it has budget by our count
+            state = ("dead" if why else "refused" if walled
+                     else "spent" if left_total == 0 else "ok")
             rows.append({"label": label, "mask": app_module.mask(key),
                          "dead": bool(why), "why": (why or ""),
-                         "used": used_total,
+                         "state": state, "used": used_total,
                          "left": (0 if why else left_total), "models": per})
-        live = [r for r in rows if not r["dead"]]
+        live = [r for r in rows if r["state"] in ("ok", "spent")]
         return jsonify({"keys": rows,
-                        "left": sum(r["left"] for r in live),
-                        "spent_keys": sum(1 for r in live if r["left"] == 0),
+                        "left": sum(r["left"] for r in rows if r["state"] == "ok"),
+                        "willtry": len(live),
+                        "refused": sum(1 for r in rows if r["state"] == "refused"),
                         "resets_in": int(app_module.seconds_to_reset())})
 
     @flask_app.get("/reader/api/groq/status")

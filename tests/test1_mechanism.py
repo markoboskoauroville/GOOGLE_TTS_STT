@@ -177,11 +177,14 @@ tts = [m for m in b["models"] if m["model"] == "gemini-2.5-flash-preview-tts"][0
 check("a key at its wall removes exactly its own share", tts["left"], 10)
 
 # ------------------------------------------------------ fallback ordering
-# candidates() decides who is asked next. The most budget first, dead keys
-# never, and a key with nothing left never appears at all.
+# candidates() decides who is asked next. Most budget first; a dead key never;
+# and a key the LEDGER thinks is spent goes to the back rather than off the
+# list, because the ledger is this app's arithmetic about somebody else's
+# allowance and the provider is the only authority on it. Only a key the
+# provider itself refused today — a wall — is skipped.
 app.mark_dead("svaram", "401")
 order = app.candidates(["gemini-2.5-flash-preview-tts"])
-check("a dead key is not offered", [l for l, _, _ in order], [])
+check("a dead key is not offered at all", [l for l, _, _ in order], ["tribal"])
 app.write_ledger({"day": app.pacific_day(), "spend": {}, "seen": {},
                   "audio_out": 0.0, "audio_in": 0.0, "dead": {}})
 app.spend("tribal", "gemini-2.5-flash-preview-tts", 9)
@@ -190,7 +193,34 @@ check("the key with more left is asked first", [l for l, _, _ in order],
       ["svaram", "tribal"])
 app.spend("tribal", "gemini-2.5-flash-preview-tts", 1)
 order = app.candidates(["gemini-2.5-flash-preview-tts"])
-check("a spent-out key drops off the list", [l for l, _, _ in order], ["svaram"])
+check("a key the ledger calls spent is tried LAST, not dropped",
+      [l for l, _, _ in order], ["svaram", "tribal"])
+
+# THE BUG THIS ENCODES. Eighteen keys all counted to their cap, candidates()
+# returning nothing, the reader stopping mid-text — and the first key, asked
+# directly, answering 200 and speaking. One round trip is the whole price of
+# finding that out, and refusing to pay it cost a working key.
+d = app.read_ledger()
+d["spend"]["svaram|gemini-2.5-flash-preview-tts"] = 10
+app.write_ledger(d)
+order = app.candidates(["gemini-2.5-flash-preview-tts"])
+check("with every key counted out it still offers all of them",
+      sorted(l for l, _, _ in order), ["svaram", "tribal"])
+
+# A wall is different: the provider said no, today, in so many words.
+d = app.read_ledger()
+d["wall"] = {"svaram|gemini-2.5-flash-preview-tts": d["day"]}
+app.write_ledger(d)
+order = app.candidates(["gemini-2.5-flash-preview-tts"])
+check("a key the PROVIDER refused today is skipped", [l for l, _, _ in order],
+      ["tribal"])
+stale = app.read_ledger()
+stale["day"] = (datetime.now(app.PACIFIC) - timedelta(days=1)).strftime("%Y-%m-%d")
+app.write_ledger(stale)
+check("and the wall does not survive midnight",
+      app.read_ledger().get("wall", {}), {})
+app.write_ledger({"day": app.pacific_day(), "spend": {}, "seen": {},
+                  "audio_out": 0.0, "audio_in": 0.0, "dead": {}})
 
 # ------------------------------------------------------------------ audio
 # 25 tokens a second, measured. The WAV header is written by hand because

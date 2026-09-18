@@ -5,12 +5,12 @@
 #   src/00_head.sh   9b27f46ee8bc
 #   src/30_transcribe.html   67e73826805d   vendored, engine swapped at build
 #   src/seed/                 47 cached previews
-#   src/10_app.py    9e4f2c4b39bb
+#   src/10_app.py    37b04f43fc0b
 #   src/15_page.html 8968972cd977
 #   src/20_tail.sh   299ff8ca57a5
-#   src/41_reader.py     b72599ecf4da
+#   src/41_reader.py     153752ae042a
 #   src/42_voicesex.py   693670981a6d
-#   src/45_reader.html   9df2d071631c
+#   src/45_reader.html   f22525a00344
 #   src/46_marked.umd.js eaccee2fb9fb
 #   src/47_icon.svg      231dd5038e47
 #   src/voice_sex.json   35dcb92926b5
@@ -601,6 +601,9 @@ def read_ledger():
     d.setdefault("spend", {})
     d.setdefault("seen", {})
     d.setdefault("dead", {})
+    # Deliberately NOT carried across the midnight rollover above: a wall is
+    # today's refusal, and tomorrow the allowance is new.
+    d.setdefault("wall", {})
     d.setdefault("audio_out", 0.0)
     d.setdefault("audio_in", 0.0)
     d.setdefault("voice_use", {})
@@ -717,19 +720,49 @@ def read_quota(body):
 
 
 def candidates(chain):
-    """(label, key, model) ordered by budget left, most first. Skips anything
-    the ledger already knows is dead or spent out."""
+    """(label, key, model), the ones with budget first and the rest after.
+
+    THE LEDGER IS A PREDICTION. THE PROVIDER IS THE TRUTH.
+
+    This used to drop every key whose ledger count had reached the daily cap,
+    and that cap is a number in LIMITS — ten, for the TTS models — which is
+    this app's belief about somebody else's allowance. Believe it too firmly
+    and the app locks itself out of keys that still work.
+
+    It did. MEASURED, 18.9.2026: eighteen keys, every one of them at "10 of 10
+    used", candidates() returning an empty list and the reader stopping at
+    sentence 19 of 33 with "the day's budget is used up". Asked directly,
+    ignoring the ledger, the FIRST key answered HTTP 200 and spoke. The others
+    really were at 429. One working key in the ring and the app would not try
+    it, because its own arithmetic said not to bother.
+
+    So a key the ledger thinks is spent is no longer dropped — it goes to the
+    BACK of the queue. Keys with budget are still preferred and still tried
+    first, so nothing changes in ordinary use; when those run out the ring
+    keeps going instead of giving up, and the only cost of being wrong is one
+    round trip that returns 429.
+
+    WHAT IS DROPPED is a key that the PROVIDER refused today: a 429 carrying a
+    daily limit is recorded as a wall, and a wall is a fact rather than a
+    guess. Those are skipped, so the discovery pass happens once per key per
+    day rather than once per sentence. Walls are not carried across midnight
+    Pacific, because neither is the allowance.
+    """
     d = read_ledger()
+    wall = d.get("wall", {})
     ring = [(l, k) for l, k in load_ring() if l not in d["dead"]]
-    out = []
+    fresh, overdrawn = [], []
     for model in chain:
         cap = limit_for(model, "rpd")
         for label, key in ring:
-            left = cap - d["spend"].get("%s|%s" % (label, model), 0)
-            if left > 0:
-                out.append((left, label, key, model))
-    out.sort(key=lambda x: -x[0])
-    return [(l, k, m) for _, l, k, m in out]
+            slot = "%s|%s" % (label, model)
+            if wall.get(slot):
+                continue                    # the provider itself said no today
+            left = cap - d["spend"].get(slot, 0)
+            (fresh if left > 0 else overdrawn).append((left, label, key, model))
+    fresh.sort(key=lambda x: -x[0])
+    overdrawn.sort(key=lambda x: -x[0])     # least overdrawn first: likeliest
+    return [(l, k, m) for _, l, k, m in fresh + overdrawn]
 
 
 def with_fallback(chain, build_payload, verb="generateContent", tries=40):
@@ -751,10 +784,14 @@ def with_fallback(chain, build_payload, verb="generateContent", tries=40):
             q = read_quota(body if isinstance(body, str) else "")
             if q.get("rpd"):
                 note_limit(model, rpd=q["rpd"])
-                # this key is finished for today on this model
+                # this key is finished for today on this model, and this time
+                # it is the PROVIDER saying so rather than our own counting.
+                # The wall is what candidates() skips; a merely predicted
+                # spend is only a reason to try it last.
                 with _lock:
                     d = read_ledger()
                     d["spend"]["%s|%s" % (label, model)] = q["rpd"]
+                    d.setdefault("wall", {})["%s|%s" % (label, model)] = d["day"]
                     write_ledger(d)
                 log.append("%s/%s at daily wall (%d)" % (label, model, q["rpd"]))
             else:
@@ -6075,6 +6112,7 @@ def mount(app_module, flask_app):
         """
         d = app_module.read_ledger()
         dead = d.get("dead", {})
+        wall = d.get("wall", {})
         rows = []
         for label, key in app_module.load_ring():
             per, left_total, used_total = [], 0, 0
@@ -6089,14 +6127,24 @@ def mount(app_module, flask_app):
                             "measured": (app_module.LIMITS.get(model, {})
                                          .get("rpd") is not None)})
             why = dead.get(label)
+            walled = all(wall.get("%s|%s" % (label, m)) for m in app_module.TTS_CHAIN)
+            # THREE STATES, AND THE MIDDLE ONE IS THE POINT.
+            #   dead     the key itself is bad
+            #   refused  the provider said no today; it will not be asked again
+            #   spent    OUR COUNT says it is finished, which is a guess. It is
+            #            still asked, last, because the count has been wrong
+            #   ok       it has budget by our count
+            state = ("dead" if why else "refused" if walled
+                     else "spent" if left_total == 0 else "ok")
             rows.append({"label": label, "mask": app_module.mask(key),
                          "dead": bool(why), "why": (why or ""),
-                         "used": used_total,
+                         "state": state, "used": used_total,
                          "left": (0 if why else left_total), "models": per})
-        live = [r for r in rows if not r["dead"]]
+        live = [r for r in rows if r["state"] in ("ok", "spent")]
         return jsonify({"keys": rows,
-                        "left": sum(r["left"] for r in live),
-                        "spent_keys": sum(1 for r in live if r["left"] == 0),
+                        "left": sum(r["left"] for r in rows if r["state"] == "ok"),
+                        "willtry": len(live),
+                        "refused": sum(1 for r in rows if r["state"] == "refused"),
                         "resets_in": int(app_module.seconds_to_reset())})
 
     @flask_app.get("/reader/api/groq/status")
@@ -6372,7 +6420,9 @@ header{
 .kbar .kt{flex:1; height:6px; border-radius:3px; background:var(--line);
   overflow:hidden}
 .kbar .kf{height:100%; background:var(--play); border-radius:3px}
-.kbar.spent .kf{background:var(--exit)}
+.kbar.refused .kf{background:var(--exit)}
+.kbar.spent .kf{background:var(--act)}
+.kbar.spent .kv,.kbar.refused .kv{color:var(--dim)}
 .kbar.dead .kn{text-decoration:line-through; opacity:.6}
 .kbar .kv{color:var(--text); min-width:3.4em; text-align:right;
   font-variant-numeric:tabular-nums}
@@ -8314,7 +8364,8 @@ function renderBudget(){
     el.textContent = d.left > 0
       ? (d.left + " of " + d.total + " sentences left today, across " +
          d.keys + " keys. Resets in " + when + ".")
-      : ("None left today. It comes back in " + when + ".");
+      : ("Our count says none left \u2014 the ring is still asked anyway, " +
+         "because the count has been wrong. Resets in " + when + ".");
   }).catch(()=>{ el.textContent = "not known"; });
 }
 /* EVERY KEY AND WHAT IS LEFT ON IT. */
@@ -8327,7 +8378,7 @@ function renderKeyBars(){
       const cap = (k.models || []).reduce((a,m)=>a+(m.cap||0), 0) || 1;
       const guess = (k.models || []).some(m=>!m.measured);
       const row = document.createElement("div");
-      row.className = "kbar" + (k.dead ? " dead" : (k.left === 0 ? " spent" : ""));
+      row.className = "kbar " + (k.state || "ok");
       const nm = document.createElement("span");
       nm.className = "kn"; nm.textContent = "Key " + (i+1);
       nm.title = k.label + "  " + k.mask + (k.why ? "  (" + k.why + ")" : "");
@@ -8337,8 +8388,12 @@ function renderKeyBars(){
       tr.appendChild(fl);
       const vv = document.createElement("span");
       vv.className = "kv";
-      vv.textContent = k.dead ? (k.why || "dead")
-                              : (k.left + (guess ? " ?" : ""));
+      /* "spent" is our count, not theirs, and it is still tried — saying 0
+         there would repeat the mistake that stopped the reading. */
+      vv.textContent = k.state === "dead"     ? (k.why || "dead")
+                     : k.state === "refused"  ? "none today"
+                     : k.state === "spent"    ? "will try"
+                     : (k.left + (guess ? " ?" : ""));
       row.appendChild(nm); row.appendChild(tr); row.appendChild(vv);
       box.appendChild(row);
     });

@@ -388,6 +388,9 @@ def read_ledger():
     d.setdefault("spend", {})
     d.setdefault("seen", {})
     d.setdefault("dead", {})
+    # Deliberately NOT carried across the midnight rollover above: a wall is
+    # today's refusal, and tomorrow the allowance is new.
+    d.setdefault("wall", {})
     d.setdefault("audio_out", 0.0)
     d.setdefault("audio_in", 0.0)
     d.setdefault("voice_use", {})
@@ -504,19 +507,49 @@ def read_quota(body):
 
 
 def candidates(chain):
-    """(label, key, model) ordered by budget left, most first. Skips anything
-    the ledger already knows is dead or spent out."""
+    """(label, key, model), the ones with budget first and the rest after.
+
+    THE LEDGER IS A PREDICTION. THE PROVIDER IS THE TRUTH.
+
+    This used to drop every key whose ledger count had reached the daily cap,
+    and that cap is a number in LIMITS — ten, for the TTS models — which is
+    this app's belief about somebody else's allowance. Believe it too firmly
+    and the app locks itself out of keys that still work.
+
+    It did. MEASURED, 18.9.2026: eighteen keys, every one of them at "10 of 10
+    used", candidates() returning an empty list and the reader stopping at
+    sentence 19 of 33 with "the day's budget is used up". Asked directly,
+    ignoring the ledger, the FIRST key answered HTTP 200 and spoke. The others
+    really were at 429. One working key in the ring and the app would not try
+    it, because its own arithmetic said not to bother.
+
+    So a key the ledger thinks is spent is no longer dropped — it goes to the
+    BACK of the queue. Keys with budget are still preferred and still tried
+    first, so nothing changes in ordinary use; when those run out the ring
+    keeps going instead of giving up, and the only cost of being wrong is one
+    round trip that returns 429.
+
+    WHAT IS DROPPED is a key that the PROVIDER refused today: a 429 carrying a
+    daily limit is recorded as a wall, and a wall is a fact rather than a
+    guess. Those are skipped, so the discovery pass happens once per key per
+    day rather than once per sentence. Walls are not carried across midnight
+    Pacific, because neither is the allowance.
+    """
     d = read_ledger()
+    wall = d.get("wall", {})
     ring = [(l, k) for l, k in load_ring() if l not in d["dead"]]
-    out = []
+    fresh, overdrawn = [], []
     for model in chain:
         cap = limit_for(model, "rpd")
         for label, key in ring:
-            left = cap - d["spend"].get("%s|%s" % (label, model), 0)
-            if left > 0:
-                out.append((left, label, key, model))
-    out.sort(key=lambda x: -x[0])
-    return [(l, k, m) for _, l, k, m in out]
+            slot = "%s|%s" % (label, model)
+            if wall.get(slot):
+                continue                    # the provider itself said no today
+            left = cap - d["spend"].get(slot, 0)
+            (fresh if left > 0 else overdrawn).append((left, label, key, model))
+    fresh.sort(key=lambda x: -x[0])
+    overdrawn.sort(key=lambda x: -x[0])     # least overdrawn first: likeliest
+    return [(l, k, m) for _, l, k, m in fresh + overdrawn]
 
 
 def with_fallback(chain, build_payload, verb="generateContent", tries=40):
@@ -538,10 +571,14 @@ def with_fallback(chain, build_payload, verb="generateContent", tries=40):
             q = read_quota(body if isinstance(body, str) else "")
             if q.get("rpd"):
                 note_limit(model, rpd=q["rpd"])
-                # this key is finished for today on this model
+                # this key is finished for today on this model, and this time
+                # it is the PROVIDER saying so rather than our own counting.
+                # The wall is what candidates() skips; a merely predicted
+                # spend is only a reason to try it last.
                 with _lock:
                     d = read_ledger()
                     d["spend"]["%s|%s" % (label, model)] = q["rpd"]
+                    d.setdefault("wall", {})["%s|%s" % (label, model)] = d["day"]
                     write_ledger(d)
                 log.append("%s/%s at daily wall (%d)" % (label, model, q["rpd"]))
             else:

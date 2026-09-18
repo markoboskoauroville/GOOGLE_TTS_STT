@@ -150,7 +150,9 @@ header{
 .kbar .kt{flex:1; height:6px; border-radius:3px; background:var(--line);
   overflow:hidden}
 .kbar .kf{height:100%; background:var(--play); border-radius:3px}
-.kbar.spent .kf{background:var(--exit)}
+.kbar.refused .kf{background:var(--exit)}
+.kbar.spent .kf{background:var(--act)}
+.kbar.spent .kv,.kbar.refused .kv{color:var(--dim)}
 .kbar.dead .kn{text-decoration:line-through; opacity:.6}
 .kbar .kv{color:var(--text); min-width:3.4em; text-align:right;
   font-variant-numeric:tabular-nums}
@@ -2092,7 +2094,8 @@ function renderBudget(){
     el.textContent = d.left > 0
       ? (d.left + " of " + d.total + " sentences left today, across " +
          d.keys + " keys. Resets in " + when + ".")
-      : ("None left today. It comes back in " + when + ".");
+      : ("Our count says none left \u2014 the ring is still asked anyway, " +
+         "because the count has been wrong. Resets in " + when + ".");
   }).catch(()=>{ el.textContent = "not known"; });
 }
 /* EVERY KEY AND WHAT IS LEFT ON IT. */
@@ -2105,7 +2108,7 @@ function renderKeyBars(){
       const cap = (k.models || []).reduce((a,m)=>a+(m.cap||0), 0) || 1;
       const guess = (k.models || []).some(m=>!m.measured);
       const row = document.createElement("div");
-      row.className = "kbar" + (k.dead ? " dead" : (k.left === 0 ? " spent" : ""));
+      row.className = "kbar " + (k.state || "ok");
       const nm = document.createElement("span");
       nm.className = "kn"; nm.textContent = "Key " + (i+1);
       nm.title = k.label + "  " + k.mask + (k.why ? "  (" + k.why + ")" : "");
@@ -2115,8 +2118,12 @@ function renderKeyBars(){
       tr.appendChild(fl);
       const vv = document.createElement("span");
       vv.className = "kv";
-      vv.textContent = k.dead ? (k.why || "dead")
-                              : (k.left + (guess ? " ?" : ""));
+      /* "spent" is our count, not theirs, and it is still tried — saying 0
+         there would repeat the mistake that stopped the reading. */
+      vv.textContent = k.state === "dead"     ? (k.why || "dead")
+                     : k.state === "refused"  ? "none today"
+                     : k.state === "spent"    ? "will try"
+                     : (k.left + (guess ? " ?" : ""));
       row.appendChild(nm); row.appendChild(tr); row.appendChild(vv);
       box.appendChild(row);
     });
