@@ -10,7 +10,7 @@
 #   src/20_tail.sh   299ff8ca57a5
 #   src/41_reader.py     b3295dfbd6fb
 #   src/42_voicesex.py   693670981a6d
-#   src/45_reader.html   097d59fdf651
+#   src/45_reader.html   f26a2c4f5f65
 #   src/46_marked.umd.js eaccee2fb9fb
 #   src/47_icon.svg      231dd5038e47
 #   src/voice_sex.json   35dcb92926b5
@@ -7017,6 +7017,29 @@ body.sheetopen .floats{display:none !important}
    opens: a real text field, already focused, that the phone will happily
    paste into by long press or by a keyboard. The moment anything lands in it
    the reading starts, so it costs one extra press and never a typed word. */
+/* ---------- THE WAIT ----------
+   A sentence is synthesised the first time it is asked for, which takes three
+   or four seconds. Nothing said so: you pressed Read it and the page sat
+   there, and a page that sits there is a page that has crashed as far as
+   anyone can tell. So this says what is happening, and keeps moving while it
+   says it — a still "please wait" is only marginally better than silence,
+   because the thing you actually want to know is whether it is still alive.
+
+   pointer-events:none on purpose. It is a notice, not a dialogue: it must
+   never eat the tap that was going somewhere else, and there is nothing on it
+   to press. */
+.busywrap{position:fixed; left:0; right:0; z-index:95; display:none;
+  top:calc(14px + env(safe-area-inset-top)); justify-content:center;
+  pointer-events:none}
+.busywrap.on{display:flex}
+.busybox{display:flex; align-items:center; gap:11px;
+  background:var(--panel); border:1px solid var(--line); border-radius:999px;
+  padding:10px 17px 10px 15px; box-shadow:0 6px 22px rgba(0,0,0,.5);
+  max-width:calc(100vw - 32px)}
+.busybox .spin{font-family:var(--mono,ui-monospace,monospace); font-size:19px;
+  line-height:1; color:var(--tune); width:1.1em; text-align:center}
+.busybox .what{font-size:13.5px; color:var(--text); line-height:1.25;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
 .catchwrap{position:fixed; inset:0; z-index:90; display:none;
   background:rgba(0,0,0,.62); align-items:center; justify-content:center;
   padding:18px}
@@ -7065,6 +7088,9 @@ body.fullread > .floatp{display:flex !important}
 body.fullread > .floatf{display:flex !important}
 body.fullread > .floats{display:flex !important}
 body.fullread > .toast{display:block !important}
+/* The wait notice is exactly the thing you need in immersive, where there is
+   nothing else on screen at all to say whether the app is still alive. */
+body.fullread > .busywrap.on{display:flex !important}
 body.fullread > .catchwrap.on{display:flex !important}
 
 /* Inside the reader, the same idea again: only the scrolling text survives.
@@ -7501,6 +7527,13 @@ body.fullread .reader-scroll{position:fixed; inset:0; max-height:none;
      that survives immersive, which makes it the one way to stop the reading
      without first leaving the view you are reading in. -->
 <button class="floats" id="floatS" title="Play and pause. Drag to move."></button>
+
+<div class="busywrap" id="busyWrap">
+  <div class="busybox">
+    <span class="spin" id="busySpin">&#10279;</span>
+    <span class="what" id="busyWhat">Generating sentences</span>
+  </div>
+</div>
 
 <div class="catchwrap" id="catchWrap">
   <div class="catchbox">
@@ -9378,6 +9411,15 @@ function startAt(i, viaHandoff){
   ST.idx = i; ST.playing = true; handedOff = false;
   highlight(i, false); setPlayIcon(true);
   el.playbackRate = ST.speed; el.volume = ST.volume/100;
+  /* Say so BEFORE the wait, not after it. If the clip is already in hand
+     this never shows at all, which is the common case once reading is under
+     way and three sentences are always kept ahead. */
+  if(!clipReady(i)){
+    const n = ST.sentences.length;
+    busyShow("Generating sentence " + (i + 1) + " of " + n);
+  } else {
+    busyHide();
+  }
   const seq = ++playSeq;
   el.onended = ()=> onEnded(i, seq);
   el.onerror = ()=> setStatus("Could not load sentence "+(i+1)+".");
@@ -9426,6 +9468,7 @@ function resume(){
   } else { startAt(ST.idx); }
 }
 function pause(){
+  busyHide();
   cancelGap(); ST.playing = false; setPlayIcon(false);
   players.forEach(p=>{ try{ p.pause(); }catch(e){} });
   highlight(ST.idx, true); setStatus("Paused.");
@@ -9435,6 +9478,7 @@ function stop(){
   /* deliberately NOT clearing atEnd: stopping a text that has already
      finished leaves it finished, so play still starts it again from the top */
   cancelGap(); ST.playing = false; setPlayIcon(false);
+  busyHide();
   players.forEach(p=>{ try{ p.pause(); p.currentTime=0; }catch(e){} });
   highlight(ST.idx, true);
   $("#barFill").style.width = (ST.idx/Math.max(1,ST.sentences.length))*100 + "%";
@@ -9675,6 +9719,43 @@ function closeSheet(){
 }
 
 function setStatus(s){ $("#status").textContent = s || ""; }
+
+/* ---------- the spinner ----------
+   Braille, because the eight dots give ten frames that all occupy exactly one
+   character cell: it turns on the spot instead of nudging the words beside it
+   a pixel left and right, which is what a spinner made of / - \ | does. */
+const BRAILLE = ["\u280B","\u2819","\u2839","\u2838","\u283C",
+                 "\u2834","\u2826","\u2827","\u2807","\u280F"];
+let busyT = null, busyN = 0;
+function busyShow(what){
+  const w = $("#busyWrap"), t = $("#busyWhat");
+  if(!w) return;
+  if(t && what) t.textContent = what;
+  w.classList.add("on");
+  if(busyT) return;                       /* already turning */
+  busyT = setInterval(()=>{
+    const sp = $("#busySpin");
+    if(sp) sp.textContent = BRAILLE[(busyN = (busyN + 1) % BRAILLE.length)];
+  }, 90);
+}
+function busyHide(){
+  const w = $("#busyWrap");
+  if(w) w.classList.remove("on");
+  if(busyT){ clearInterval(busyT); busyT = null; }
+}
+/* Is this sentence already in hand? The clip is fetched into a blob the
+   moment it exists, so having the blob IS being ready. */
+function clipReady(i){
+  try{ return clipUrls.has(warmKey(i)); }catch(e){ return false; }
+}
+/* The wait ends when sound actually starts, not when the fetch returns: the
+   browser still has to decode. Every player says so, so this is wired once. */
+players.forEach(p=>{
+  try{
+    p.addEventListener("playing", busyHide);
+    p.addEventListener("error", busyHide);
+  }catch(e){}
+});
 
 /* ---------- views ---------- */
 const V2_VIEWS = ["homeView","readerView","offlineView",
@@ -10604,6 +10685,7 @@ function readTextNow(text){
   if(!text || !text.trim()){ toast("Nothing to read."); return; }
   autoDetect(text);              /* a new text is the moment to ask */
   setStatus("Preparing...");
+  busyShow("Preparing the text");
   api("/api/prepare", {method:"POST", headers:{"Content-Type":"application/json"},
        body: prepareBody(text)})
     .then(r=>r.json().then(j=>({ok:r.ok,j})))
