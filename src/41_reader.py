@@ -823,6 +823,11 @@ def mount(app_module, flask_app):
             tts = [m for m in b.get("models", []) if m.get("use") == "tts"]
             left = sum(m.get("left", 0) for m in tts)
             total = sum(m.get("total", 0) for m in tts)
+            # WHAT WE SPENT IS A FACT. WHAT IS LEFT IS A SUBTRACTION FROM A
+            # NUMBER WE GUESSED. `made` counts up and is always true; `left`
+            # counts down from a cap this app believes in, and it has already
+            # been wrong — it read 0 while the ring was happily speaking.
+            made = sum(m.get("used", 0) for m in tts)
             d = app_module.read_ledger()
             wall = d.get("wall", {})
             dead = d.get("dead", {})
@@ -835,9 +840,10 @@ def mount(app_module, flask_app):
                        for m in app_module.TTS_CHAIN):
                     continue
                 ok += 1                      # still worth asking
-            return jsonify({"left": left, "total": total,
+            return jsonify({"left": left, "total": total, "made": made,
                             "keys": b.get("keys_live", 0),
                             "keys_ok": ok, "keys_total": len(ring),
+                            "keys_spent": len(ring) - ok,
                             "resets_in": int(app_module.seconds_to_reset())})
         except Exception as e:
             return jsonify({"left": None, "error": str(e)})

@@ -5,12 +5,12 @@
 #   src/00_head.sh   9b27f46ee8bc
 #   src/30_transcribe.html   67e73826805d   vendored, engine swapped at build
 #   src/seed/                 47 cached previews
-#   src/10_app.py    b74d7ea727cb
+#   src/10_app.py    bb3ccbcad372
 #   src/15_page.html 8968972cd977
 #   src/20_tail.sh   299ff8ca57a5
-#   src/41_reader.py     2fb221f91cc5
+#   src/41_reader.py     a7850187f02c
 #   src/42_voicesex.py   693670981a6d
-#   src/45_reader.html   fae8112ac894
+#   src/45_reader.html   df18bf99a4f0
 #   src/46_marked.umd.js eaccee2fb9fb
 #   src/47_icon.svg      231dd5038e47
 #   src/voice_sex.json   35dcb92926b5
@@ -27,10 +27,10 @@
 # ledgers, and two ledgers that each think they own the daily budget are both
 # wrong by dinner time.
 #
-#   bash 26-google-tts-stt-v26.sh                 install
-#   bash 26-google-tts-stt-v26.sh --keys FILE     install, and take the keys out of FILE
-#   bash 26-google-tts-stt-v26.sh --test          install, then run the four tests
-#   bash 26-google-tts-stt-v26.sh --verify        check this file is whole, change nothing
+#   bash 27-google-tts-stt-v27.sh                 install
+#   bash 27-google-tts-stt-v27.sh --keys FILE     install, and take the keys out of FILE
+#   bash 27-google-tts-stt-v27.sh --test          install, then run the four tests
+#   bash 27-google-tts-stt-v27.sh --verify        check this file is whole, change nothing
 #
 # INSTALLING SPENDS NOTHING. The four tests make real calls against a real
 # ring, and a TTS account has ten requests a day, so they run when you ask for
@@ -53,8 +53,8 @@
 
 set -u
 
-GTT_VERSION="v26"
-GTT_FILE="26-google-tts-stt-v26.sh"
+GTT_VERSION="v27"
+GTT_FILE="27-google-tts-stt-v27.sh"
 GTT_REPO="markoboskoauroville/GOOGLE_TTS_STT"
 
 # --- the platform layer, and nothing below this block knows the platform ---
@@ -254,7 +254,7 @@ try:
 except Exception:
     PACIFIC = timezone(timedelta(hours=-8))
 
-VERSION = 26
+VERSION = 27
 PORT = int(os.environ.get("GTTS_PORT", "7311"))
 KEYFILE = os.environ.get("GEMINI_KEYS", os.path.expanduser("~/.gemini_keys"))
 HOME = os.path.expanduser("~/.google_tts_stt")
@@ -6280,6 +6280,11 @@ def mount(app_module, flask_app):
             tts = [m for m in b.get("models", []) if m.get("use") == "tts"]
             left = sum(m.get("left", 0) for m in tts)
             total = sum(m.get("total", 0) for m in tts)
+            # WHAT WE SPENT IS A FACT. WHAT IS LEFT IS A SUBTRACTION FROM A
+            # NUMBER WE GUESSED. `made` counts up and is always true; `left`
+            # counts down from a cap this app believes in, and it has already
+            # been wrong — it read 0 while the ring was happily speaking.
+            made = sum(m.get("used", 0) for m in tts)
             d = app_module.read_ledger()
             wall = d.get("wall", {})
             dead = d.get("dead", {})
@@ -6292,9 +6297,10 @@ def mount(app_module, flask_app):
                        for m in app_module.TTS_CHAIN):
                     continue
                 ok += 1                      # still worth asking
-            return jsonify({"left": left, "total": total,
+            return jsonify({"left": left, "total": total, "made": made,
                             "keys": b.get("keys_live", 0),
                             "keys_ok": ok, "keys_total": len(ring),
+                            "keys_spent": len(ring) - ok,
                             "resets_in": int(app_module.seconds_to_reset())})
         except Exception as e:
             return jsonify({"left": None, "error": str(e)})
@@ -6474,13 +6480,16 @@ header{
    long and full of bad news. */
 .keyrow{display:flex; align-items:center; gap:8px; margin-top:5px}
 .keyrow .keyline{flex:1; min-width:0; margin-top:0}
-/* Eleven pixels of glyph, twenty-eight of target. A readout can be tiny; a
-   thing pressed with a thumb cannot. */
-.rescan{flex:0 0 auto; font-family:inherit; font-size:11px; line-height:1;
-  letter-spacing:.14em; color:var(--act); background:transparent;
-  border:1px solid var(--line); border-radius:6px;
-  padding:7px 8px; margin:-6px 0}
-.rescan:active{color:var(--bg); background:var(--act); border-color:var(--act)}
+/* NO FRAME. It is part of the line, in the same font on the same baseline,
+   and a chevron already reads as "go". A border around it says "this is a
+   button" to somebody who can see that it is one, and buys that redundancy
+   with a box drawn across a status line that was right without it.
+   The hit area is still twenty-eight pixels; the padding is invisible and the
+   negative margin keeps the row its original height. */
+.rescan{flex:0 0 auto; font-family:inherit; font-size:inherit; line-height:1;
+  letter-spacing:.12em; color:var(--act); background:transparent;
+  border:0; border-radius:0; padding:9px 4px 9px 10px; margin:-9px 0}
+.rescan:active{color:var(--text)}
 .rescan.busy{opacity:.45}
 .langhint{font-size:11.5px; color:var(--faint); line-height:1.5; margin:2px 0 10px}
 /* One row per key: what it is, a bar of what is left, and the count. A ring
@@ -10321,8 +10330,8 @@ function busyHide(){
    browser, which is already standing in the right timezone — so it reads
    09:00 in Croatia without this app having to know where Croatia is, and it
    stays correct on a plane. */
-const KEYLINE = {key:"", left:null, total:null, ok:null, all:null,
-                 resetAt:0, err:"", warn:false};
+const KEYLINE = {key:"", made:null, spent:null, all:null,
+                 resetAt:0, err:""};
 function resetClock(){
   if(!KEYLINE.resetAt) return "--:--";
   try{
@@ -10336,18 +10345,28 @@ function resetClock(){
 function renderKeyLine(){
   const el = $("#keyLine"); if(!el) return;
   const dot = " \u00b7 ";
-  const budget = (KEYLINE.left === null) ? "--" : (KEYLINE.left + "/" + KEYLINE.total);
-  const keys = (KEYLINE.ok === null) ? "" : (KEYLINE.ok + "/" + KEYLINE.all + " keys" + dot);
+  /* COUNT UP, NOT DOWN. "0/360 left" was on screen while the ring was
+     speaking, which is the ledger-as-truth mistake wearing a different hat:
+     what is LEFT is a subtraction from a daily cap this app merely believes
+     in, and that belief has already been wrong. What was MADE is a fact — we
+     counted each one as we asked for it — and how many keys the PROVIDER has
+     refused today is a fact too. Neither can contradict the audio playing. */
+  const made = (KEYLINE.made === null) ? "--" : (KEYLINE.made + " made");
+  const keys = (KEYLINE.spent === null) ? ""
+             : (KEYLINE.spent + "/" + KEYLINE.all + " spent" + dot);
   let txt;
   if(KEYLINE.err){
-    txt = "! " + KEYLINE.err + dot + budget + dot + keys + "back " + resetClock();
+    txt = "! " + KEYLINE.err + dot + made + dot + keys + "back " + resetClock();
   } else {
-    txt = (KEYLINE.key || "idle") + dot + budget + " left" + dot + keys +
+    txt = (KEYLINE.key || "idle") + dot + made + dot + keys +
           "back " + resetClock();
   }
   el.textContent = txt;
   el.classList.toggle("bad", !!KEYLINE.err);
-  el.classList.toggle("warn", !KEYLINE.err && KEYLINE.left === 0);
+  /* amber only when the PROVIDER has refused every key, which is a fact,
+     rather than when our own arithmetic reaches zero, which is not */
+  el.classList.toggle("warn", !KEYLINE.err && KEYLINE.spent !== null &&
+                              KEYLINE.all > 0 && KEYLINE.spent >= KEYLINE.all);
 }
 /* GO ROUND THE RING AGAIN.
    Clears today's refusals so every key is willing to be asked once more, then
@@ -10384,9 +10403,8 @@ function pollBudget(force){
   if(!force && now - budgetT < 20000) return;     /* not on every sentence */
   budgetT = now;
   api("/api/budget").then(r=>r.json()).then(d=>{
-    KEYLINE.left = (typeof d.left === "number") ? d.left : null;
-    KEYLINE.total = d.total;
-    KEYLINE.ok = (typeof d.keys_ok === "number") ? d.keys_ok : null;
+    KEYLINE.made = (typeof d.made === "number") ? d.made : null;
+    KEYLINE.spent = (typeof d.keys_spent === "number") ? d.keys_spent : null;
     KEYLINE.all = d.keys_total;
     KEYLINE.resetAt = Date.now() + (d.resets_in || 0) * 1000;
     renderKeyLine();
@@ -10409,7 +10427,7 @@ function noteSpeakingKey(r){
     /* A sentence arrived, so whatever was wrong is not wrong any more. */
     KEYLINE.key = label;
     KEYLINE.err = "";
-    if(left >= 0) KEYLINE.left = null;      /* re-read rather than guess */
+
     renderKeyLine();
     pollBudget(label !== lastKey);          /* a new key is worth a fresh count */
     if(left === 0 && !spentSaid[label]){
