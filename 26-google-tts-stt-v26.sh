@@ -5,12 +5,12 @@
 #   src/00_head.sh   9b27f46ee8bc
 #   src/30_transcribe.html   67e73826805d   vendored, engine swapped at build
 #   src/seed/                 47 cached previews
-#   src/10_app.py    0847ab31c68d
+#   src/10_app.py    b74d7ea727cb
 #   src/15_page.html 8968972cd977
 #   src/20_tail.sh   299ff8ca57a5
-#   src/41_reader.py     6b851c4657c7
+#   src/41_reader.py     2fb221f91cc5
 #   src/42_voicesex.py   693670981a6d
-#   src/45_reader.html   00d5a840934f
+#   src/45_reader.html   fae8112ac894
 #   src/46_marked.umd.js eaccee2fb9fb
 #   src/47_icon.svg      231dd5038e47
 #   src/voice_sex.json   35dcb92926b5
@@ -27,10 +27,10 @@
 # ledgers, and two ledgers that each think they own the daily budget are both
 # wrong by dinner time.
 #
-#   bash 25-google-tts-stt-v25.sh                 install
-#   bash 25-google-tts-stt-v25.sh --keys FILE     install, and take the keys out of FILE
-#   bash 25-google-tts-stt-v25.sh --test          install, then run the four tests
-#   bash 25-google-tts-stt-v25.sh --verify        check this file is whole, change nothing
+#   bash 26-google-tts-stt-v26.sh                 install
+#   bash 26-google-tts-stt-v26.sh --keys FILE     install, and take the keys out of FILE
+#   bash 26-google-tts-stt-v26.sh --test          install, then run the four tests
+#   bash 26-google-tts-stt-v26.sh --verify        check this file is whole, change nothing
 #
 # INSTALLING SPENDS NOTHING. The four tests make real calls against a real
 # ring, and a TTS account has ten requests a day, so they run when you ask for
@@ -53,8 +53,8 @@
 
 set -u
 
-GTT_VERSION="v25"
-GTT_FILE="25-google-tts-stt-v25.sh"
+GTT_VERSION="v26"
+GTT_FILE="26-google-tts-stt-v26.sh"
 GTT_REPO="markoboskoauroville/GOOGLE_TTS_STT"
 
 # --- the platform layer, and nothing below this block knows the platform ---
@@ -254,7 +254,7 @@ try:
 except Exception:
     PACIFIC = timezone(timedelta(hours=-8))
 
-VERSION = 25
+VERSION = 26
 PORT = int(os.environ.get("GTTS_PORT", "7311"))
 KEYFILE = os.environ.get("GEMINI_KEYS", os.path.expanduser("~/.gemini_keys"))
 HOME = os.path.expanduser("~/.google_tts_stt")
@@ -6242,6 +6242,33 @@ def mount(app_module, flask_app):
             resp.headers["X-Gtt-Key-Left"] = str(info.get("left", -1))
         return resp
 
+    @flask_app.post("/reader/api/rescan")
+    def r_rescan():
+        """Forget today's refusals and let the ring be tried again.
+
+        A wall is the provider saying no AT A MOMENT, and a free tier is not a
+        cliff: a key that answered 429 half an hour ago can answer 200 now.
+        Measured here on 18.9.2026 — `calisthenics` refused, then spoke a few
+        minutes later. The wall exists so the discovery pass is not repeated on
+        every sentence, not because the refusal is permanent.
+
+        So this is the one thing the app cannot decide for itself: whether it
+        is worth spending a round trip per key to find out again. Pressing it
+        says yes. It clears nothing else — a key marked DEAD stays dead, since
+        that is about the key rather than about today.
+        """
+        with app_module._lock:
+            d = app_module.read_ledger()
+            cleared = len(d.get("wall", {}))
+            d["wall"] = {}
+            app_module.write_ledger(d)
+        ring = app_module.load_ring()
+        dead = app_module.read_ledger().get("dead", {})
+        return jsonify({"ok": True, "cleared": cleared,
+                        "keys_ok": sum(1 for l, _k in ring if l not in dead),
+                        "keys_total": len(ring),
+                        "resets_in": int(app_module.seconds_to_reset())})
+
     @flask_app.get("/reader/api/budget")
     def r_budget():
         """What is left to speak with today, and when it comes back.
@@ -6442,6 +6469,19 @@ header{
   text-overflow:ellipsis; height:12px}
 .keyline.bad{color:var(--exit)}
 .keyline.warn{color:var(--act)}
+/* The line takes what is left; the chevrons never move and are never eaten by
+   the ellipsis, because the moment you want them is the moment the line is
+   long and full of bad news. */
+.keyrow{display:flex; align-items:center; gap:8px; margin-top:5px}
+.keyrow .keyline{flex:1; min-width:0; margin-top:0}
+/* Eleven pixels of glyph, twenty-eight of target. A readout can be tiny; a
+   thing pressed with a thumb cannot. */
+.rescan{flex:0 0 auto; font-family:inherit; font-size:11px; line-height:1;
+  letter-spacing:.14em; color:var(--act); background:transparent;
+  border:1px solid var(--line); border-radius:6px;
+  padding:7px 8px; margin:-6px 0}
+.rescan:active{color:var(--bg); background:var(--act); border-color:var(--act)}
+.rescan.busy{opacity:.45}
 .langhint{font-size:11.5px; color:var(--faint); line-height:1.5; margin:2px 0 10px}
 /* One row per key: what it is, a bar of what is left, and the count. A ring
    emptying quietly is what made the app look broken, so it is shown. */
@@ -7451,7 +7491,14 @@ body.fullread .reader-scroll{position:fixed; inset:0; max-height:none;
       <div class="status" id="status"></div>
       <!-- THE RING, IN ONE LINE, ALWAYS THERE. A toast says a thing once and
            takes it away; this is for the facts you want to glance at. -->
-      <div class="keyline" id="keyLine">&#183;</div>
+      <div class="keyrow">
+        <div class="keyline" id="keyLine">&#183;</div>
+        <!-- Four chevrons: go round the ring again. The app will not spend a
+             round trip per key on its own to find out whether a refusal has
+             expired; this is how you say it is worth it. -->
+        <button class="rescan" id="rescanBtn"
+          title="Scan the keys again and carry on">&gt;&gt;&gt;&gt;</button>
+      </div>
     </div>
   </section>
 
@@ -10302,6 +10349,35 @@ function renderKeyLine(){
   el.classList.toggle("bad", !!KEYLINE.err);
   el.classList.toggle("warn", !KEYLINE.err && KEYLINE.left === 0);
 }
+/* GO ROUND THE RING AGAIN.
+   Clears today's refusals so every key is willing to be asked once more, then
+   carries on from wherever the reading stopped. THE SCAN IS THE RETRY: the
+   ring walks itself and stops at the first key that answers, which is the
+   only way to find out who has anything left — a free tier does not publish a
+   balance, and the only honest probe is the work itself. */
+function rescanKeys(){
+  const b = $("#rescanBtn");
+  if(b && b.classList.contains("busy")) return;
+  if(b) b.classList.add("busy");
+  KEYLINE.err = "";
+  KEYLINE.key = "scanning the ring\u2026";
+  renderKeyLine();
+  api("/api/rescan", {method:"POST"}).then(r=>r.json()).then(d=>{
+    spentSaid = {};                       /* say it again if one runs out */
+    KEYLINE.key = "";
+    pollBudget(true);
+    try{ renderKeyBars(); }catch(e){}
+    toast(d.cleared ? ("Trying " + d.keys_ok + " keys again")
+                    : "Nothing was being skipped");
+    /* If the reading stopped on a failed sentence, this is the moment it was
+       pressed for: pick it up where it fell over. */
+    if(ST.tid && !ST.playing) startAt(ST.idx);
+  }).catch(()=>{
+    KEYLINE.err = "could not reach the server";
+    renderKeyLine();
+  }).then(()=>{ if(b) b.classList.remove("busy"); });
+}
+
 let budgetT = 0;
 function pollBudget(force){
   const now = Date.now();
@@ -10880,6 +10956,7 @@ function bind(){
       toast(ST.hideTabs ? "Tabs hidden, the gear stays" : "Tabs back");
     };
   }
+  { const b=$("#rescanBtn"); if(b) b.onclick = rescanKeys; }
   { const b=$("#barTog");
     if(b) b.onclick = ()=>{
       ST.hideBar = !ST.hideBar;

@@ -159,6 +159,19 @@ header{
   text-overflow:ellipsis; height:12px}
 .keyline.bad{color:var(--exit)}
 .keyline.warn{color:var(--act)}
+/* The line takes what is left; the chevrons never move and are never eaten by
+   the ellipsis, because the moment you want them is the moment the line is
+   long and full of bad news. */
+.keyrow{display:flex; align-items:center; gap:8px; margin-top:5px}
+.keyrow .keyline{flex:1; min-width:0; margin-top:0}
+/* Eleven pixels of glyph, twenty-eight of target. A readout can be tiny; a
+   thing pressed with a thumb cannot. */
+.rescan{flex:0 0 auto; font-family:inherit; font-size:11px; line-height:1;
+  letter-spacing:.14em; color:var(--act); background:transparent;
+  border:1px solid var(--line); border-radius:6px;
+  padding:7px 8px; margin:-6px 0}
+.rescan:active{color:var(--bg); background:var(--act); border-color:var(--act)}
+.rescan.busy{opacity:.45}
 .langhint{font-size:11.5px; color:var(--faint); line-height:1.5; margin:2px 0 10px}
 /* One row per key: what it is, a bar of what is left, and the count. A ring
    emptying quietly is what made the app look broken, so it is shown. */
@@ -1168,7 +1181,14 @@ body.fullread .reader-scroll{position:fixed; inset:0; max-height:none;
       <div class="status" id="status"></div>
       <!-- THE RING, IN ONE LINE, ALWAYS THERE. A toast says a thing once and
            takes it away; this is for the facts you want to glance at. -->
-      <div class="keyline" id="keyLine">&#183;</div>
+      <div class="keyrow">
+        <div class="keyline" id="keyLine">&#183;</div>
+        <!-- Four chevrons: go round the ring again. The app will not spend a
+             round trip per key on its own to find out whether a refusal has
+             expired; this is how you say it is worth it. -->
+        <button class="rescan" id="rescanBtn"
+          title="Scan the keys again and carry on">&gt;&gt;&gt;&gt;</button>
+      </div>
     </div>
   </section>
 
@@ -4019,6 +4039,35 @@ function renderKeyLine(){
   el.classList.toggle("bad", !!KEYLINE.err);
   el.classList.toggle("warn", !KEYLINE.err && KEYLINE.left === 0);
 }
+/* GO ROUND THE RING AGAIN.
+   Clears today's refusals so every key is willing to be asked once more, then
+   carries on from wherever the reading stopped. THE SCAN IS THE RETRY: the
+   ring walks itself and stops at the first key that answers, which is the
+   only way to find out who has anything left — a free tier does not publish a
+   balance, and the only honest probe is the work itself. */
+function rescanKeys(){
+  const b = $("#rescanBtn");
+  if(b && b.classList.contains("busy")) return;
+  if(b) b.classList.add("busy");
+  KEYLINE.err = "";
+  KEYLINE.key = "scanning the ring\u2026";
+  renderKeyLine();
+  api("/api/rescan", {method:"POST"}).then(r=>r.json()).then(d=>{
+    spentSaid = {};                       /* say it again if one runs out */
+    KEYLINE.key = "";
+    pollBudget(true);
+    try{ renderKeyBars(); }catch(e){}
+    toast(d.cleared ? ("Trying " + d.keys_ok + " keys again")
+                    : "Nothing was being skipped");
+    /* If the reading stopped on a failed sentence, this is the moment it was
+       pressed for: pick it up where it fell over. */
+    if(ST.tid && !ST.playing) startAt(ST.idx);
+  }).catch(()=>{
+    KEYLINE.err = "could not reach the server";
+    renderKeyLine();
+  }).then(()=>{ if(b) b.classList.remove("busy"); });
+}
+
 let budgetT = 0;
 function pollBudget(force){
   const now = Date.now();
@@ -4597,6 +4646,7 @@ function bind(){
       toast(ST.hideTabs ? "Tabs hidden, the gear stays" : "Tabs back");
     };
   }
+  { const b=$("#rescanBtn"); if(b) b.onclick = rescanKeys; }
   { const b=$("#barTog");
     if(b) b.onclick = ()=>{
       ST.hideBar = !ST.hideBar;

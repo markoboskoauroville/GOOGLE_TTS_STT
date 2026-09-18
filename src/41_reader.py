@@ -785,6 +785,33 @@ def mount(app_module, flask_app):
             resp.headers["X-Gtt-Key-Left"] = str(info.get("left", -1))
         return resp
 
+    @flask_app.post("/reader/api/rescan")
+    def r_rescan():
+        """Forget today's refusals and let the ring be tried again.
+
+        A wall is the provider saying no AT A MOMENT, and a free tier is not a
+        cliff: a key that answered 429 half an hour ago can answer 200 now.
+        Measured here on 18.9.2026 — `calisthenics` refused, then spoke a few
+        minutes later. The wall exists so the discovery pass is not repeated on
+        every sentence, not because the refusal is permanent.
+
+        So this is the one thing the app cannot decide for itself: whether it
+        is worth spending a round trip per key to find out again. Pressing it
+        says yes. It clears nothing else — a key marked DEAD stays dead, since
+        that is about the key rather than about today.
+        """
+        with app_module._lock:
+            d = app_module.read_ledger()
+            cleared = len(d.get("wall", {}))
+            d["wall"] = {}
+            app_module.write_ledger(d)
+        ring = app_module.load_ring()
+        dead = app_module.read_ledger().get("dead", {})
+        return jsonify({"ok": True, "cleared": cleared,
+                        "keys_ok": sum(1 for l, _k in ring if l not in dead),
+                        "keys_total": len(ring),
+                        "resets_in": int(app_module.seconds_to_reset())})
+
     @flask_app.get("/reader/api/budget")
     def r_budget():
         """What is left to speak with today, and when it comes back.
