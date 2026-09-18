@@ -5,12 +5,12 @@
 #   src/00_head.sh   9b27f46ee8bc
 #   src/30_transcribe.html   67e73826805d   vendored, engine swapped at build
 #   src/seed/                 47 cached previews
-#   src/10_app.py    96b2cb9effa5
+#   src/10_app.py    9468a9442e28
 #   src/15_page.html 8968972cd977
 #   src/20_tail.sh   299ff8ca57a5
-#   src/41_reader.py     85c25014221e
+#   src/41_reader.py     69280535340c
 #   src/42_voicesex.py   693670981a6d
-#   src/45_reader.html   19566e2535fd
+#   src/45_reader.html   0ac9fcbf6125
 #   src/46_marked.umd.js eaccee2fb9fb
 #   src/47_icon.svg      231dd5038e47
 #   src/voice_sex.json   35dcb92926b5
@@ -27,10 +27,10 @@
 # ledgers, and two ledgers that each think they own the daily budget are both
 # wrong by dinner time.
 #
-#   bash 28-google-tts-stt-v28.sh                 install
-#   bash 28-google-tts-stt-v28.sh --keys FILE     install, and take the keys out of FILE
-#   bash 28-google-tts-stt-v28.sh --test          install, then run the four tests
-#   bash 28-google-tts-stt-v28.sh --verify        check this file is whole, change nothing
+#   bash 29-google-tts-stt-v29.sh                 install
+#   bash 29-google-tts-stt-v29.sh --keys FILE     install, and take the keys out of FILE
+#   bash 29-google-tts-stt-v29.sh --test          install, then run the four tests
+#   bash 29-google-tts-stt-v29.sh --verify        check this file is whole, change nothing
 #
 # INSTALLING SPENDS NOTHING. The four tests make real calls against a real
 # ring, and a TTS account has ten requests a day, so they run when you ask for
@@ -53,8 +53,8 @@
 
 set -u
 
-GTT_VERSION="v28"
-GTT_FILE="28-google-tts-stt-v28.sh"
+GTT_VERSION="v29"
+GTT_FILE="29-google-tts-stt-v29.sh"
 GTT_REPO="markoboskoauroville/GOOGLE_TTS_STT"
 
 # --- the platform layer, and nothing below this block knows the platform ---
@@ -254,7 +254,7 @@ try:
 except Exception:
     PACIFIC = timezone(timedelta(hours=-8))
 
-VERSION = 28
+VERSION = 29
 PORT = int(os.environ.get("GTTS_PORT", "7311"))
 KEYFILE = os.environ.get("GEMINI_KEYS", os.path.expanduser("~/.gemini_keys"))
 HOME = os.path.expanduser("~/.google_tts_stt")
@@ -6304,22 +6304,62 @@ def mount(app_module, flask_app):
             resp.headers["X-Gtt-Key-Left"] = str(info.get("left", -1))
         return resp
 
-    @flask_app.post("/reader/api/nextkey")
-    def r_nextkey():
-        """Step to the next key in the ring. Costs nothing.
+    @flask_app.post("/reader/api/testkey")
+    def r_testkey():
+        """Ask the current key one short question and report what it says.
 
-        NO SCANNING. The old button cleared every refusal and let the ring walk
-        itself, which on eighteen keys is eighteen round trips and a wait with
-        nothing on screen. This moves the pin one place and says the name. The
-        test is the next sentence: if it speaks, that key works, and you have
-        the sentence as well as the answer. If it does not, press again.
+        A TEST COSTS A REQUEST, AND THAT IS THE ONLY HONEST KIND. A free tier
+        publishes no balance; listing models proves the key exists and nothing
+        about whether it has anything left. So this asks for the smallest real
+        piece of work — one word of speech — and throws the audio away. That
+        is `key-testing.md`'s work-probe: a 200 that lies is the failure being
+        avoided, and only the work itself cannot lie.
 
-        The wall on the key being moved TO is cleared, because pressing this is
-        somebody saying "try that one" and a wall is only a note that it
-        refused earlier. A key marked DEAD is skipped entirely — that is about
-        the key rather than about today.
+        Pressed on purpose, so it spends on purpose. Nothing here tests
+        anything by itself.
         """
-        label, idx, total = step_key(app_module, 1)
+        label = current_key(app_module)
+        if not label:
+            return jsonify({"ok": False, "error": "there are no keys"}), 400
+
+        def payload(_m):
+            return {"contents": [{"parts": [{"text": "Read aloud: yes."}]}],
+                    "generationConfig": {
+                        "responseModalities": ["AUDIO"],
+                        "speechConfig": {"voiceConfig": {
+                            "prebuiltVoiceConfig": {"voiceName": "Charon"}}}}}
+
+        r = app_module.with_fallback(app_module.TTS_CHAIN, payload, only=label)
+        if r.get("ok"):
+            try:
+                app_module.spend(r["label"], r["model"])
+            except Exception:
+                pass
+            return jsonify({"ok": True, "key": label, "model": r.get("model", "")})
+        # The log says WHY in the ring's own words — daily wall, minute limit,
+        # no credit — which is more use than "it did not work".
+        why = "; ".join(r.get("log") or []) or (r.get("error") or "no answer")
+        return jsonify({"ok": False, "key": label, "why": why[:80]})
+
+    @flask_app.post("/reader/api/stepkey")
+    def r_stepkey():
+        """Move the pin one place along the ring, either way. Costs nothing.
+
+        NOTHING CHOOSES A KEY BUT THE PERSON. The ring used to sort itself by
+        remaining budget and take the first that answered, which is right for
+        a thing nobody is watching and wrong here: it meant eighteen round
+        trips to learn the ring was empty, and no way to say which key was
+        speaking. Now `<` and `>` walk the list, `T` asks one of them a
+        question, and play uses whichever one is showing. If that key refuses,
+        it refuses — that is a fact about the key, offered rather than hidden.
+
+        The wall on the key moved TO is cleared, because pressing this is
+        somebody saying "try that one", and a wall is only a note that it
+        refused earlier.
+        """
+        j = request.get_json(force=True, silent=True) or {}
+        by = -1 if int(j.get("by", 1)) < 0 else 1
+        label, idx, total = step_key(app_module, by)
         if not label:
             return jsonify({"ok": False, "error": "there are no keys"}), 400
         with app_module._lock:
@@ -6554,7 +6594,8 @@ header{
    negative margin keeps the row its original height. */
 .rescan{flex:0 0 auto; font-family:inherit; font-size:inherit; line-height:1;
   letter-spacing:.12em; color:var(--act); background:transparent;
-  border:0; border-radius:0; padding:9px 4px 9px 10px; margin:-9px 0}
+  border:0; border-radius:0; padding:9px 7px; margin:-9px 0}
+.keyrow .rescan:first-of-type{padding-left:10px}
 .rescan:active{color:var(--text)}
 .rescan.busy{opacity:.45}
 .langhint{font-size:11.5px; color:var(--faint); line-height:1.5; margin:2px 0 10px}
@@ -7562,11 +7603,12 @@ body.fullread .reader-scroll{position:fixed; inset:0; max-height:none;
            takes it away; this is for the facts you want to glance at. -->
       <div class="keyrow">
         <div class="keyline" id="keyLine">&#183;</div>
-        <!-- Four chevrons: go round the ring again. The app will not spend a
-             round trip per key on its own to find out whether a refusal has
-             expired; this is how you say it is worth it. -->
-        <button class="rescan" id="rescanBtn"
-          title="Scan the keys again and carry on">&gt;&gt;&gt;&gt;</button>
+        <!-- THE WHOLE RING, BY HAND. Walk the list with < and >, ask the one
+             you are on a question with T, and press play when you want to
+             find out the expensive way. Nothing here happens on its own. -->
+        <button class="rescan" id="keyPrev" title="Previous key">&lt;</button>
+        <button class="rescan" id="keyTest" title="Test this key. Costs one request.">T</button>
+        <button class="rescan" id="keyNext" title="Next key">&gt;</button>
       </div>
     </div>
   </section>
@@ -9975,7 +10017,7 @@ function clipFailed(i){
 }
 function reportClipFailure(i){
   const why = clipErr.get(warmKey(i)) || {};
-  KEYLINE.trying = "";        /* it did not speak: the trial is over too */
+  KEYLINE.trying = ""; KEYLINE.note = "";
   stopGenerating();
   busyHide();
   ST.playing = false; setPlayIcon(false);
@@ -10399,7 +10441,7 @@ function busyHide(){
    09:00 in Croatia without this app having to know where Croatia is, and it
    stays correct on a plane. */
 const KEYLINE = {key:"", kidx:0, made:null, spent:null, all:null,
-                 resetAt:0, err:"", trying:""};
+                 resetAt:0, err:"", trying:"", note:""};
 function resetClock(){
   if(!KEYLINE.resetAt) return "--:--";
   try{
@@ -10429,7 +10471,9 @@ function renderKeyLine(){
     : "no keys";
   let txt;
   if(KEYLINE.trying){
-    txt = who + dot + "trying\u2026" + dot + made + dot + "back " + resetClock();
+    txt = who + dot + "asking\u2026" + dot + made + dot + "back " + resetClock();
+  } else if(KEYLINE.note){
+    txt = who + dot + KEYLINE.note + dot + made + dot + "back " + resetClock();
   } else if(KEYLINE.err){
     txt = "! " + who + dot + KEYLINE.err + dot + made + dot + "back " + resetClock();
   } else {
@@ -10453,19 +10497,36 @@ function renderKeyLine(){
    next sentence — if it speaks, that key works and you have the sentence too;
    if it does not, press again. Eighteen presses is eighteen deliberate acts;
    one press that quietly tries eighteen keys is a minute of nothing. */
-function nextKey(){
-  const b = $("#rescanBtn");
-  if(b && b.classList.contains("busy")) return;
-  if(b) b.classList.add("busy");
-  api("/api/nextkey", {method:"POST"}).then(r=>r.json()).then(d=>{
+function stepKey(by){
+  api("/api/stepkey", {method:"POST",
+       headers:{"Content-Type":"application/json"},
+       body: JSON.stringify({by: by})}).then(r=>r.json()).then(d=>{
     if(!d.ok) throw new Error(d.error || "no keys");
     spentSaid = {};
     KEYLINE.key = d.key; KEYLINE.kidx = d.index; KEYLINE.all = d.total;
-    KEYLINE.err = ""; KEYLINE.trying = d.key;
+    KEYLINE.err = ""; KEYLINE.trying = ""; KEYLINE.note = "";
     renderKeyLine();
-    /* the sentence IS the test */
-    if(ST.tid) startAt(ST.idx);
-    else { KEYLINE.trying = ""; renderKeyLine(); }
+    /* Walking the list spends nothing and proves nothing. Whether this one
+       works is found out by pressing T, or by pressing play and accepting
+       that it might refuse. Neither is decided here. */
+  }).catch(()=>{
+    KEYLINE.err = "could not reach the server";
+    renderKeyLine();
+  });
+}
+/* T. One short question, one real request, and the answer in the key's own
+   words. It spends because it is the only kind of test that cannot lie. */
+function testKey(){
+  const b = $("#keyTest");
+  if(b && b.classList.contains("busy")) return;
+  if(b) b.classList.add("busy");
+  KEYLINE.err = ""; KEYLINE.trying = KEYLINE.key || "this key";
+  renderKeyLine();
+  api("/api/testkey", {method:"POST"}).then(r=>r.json()).then(d=>{
+    KEYLINE.trying = "";
+    if(d.ok){ KEYLINE.note = "works"; KEYLINE.err = ""; }
+    else { KEYLINE.note = ""; KEYLINE.err = d.why || "refused"; }
+    renderKeyLine();
     pollBudget(true);
     try{ renderKeyBars(); }catch(e){}
   }).catch(()=>{
@@ -10507,7 +10568,7 @@ function noteSpeakingKey(r){
     /* A sentence arrived, so whatever was wrong is not wrong any more. */
     KEYLINE.key = label;
     KEYLINE.err = "";
-    KEYLINE.trying = "";        /* it spoke, so it works: the trial is over */
+    KEYLINE.trying = ""; KEYLINE.note = "";   /* it spoke; that IS the answer */
 
     renderKeyLine();
     pollBudget(label !== lastKey);          /* a new key is worth a fresh count */
@@ -11055,7 +11116,9 @@ function bind(){
       say(ST.hideTabs ? "Tabs hidden, the gear stays" : "Tabs back");
     };
   }
-  { const b=$("#rescanBtn"); if(b) b.onclick = nextKey; }
+  { const b=$("#keyPrev"); if(b) b.onclick = ()=> stepKey(-1); }
+  { const b=$("#keyNext"); if(b) b.onclick = ()=> stepKey(1); }
+  { const b=$("#keyTest"); if(b) b.onclick = testKey; }
   { const b=$("#barTog");
     if(b) b.onclick = ()=>{
       ST.hideBar = !ST.hideBar;

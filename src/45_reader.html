@@ -172,7 +172,8 @@ header{
    negative margin keeps the row its original height. */
 .rescan{flex:0 0 auto; font-family:inherit; font-size:inherit; line-height:1;
   letter-spacing:.12em; color:var(--act); background:transparent;
-  border:0; border-radius:0; padding:9px 4px 9px 10px; margin:-9px 0}
+  border:0; border-radius:0; padding:9px 7px; margin:-9px 0}
+.keyrow .rescan:first-of-type{padding-left:10px}
 .rescan:active{color:var(--text)}
 .rescan.busy{opacity:.45}
 .langhint{font-size:11.5px; color:var(--faint); line-height:1.5; margin:2px 0 10px}
@@ -1180,11 +1181,12 @@ body.fullread .reader-scroll{position:fixed; inset:0; max-height:none;
            takes it away; this is for the facts you want to glance at. -->
       <div class="keyrow">
         <div class="keyline" id="keyLine">&#183;</div>
-        <!-- Four chevrons: go round the ring again. The app will not spend a
-             round trip per key on its own to find out whether a refusal has
-             expired; this is how you say it is worth it. -->
-        <button class="rescan" id="rescanBtn"
-          title="Scan the keys again and carry on">&gt;&gt;&gt;&gt;</button>
+        <!-- THE WHOLE RING, BY HAND. Walk the list with < and >, ask the one
+             you are on a question with T, and press play when you want to
+             find out the expensive way. Nothing here happens on its own. -->
+        <button class="rescan" id="keyPrev" title="Previous key">&lt;</button>
+        <button class="rescan" id="keyTest" title="Test this key. Costs one request.">T</button>
+        <button class="rescan" id="keyNext" title="Next key">&gt;</button>
       </div>
     </div>
   </section>
@@ -3593,7 +3595,7 @@ function clipFailed(i){
 }
 function reportClipFailure(i){
   const why = clipErr.get(warmKey(i)) || {};
-  KEYLINE.trying = "";        /* it did not speak: the trial is over too */
+  KEYLINE.trying = ""; KEYLINE.note = "";
   stopGenerating();
   busyHide();
   ST.playing = false; setPlayIcon(false);
@@ -4017,7 +4019,7 @@ function busyHide(){
    09:00 in Croatia without this app having to know where Croatia is, and it
    stays correct on a plane. */
 const KEYLINE = {key:"", kidx:0, made:null, spent:null, all:null,
-                 resetAt:0, err:"", trying:""};
+                 resetAt:0, err:"", trying:"", note:""};
 function resetClock(){
   if(!KEYLINE.resetAt) return "--:--";
   try{
@@ -4047,7 +4049,9 @@ function renderKeyLine(){
     : "no keys";
   let txt;
   if(KEYLINE.trying){
-    txt = who + dot + "trying\u2026" + dot + made + dot + "back " + resetClock();
+    txt = who + dot + "asking\u2026" + dot + made + dot + "back " + resetClock();
+  } else if(KEYLINE.note){
+    txt = who + dot + KEYLINE.note + dot + made + dot + "back " + resetClock();
   } else if(KEYLINE.err){
     txt = "! " + who + dot + KEYLINE.err + dot + made + dot + "back " + resetClock();
   } else {
@@ -4071,19 +4075,36 @@ function renderKeyLine(){
    next sentence — if it speaks, that key works and you have the sentence too;
    if it does not, press again. Eighteen presses is eighteen deliberate acts;
    one press that quietly tries eighteen keys is a minute of nothing. */
-function nextKey(){
-  const b = $("#rescanBtn");
-  if(b && b.classList.contains("busy")) return;
-  if(b) b.classList.add("busy");
-  api("/api/nextkey", {method:"POST"}).then(r=>r.json()).then(d=>{
+function stepKey(by){
+  api("/api/stepkey", {method:"POST",
+       headers:{"Content-Type":"application/json"},
+       body: JSON.stringify({by: by})}).then(r=>r.json()).then(d=>{
     if(!d.ok) throw new Error(d.error || "no keys");
     spentSaid = {};
     KEYLINE.key = d.key; KEYLINE.kidx = d.index; KEYLINE.all = d.total;
-    KEYLINE.err = ""; KEYLINE.trying = d.key;
+    KEYLINE.err = ""; KEYLINE.trying = ""; KEYLINE.note = "";
     renderKeyLine();
-    /* the sentence IS the test */
-    if(ST.tid) startAt(ST.idx);
-    else { KEYLINE.trying = ""; renderKeyLine(); }
+    /* Walking the list spends nothing and proves nothing. Whether this one
+       works is found out by pressing T, or by pressing play and accepting
+       that it might refuse. Neither is decided here. */
+  }).catch(()=>{
+    KEYLINE.err = "could not reach the server";
+    renderKeyLine();
+  });
+}
+/* T. One short question, one real request, and the answer in the key's own
+   words. It spends because it is the only kind of test that cannot lie. */
+function testKey(){
+  const b = $("#keyTest");
+  if(b && b.classList.contains("busy")) return;
+  if(b) b.classList.add("busy");
+  KEYLINE.err = ""; KEYLINE.trying = KEYLINE.key || "this key";
+  renderKeyLine();
+  api("/api/testkey", {method:"POST"}).then(r=>r.json()).then(d=>{
+    KEYLINE.trying = "";
+    if(d.ok){ KEYLINE.note = "works"; KEYLINE.err = ""; }
+    else { KEYLINE.note = ""; KEYLINE.err = d.why || "refused"; }
+    renderKeyLine();
     pollBudget(true);
     try{ renderKeyBars(); }catch(e){}
   }).catch(()=>{
@@ -4125,7 +4146,7 @@ function noteSpeakingKey(r){
     /* A sentence arrived, so whatever was wrong is not wrong any more. */
     KEYLINE.key = label;
     KEYLINE.err = "";
-    KEYLINE.trying = "";        /* it spoke, so it works: the trial is over */
+    KEYLINE.trying = ""; KEYLINE.note = "";   /* it spoke; that IS the answer */
 
     renderKeyLine();
     pollBudget(label !== lastKey);          /* a new key is worth a fresh count */
@@ -4673,7 +4694,9 @@ function bind(){
       say(ST.hideTabs ? "Tabs hidden, the gear stays" : "Tabs back");
     };
   }
-  { const b=$("#rescanBtn"); if(b) b.onclick = nextKey; }
+  { const b=$("#keyPrev"); if(b) b.onclick = ()=> stepKey(-1); }
+  { const b=$("#keyNext"); if(b) b.onclick = ()=> stepKey(1); }
+  { const b=$("#keyTest"); if(b) b.onclick = testKey; }
   { const b=$("#barTog");
     if(b) b.onclick = ()=>{
       ST.hideBar = !ST.hideBar;

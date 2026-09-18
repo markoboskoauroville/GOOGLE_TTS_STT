@@ -830,22 +830,62 @@ def mount(app_module, flask_app):
             resp.headers["X-Gtt-Key-Left"] = str(info.get("left", -1))
         return resp
 
-    @flask_app.post("/reader/api/nextkey")
-    def r_nextkey():
-        """Step to the next key in the ring. Costs nothing.
+    @flask_app.post("/reader/api/testkey")
+    def r_testkey():
+        """Ask the current key one short question and report what it says.
 
-        NO SCANNING. The old button cleared every refusal and let the ring walk
-        itself, which on eighteen keys is eighteen round trips and a wait with
-        nothing on screen. This moves the pin one place and says the name. The
-        test is the next sentence: if it speaks, that key works, and you have
-        the sentence as well as the answer. If it does not, press again.
+        A TEST COSTS A REQUEST, AND THAT IS THE ONLY HONEST KIND. A free tier
+        publishes no balance; listing models proves the key exists and nothing
+        about whether it has anything left. So this asks for the smallest real
+        piece of work — one word of speech — and throws the audio away. That
+        is `key-testing.md`'s work-probe: a 200 that lies is the failure being
+        avoided, and only the work itself cannot lie.
 
-        The wall on the key being moved TO is cleared, because pressing this is
-        somebody saying "try that one" and a wall is only a note that it
-        refused earlier. A key marked DEAD is skipped entirely — that is about
-        the key rather than about today.
+        Pressed on purpose, so it spends on purpose. Nothing here tests
+        anything by itself.
         """
-        label, idx, total = step_key(app_module, 1)
+        label = current_key(app_module)
+        if not label:
+            return jsonify({"ok": False, "error": "there are no keys"}), 400
+
+        def payload(_m):
+            return {"contents": [{"parts": [{"text": "Read aloud: yes."}]}],
+                    "generationConfig": {
+                        "responseModalities": ["AUDIO"],
+                        "speechConfig": {"voiceConfig": {
+                            "prebuiltVoiceConfig": {"voiceName": "Charon"}}}}}
+
+        r = app_module.with_fallback(app_module.TTS_CHAIN, payload, only=label)
+        if r.get("ok"):
+            try:
+                app_module.spend(r["label"], r["model"])
+            except Exception:
+                pass
+            return jsonify({"ok": True, "key": label, "model": r.get("model", "")})
+        # The log says WHY in the ring's own words — daily wall, minute limit,
+        # no credit — which is more use than "it did not work".
+        why = "; ".join(r.get("log") or []) or (r.get("error") or "no answer")
+        return jsonify({"ok": False, "key": label, "why": why[:80]})
+
+    @flask_app.post("/reader/api/stepkey")
+    def r_stepkey():
+        """Move the pin one place along the ring, either way. Costs nothing.
+
+        NOTHING CHOOSES A KEY BUT THE PERSON. The ring used to sort itself by
+        remaining budget and take the first that answered, which is right for
+        a thing nobody is watching and wrong here: it meant eighteen round
+        trips to learn the ring was empty, and no way to say which key was
+        speaking. Now `<` and `>` walk the list, `T` asks one of them a
+        question, and play uses whichever one is showing. If that key refuses,
+        it refuses — that is a fact about the key, offered rather than hidden.
+
+        The wall on the key moved TO is cleared, because pressing this is
+        somebody saying "try that one", and a wall is only a note that it
+        refused earlier.
+        """
+        j = request.get_json(force=True, silent=True) or {}
+        by = -1 if int(j.get("by", 1)) < 0 else 1
+        label, idx, total = step_key(app_module, by)
         if not label:
             return jsonify({"ok": False, "error": "there are no keys"}), 400
         with app_module._lock:
