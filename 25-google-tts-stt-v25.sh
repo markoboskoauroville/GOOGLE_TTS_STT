@@ -5,12 +5,12 @@
 #   src/00_head.sh   9b27f46ee8bc
 #   src/30_transcribe.html   67e73826805d   vendored, engine swapped at build
 #   src/seed/                 47 cached previews
-#   src/10_app.py    8bcfc6eea147
+#   src/10_app.py    0847ab31c68d
 #   src/15_page.html 8968972cd977
 #   src/20_tail.sh   299ff8ca57a5
-#   src/41_reader.py     153752ae042a
+#   src/41_reader.py     6b851c4657c7
 #   src/42_voicesex.py   693670981a6d
-#   src/45_reader.html   f22525a00344
+#   src/45_reader.html   00d5a840934f
 #   src/46_marked.umd.js eaccee2fb9fb
 #   src/47_icon.svg      231dd5038e47
 #   src/voice_sex.json   35dcb92926b5
@@ -27,10 +27,10 @@
 # ledgers, and two ledgers that each think they own the daily budget are both
 # wrong by dinner time.
 #
-#   bash 24-google-tts-stt-v24.sh                 install
-#   bash 24-google-tts-stt-v24.sh --keys FILE     install, and take the keys out of FILE
-#   bash 24-google-tts-stt-v24.sh --test          install, then run the four tests
-#   bash 24-google-tts-stt-v24.sh --verify        check this file is whole, change nothing
+#   bash 25-google-tts-stt-v25.sh                 install
+#   bash 25-google-tts-stt-v25.sh --keys FILE     install, and take the keys out of FILE
+#   bash 25-google-tts-stt-v25.sh --test          install, then run the four tests
+#   bash 25-google-tts-stt-v25.sh --verify        check this file is whole, change nothing
 #
 # INSTALLING SPENDS NOTHING. The four tests make real calls against a real
 # ring, and a TTS account has ten requests a day, so they run when you ask for
@@ -53,8 +53,8 @@
 
 set -u
 
-GTT_VERSION="v24"
-GTT_FILE="24-google-tts-stt-v24.sh"
+GTT_VERSION="v25"
+GTT_FILE="25-google-tts-stt-v25.sh"
 GTT_REPO="markoboskoauroville/GOOGLE_TTS_STT"
 
 # --- the platform layer, and nothing below this block knows the platform ---
@@ -254,7 +254,7 @@ try:
 except Exception:
     PACIFIC = timezone(timedelta(hours=-8))
 
-VERSION = 24
+VERSION = 25
 PORT = int(os.environ.get("GTTS_PORT", "7311"))
 KEYFILE = os.environ.get("GEMINI_KEYS", os.path.expanduser("~/.gemini_keys"))
 HOME = os.path.expanduser("~/.google_tts_stt")
@@ -6253,8 +6253,21 @@ def mount(app_module, flask_app):
             tts = [m for m in b.get("models", []) if m.get("use") == "tts"]
             left = sum(m.get("left", 0) for m in tts)
             total = sum(m.get("total", 0) for m in tts)
+            d = app_module.read_ledger()
+            wall = d.get("wall", {})
+            dead = d.get("dead", {})
+            ring = app_module.load_ring()
+            ok = 0
+            for label, _k in ring:
+                if label in dead:
+                    continue
+                if all(wall.get("%s|%s" % (label, m))
+                       for m in app_module.TTS_CHAIN):
+                    continue
+                ok += 1                      # still worth asking
             return jsonify({"left": left, "total": total,
                             "keys": b.get("keys_live", 0),
+                            "keys_ok": ok, "keys_total": len(ring),
                             "resets_in": int(app_module.seconds_to_reset())})
         except Exception as e:
             return jsonify({"left": None, "error": str(e)})
@@ -6410,6 +6423,25 @@ header{
   padding:9px 4px; white-space:nowrap}
 
 /* ---------- Languages panel (Settings) ---------- */
+/* ---------- THE KEY LINE ----------
+   One line under the transport, in the terminal's own font, always on. It
+   carries the things a ring of eighteen free-tier keys makes you want to
+   know continuously: which key just spoke, how much is left today, how many
+   keys are still worth asking, and the clock time the allowance comes back.
+
+   A LINE, NOT A TOAST. A toast appears, says something, and removes it — and
+   the one fact you wanted was gone before you looked up. Anything here stays
+   until it is no longer true, and an error stays until a sentence succeeds.
+
+   Monospace and small on purpose: it is a readout, not prose. Fixed height
+   and nowrap, so it can never become two lines and push the player about. */
+.keyline{font-family:ui-monospace,"SF Mono","JetBrains Mono","Cascadia Mono",
+  Menlo,Consolas,monospace;
+  font-size:9px; line-height:1.25; letter-spacing:.02em;
+  color:var(--faint); margin-top:5px; white-space:nowrap; overflow:hidden;
+  text-overflow:ellipsis; height:12px}
+.keyline.bad{color:var(--exit)}
+.keyline.warn{color:var(--act)}
 .langhint{font-size:11.5px; color:var(--faint); line-height:1.5; margin:2px 0 10px}
 /* One row per key: what it is, a bar of what is left, and the count. A ring
    emptying quietly is what made the app look broken, so it is shown. */
@@ -7417,6 +7449,9 @@ body.fullread .reader-scroll{position:fixed; inset:0; max-height:none;
         </button>
       </div>
       <div class="status" id="status"></div>
+      <!-- THE RING, IN ONE LINE, ALWAYS THERE. A toast says a thing once and
+           takes it away; this is for the facts you want to glance at. -->
+      <div class="keyline" id="keyLine">&#183;</div>
     </div>
   </section>
 
@@ -9822,19 +9857,26 @@ function reportClipFailure(i){
   ST.playing = false; setPlayIcon(false);
   try{ highlight(ST.idx, true); }catch(e){}
   if(why.quota){
+    if(why.resets_in) KEYLINE.resetAt = Date.now() + why.resets_in * 1000;
     const mins = Math.max(1, Math.round((why.resets_in || 0) / 60));
     const when = mins >= 120 ? Math.round(mins/60) + " hours"
                : mins >= 60  ? "about an hour"
                              : mins + " minutes";
     setStatus("Stopped at sentence " + (i+1) + ". " + why.error +
               " It comes back in " + when + ".");
+    /* The line keeps it. The toast is the glance; this is the record. */
+    KEYLINE.err = "s" + (i+1) + " every key spent today";
     toast("Voice budget used up \u2014 back in " + when);
   } else {
     setStatus("Stopped at sentence " + (i+1) + ". " +
               (why.error || "That sentence could not be made.") +
               " Press play to try again.");
+    KEYLINE.err = "s" + (i+1) + " " +
+                  String(why.error || "could not be made").slice(0, 40);
     toast("Could not make sentence " + (i+1));
   }
+  renderKeyLine();
+  pollBudget(true);
 }
 
 /* ---------- core playback ---------- */
@@ -10225,6 +10267,56 @@ function busyHide(){
   if(w) w.classList.remove("on");
   if(busyT){ clearInterval(busyT); busyT = null; }
 }
+/* ---------- what the key line says ----------
+   THE CLOCK IS LOCAL. The allowance resets at midnight Pacific, which is a
+   fact about Google and useless to read. The server sends the number of
+   SECONDS until it happens and the clock time is worked out here, in the
+   browser, which is already standing in the right timezone — so it reads
+   09:00 in Croatia without this app having to know where Croatia is, and it
+   stays correct on a plane. */
+const KEYLINE = {key:"", left:null, total:null, ok:null, all:null,
+                 resetAt:0, err:"", warn:false};
+function resetClock(){
+  if(!KEYLINE.resetAt) return "--:--";
+  try{
+    /* 24-hour explicitly. The locale would decide otherwise, and on a phone
+       set to English that is "06:12 AM" — four characters longer on a line
+       that must not wrap, and not how the time is written here anyway. */
+    return new Date(KEYLINE.resetAt)
+      .toLocaleTimeString([], {hour:"2-digit", minute:"2-digit", hour12:false});
+  }catch(e){ return "--:--"; }
+}
+function renderKeyLine(){
+  const el = $("#keyLine"); if(!el) return;
+  const dot = " \u00b7 ";
+  const budget = (KEYLINE.left === null) ? "--" : (KEYLINE.left + "/" + KEYLINE.total);
+  const keys = (KEYLINE.ok === null) ? "" : (KEYLINE.ok + "/" + KEYLINE.all + " keys" + dot);
+  let txt;
+  if(KEYLINE.err){
+    txt = "! " + KEYLINE.err + dot + budget + dot + keys + "back " + resetClock();
+  } else {
+    txt = (KEYLINE.key || "idle") + dot + budget + " left" + dot + keys +
+          "back " + resetClock();
+  }
+  el.textContent = txt;
+  el.classList.toggle("bad", !!KEYLINE.err);
+  el.classList.toggle("warn", !KEYLINE.err && KEYLINE.left === 0);
+}
+let budgetT = 0;
+function pollBudget(force){
+  const now = Date.now();
+  if(!force && now - budgetT < 20000) return;     /* not on every sentence */
+  budgetT = now;
+  api("/api/budget").then(r=>r.json()).then(d=>{
+    KEYLINE.left = (typeof d.left === "number") ? d.left : null;
+    KEYLINE.total = d.total;
+    KEYLINE.ok = (typeof d.keys_ok === "number") ? d.keys_ok : null;
+    KEYLINE.all = d.keys_total;
+    KEYLINE.resetAt = Date.now() + (d.resets_in || 0) * 1000;
+    renderKeyLine();
+  }).catch(()=>{});
+}
+
 /* WHICH KEY IS SPEAKING, AND WHEN ONE RUNS DRY.
    The ring has always fallen back by itself: the candidate list is sorted by
    what is left and a spent key simply stops being a candidate. What it never
@@ -10238,9 +10330,14 @@ function noteSpeakingKey(r){
     const label = r.headers.get("X-Gtt-Key") || "";
     const left = parseInt(r.headers.get("X-Gtt-Key-Left") || "-1", 10);
     if(!label) return;
+    /* A sentence arrived, so whatever was wrong is not wrong any more. */
+    KEYLINE.key = label;
+    KEYLINE.err = "";
+    if(left >= 0) KEYLINE.left = null;      /* re-read rather than guess */
+    renderKeyLine();
+    pollBudget(label !== lastKey);          /* a new key is worth a fresh count */
     if(left === 0 && !spentSaid[label]){
       spentSaid[label] = 1;
-      toast("That key is spent for today \u2014 moving to another");
       try{ renderKeyBars(); }catch(e){}
     }
     lastKey = label;
@@ -12033,6 +12130,13 @@ function boot(){
     renderEdgeGrid(); renderSpKeyList(); renderSpDead(); loadCroVoices();
     renderGroq(); wireGroq(); renderKeyList(); wireKeys();
     loadDirection(); armBarHide(); renderBudget(); renderKeyBars();
+    /* The line is alive from the moment the app is, and keeps itself honest:
+       the count drifts as sentences are made and the clock ticks toward the
+       reset, so it is re-read on a slow timer rather than only when something
+       happens. */
+    pollBudget(true);
+    setInterval(()=>{ pollBudget(true); }, 60000);
+    setInterval(renderKeyLine, 30000);    /* the clock, cheaply */
     mediaSetup(); wireFloat(); wireFloatF(); wireFloatS(); wireFsWatch(); wirePersistFlush();
     renderVoices(); renderLangList();
     applySpeed(); applyVolume(); applyGap(); applyLag(); applySize();

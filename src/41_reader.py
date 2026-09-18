@@ -796,8 +796,21 @@ def mount(app_module, flask_app):
             tts = [m for m in b.get("models", []) if m.get("use") == "tts"]
             left = sum(m.get("left", 0) for m in tts)
             total = sum(m.get("total", 0) for m in tts)
+            d = app_module.read_ledger()
+            wall = d.get("wall", {})
+            dead = d.get("dead", {})
+            ring = app_module.load_ring()
+            ok = 0
+            for label, _k in ring:
+                if label in dead:
+                    continue
+                if all(wall.get("%s|%s" % (label, m))
+                       for m in app_module.TTS_CHAIN):
+                    continue
+                ok += 1                      # still worth asking
             return jsonify({"left": left, "total": total,
                             "keys": b.get("keys_live", 0),
+                            "keys_ok": ok, "keys_total": len(ring),
                             "resets_in": int(app_module.seconds_to_reset())})
         except Exception as e:
             return jsonify({"left": None, "error": str(e)})
