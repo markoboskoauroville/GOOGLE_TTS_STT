@@ -2031,6 +2031,22 @@ def open_page(url):
         except Exception:
             return False
 
+    # CHROME BY NAME, FIRST, AND THAT IS ABOUT SCREEN SPACE.
+    #
+    # A bare VIEW intent lets Android pick, and what it picks here is a custom
+    # tab: a header with the page title on one line and the address on the
+    # line below it, permanently, above a reader that wants every pixel. A
+    # plain Chrome tab is one line.
+    #
+    # Asked for by PACKAGE rather than by activity, because the activity name
+    # has changed between Chrome versions and the package name never has. The
+    # phone's own default stays as the fallback rather than the rule, so a
+    # phone without Chrome still opens.
+    for pkg in ("com.android.chrome", "com.chrome.beta",
+                "com.chrome.dev", "com.chrome.canary"):
+        if run(["am", "start", "-a", "android.intent.action.VIEW",
+                "-p", pkg, "-d", url]):
+            return "chrome"
     if run(["am", "start", "-a", "android.intent.action.VIEW", "-d", url]):
         return "am start"
     if run(["termux-open-url", url]):

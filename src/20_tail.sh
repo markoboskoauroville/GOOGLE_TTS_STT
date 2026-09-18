@@ -111,10 +111,36 @@ step "gtt"
 cat > "$BIN/gtt.new" <<GTT_CMD_EOF
 #!/usr/bin/env bash
 # gtt - Google TTS and STT $GTT_VERSION
-APP="$APP"
-PY="$PY"
-KEYS="$KEYS"
-OUT="$OUT"
+#
+# ONE HOME, TWO SPELLINGS, AND THIS COMMAND IS SHARED BETWEEN THEM.
+#
+# \$PREFIX/bin is the same directory whether you are in Termux or inside the
+# proot, so this one file is run from both. But the two spell the same home
+# differently — /data/data/com.termux/files/home out here, /root in there —
+# and they are the SAME DIRECTORY, same inode, reachable by either name from
+# inside and by only one name from outside.
+#
+# So the path must not be frozen at install time. It was, and installing from
+# inside the proot wrote /root into this file; run from Termux proper it then
+# said "can't open file '/root/.google_tts_stt/app.py'" while the file was
+# sitting right there under its other name. The app was fine. The spelling
+# was not.
+#
+# Resolved here instead, every run, cheaply: whichever spelling has the app.
+GTT_HOME=""
+for _h in "\$HOME" /data/data/com.termux/files/home /root; do
+  [ -n "\$_h" ] && [ -f "\$_h/.google_tts_stt/app.py" ] && GTT_HOME="\$_h" && break
+done
+if [ -z "\$GTT_HOME" ]; then
+  printf "\n  GTT is not installed under any home this shell can see.\n"
+  printf "  Looked in: \$HOME, /data/data/com.termux/files/home, /root\n\n"
+  exit 1
+fi
+APP="\$GTT_HOME/.google_tts_stt/app.py"
+PY="\$(command -v python3 2>/dev/null || command -v python 2>/dev/null || echo python3)"
+KEYS="\$GTT_HOME/.gemini_keys"
+OUT="\$GTT_HOME/.google_tts_stt/out"
+export HOME="\$GTT_HOME"
 if [ -t 1 ]; then AM="\033[38;5;214m"; SAND="\033[38;5;223m"; DIM="\033[0;90m"; OFF="\033[0m"
 else AM=""; SAND=""; DIM=""; OFF=""; fi
 case "\${1:-run}" in

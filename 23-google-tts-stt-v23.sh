@@ -5,12 +5,12 @@
 #   src/00_head.sh   9b27f46ee8bc
 #   src/30_transcribe.html   67e73826805d   vendored, engine swapped at build
 #   src/seed/                 47 cached previews
-#   src/10_app.py    b4895e4cbdab
+#   src/10_app.py    9e4f2c4b39bb
 #   src/15_page.html 8968972cd977
-#   src/20_tail.sh   86ccf82463ee
+#   src/20_tail.sh   299ff8ca57a5
 #   src/41_reader.py     c738a9b8dcbf
 #   src/42_voicesex.py   693670981a6d
-#   src/45_reader.html   fb541dba708a
+#   src/45_reader.html   b9c77678a684
 #   src/46_marked.umd.js eaccee2fb9fb
 #   src/47_icon.svg      231dd5038e47
 #   src/voice_sex.json   35dcb92926b5
@@ -2244,6 +2244,22 @@ def open_page(url):
         except Exception:
             return False
 
+    # CHROME BY NAME, FIRST, AND THAT IS ABOUT SCREEN SPACE.
+    #
+    # A bare VIEW intent lets Android pick, and what it picks here is a custom
+    # tab: a header with the page title on one line and the address on the
+    # line below it, permanently, above a reader that wants every pixel. A
+    # plain Chrome tab is one line.
+    #
+    # Asked for by PACKAGE rather than by activity, because the activity name
+    # has changed between Chrome versions and the package name never has. The
+    # phone's own default stays as the fallback rather than the rule, so a
+    # phone without Chrome still opens.
+    for pkg in ("com.android.chrome", "com.chrome.beta",
+                "com.chrome.dev", "com.chrome.canary"):
+        if run(["am", "start", "-a", "android.intent.action.VIEW",
+                "-p", pkg, "-d", url]):
+            return "chrome"
     if run(["am", "start", "-a", "android.intent.action.VIEW", "-d", url]):
         return "am start"
     if run(["termux-open-url", url]):
@@ -6072,6 +6088,14 @@ cat > "$APPHOME/static/reader.html.new" <<'GTT_READER_HTML_EOF'
 <link rel="icon" type="image/svg+xml" href="/static/icon.svg">
 <link rel="mask-icon" href="/static/icon.svg" color="#ebcd2d">
 <link rel="apple-touch-icon" href="/static/icon.svg">
+<!-- THE TITLE IS THE NAME AND NOTHING ELSE.
+     It briefly carried the address too, so that whatever showed one line
+     showed both. That was wrong here: a Chrome custom tab prints the title on
+     one line and the ORIGIN on the line under it, always, and it is Chrome
+     writing that second line, not this page. So the address appeared twice,
+     once in our words and once in Chrome's, which is worse than the two lines
+     it was meant to save. The second line cannot be removed from inside the
+     page; what can be removed is our half of the repetition. -->
 <title>GTT</title>
 <style>
 
@@ -11833,10 +11857,36 @@ step "gtt"
 cat > "$BIN/gtt.new" <<GTT_CMD_EOF
 #!/usr/bin/env bash
 # gtt - Google TTS and STT $GTT_VERSION
-APP="$APP"
-PY="$PY"
-KEYS="$KEYS"
-OUT="$OUT"
+#
+# ONE HOME, TWO SPELLINGS, AND THIS COMMAND IS SHARED BETWEEN THEM.
+#
+# \$PREFIX/bin is the same directory whether you are in Termux or inside the
+# proot, so this one file is run from both. But the two spell the same home
+# differently — /data/data/com.termux/files/home out here, /root in there —
+# and they are the SAME DIRECTORY, same inode, reachable by either name from
+# inside and by only one name from outside.
+#
+# So the path must not be frozen at install time. It was, and installing from
+# inside the proot wrote /root into this file; run from Termux proper it then
+# said "can't open file '/root/.google_tts_stt/app.py'" while the file was
+# sitting right there under its other name. The app was fine. The spelling
+# was not.
+#
+# Resolved here instead, every run, cheaply: whichever spelling has the app.
+GTT_HOME=""
+for _h in "\$HOME" /data/data/com.termux/files/home /root; do
+  [ -n "\$_h" ] && [ -f "\$_h/.google_tts_stt/app.py" ] && GTT_HOME="\$_h" && break
+done
+if [ -z "\$GTT_HOME" ]; then
+  printf "\n  GTT is not installed under any home this shell can see.\n"
+  printf "  Looked in: \$HOME, /data/data/com.termux/files/home, /root\n\n"
+  exit 1
+fi
+APP="\$GTT_HOME/.google_tts_stt/app.py"
+PY="\$(command -v python3 2>/dev/null || command -v python 2>/dev/null || echo python3)"
+KEYS="\$GTT_HOME/.gemini_keys"
+OUT="\$GTT_HOME/.google_tts_stt/out"
+export HOME="\$GTT_HOME"
 if [ -t 1 ]; then AM="\033[38;5;214m"; SAND="\033[38;5;223m"; DIM="\033[0;90m"; OFF="\033[0m"
 else AM=""; SAND=""; DIM=""; OFF=""; fi
 case "\${1:-run}" in
