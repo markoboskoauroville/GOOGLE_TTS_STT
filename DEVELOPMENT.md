@@ -1037,3 +1037,97 @@ earlier today. So the list is what is promised, and the line under it is what wa
 observed, and they are not run together. The seventy-plus preview languages the
 newer model claims are left out entirely: a preview list is not stable, and a
 language that stops working is worse than one never offered.
+
+---
+
+## 19.9.2026 — v30, pinch the reader text to resize it
+
+Two fingers anywhere in the reading area change the size of the type, live,
+while they move. One finger still scrolls. It works in the reader and in the
+offline player, and on a Mac trackpad the same pinch arrives as ctrl+wheel and
+is handled by the same code. The same change went into MA Reader in the same
+hour; the page is shared ancestry and the two must not drift, so it was
+written once as a patch script and applied to all three copies from one file.
+
+### It is not the browser's zoom, and that is the point
+
+Zoom magnifies the page as a picture: the line breaks stay where they were and
+the right-hand edge of every line goes off the screen, so reading becomes a
+sideways drag once per line. This is the A- / A+ stepper from Settings run
+continuously — the type grows and the text REFLOWS into the same column, so
+nothing ever leaves the screen. Both write the same `size`, so the stepper and
+the pinch always agree, and the pinch is remembered like any other setting.
+
+### touch-action is the only thing that works, and it has to be in the CSS
+
+`preventDefault` on the first touchmove is too late. By then Chrome has
+decided the gesture is a scroll, and every touchmove after that arrives with
+`cancelable` already false — the call is made, returns, and does nothing. The
+declaration has to be in the stylesheet, before the first finger lands:
+
+    .reader-scroll{ touch-action:pan-y }
+
+`pan-y`, not `none`, so the ordinary one-finger scroll keeps its native feel.
+And `pan-x pan-y` on `.doc.md pre`, because pan-y on the ancestor would
+otherwise have quietly taken the sideways scroll away from code blocks.
+
+### The anchor is what makes it usable rather than a demonstration
+
+Growing the type from the top of the document pushes the line you were reading
+down and off the bottom, and the gesture becomes a hunt for your place.
+`elementFromPoint` at the middle of the pinch is remembered before anything
+moves, and after every resize the scroll is corrected so that line has not
+shifted a pixel.
+
+A detached element reports a rectangle of zeroes, which would throw the scroll
+to the top of the text, so that case is checked and anchoring simply stops
+rather than anchoring to nothing.
+
+### Two silent failures found on the way, which were worth more than the feature
+
+**MA Reader's server was truncating the gesture.** Its `load_state()` ended
+with `st["size"] = int(st["size"])`, so 7.35 worked on the screen, was accepted
+with a 200, and came back 7 on the next page load. GTT's `save_state` has no
+such coercion and was never affected — but the same page runs on both, so the
+fix belonged in both records.
+
+**A size that is not a number was being used as one, in both apps.** GTT's
+state file is written by the browser and read back with no arithmetic in
+between, so a corrupted file or somebody with the console open could put a
+string in it. Proven against the running server: a POST of `{"size":"banana"}`
+is stored and handed straight back.
+
+That string made `--read` into `"NaNpx"`, and **a browser discards an invalid
+custom-property value without saying so**. The text then sat at the 21px in
+the stylesheet, which looks exactly like a working default; the readout said
+NaN; and the letter size could not be moved by the stepper or by a pinch,
+because every sum that starts at NaN ends at NaN. Nothing anywhere reported a
+fault. `sizeOf()` now stands in front of every route into `ST.size`, and the
+NaN test is written `n === n`, which is the one comparison NaN fails.
+
+### The tests, and the four that were not good enough
+
+64 checks on the gesture, lifted verbatim out of the shipped page and driven
+with synthetic touches; 15 on MA Reader's clamp, lifted out of the shipped
+installer; the whole page parsed as JavaScript and its stylesheet
+brace-counted, because a syntax error in a 4,598-line inline script is a blank
+app rather than a broken pinch; and the real server run on a spare port with
+the page fetched over HTTP and compared byte for byte against the source.
+
+Then the suite was checked against itself — fourteen deliberate breaks planted
+one at a time. Four got through on the first pass:
+
+    the ratio measured frame to frame     the slow-versus-fast test had both
+                                            ends sitting at the ceiling, so
+                                            they agreed for the wrong reason
+    the scroll anchor removed             the anchor was tested by calling the
+                                            helper, never by pinching
+    the last frame dropped on touchend    the assertion could not fail
+    a third finger treated as two         the first two fingers did not move
+                                            in the test, so both behaved alike
+
+All four tests were rewritten and all fourteen breaks are now caught.
+
+**NOT tested: a real finger on a real screen.** There is no browser on this
+phone to drive. The arithmetic, the event flow and the bytes that reach the
+browser are proven; how it feels under the hand is his to see first.

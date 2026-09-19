@@ -96,3 +96,28 @@ The installer is generated. `src/` is the truth.
     python3 tools/build_installer.py --check    fail if the shipped file is stale
     bash tests/gate.sh                          the tests
     bash tests/gate.sh --offline                1, 3 and the build check, no keys spent
+
+### The reader page, which is shared with MA Reader
+
+`src/45_reader.html` and MA Reader's two installers carry the same page. The
+checks on it read the shipped file — never a copy kept beside them — and take
+a path, so one suite covers all three:
+
+    node tests/test_page.js                     does the page still parse at all
+    node tests/test_pinch.js                    the pinch, on synthetic touches
+    python3 tests/pinch_mutants.py              breaks it on purpose, 14 ways,
+                                                  and the suite must go red
+    python3 tests/test_state_size.py <sh>       MA Reader's server-side clamp
+
+Each takes an optional file, so
+
+    node tests/test_pinch.js ../MA_READER_TERMUX_MACOS/3sh_i_ma_reader_v3_termux.sh
+
+tests MA Reader's copy. `tests/pinch_extract.py` lifts the page out of an
+installer's heredoc. `tools/apply_pinch.py` is the patch that made the change
+in all three at once; it is idempotent and `--check` says whether a file still
+carries it.
+
+The page checks run in `--offline` too: they spend nothing. They are in the
+gate because a syntax error in a 4,600-line inline script is not a broken
+feature, it is a blank app.

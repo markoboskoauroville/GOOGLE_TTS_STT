@@ -45,6 +45,24 @@ fi
 
 "$PY" "$ROOT/tests/test3_ugly.py" || FAILED="$FAILED test3"
 
+# The reader page. It spends nothing and needs no keys, so it runs in --offline
+# too. Two things are being asked: does the page still parse at all - a syntax
+# error in a 4,600-line inline script is a blank app, not a broken feature -
+# and does the pinch still behave. Then the suite is turned on itself.
+printf "\n${AM}the reader page${OFF}\n"
+if command -v node >/dev/null 2>&1; then
+  node "$ROOT/tests/test_page.js"  || FAILED="$FAILED page"
+  node "$ROOT/tests/test_pinch.js" || FAILED="$FAILED pinch"
+  "$PY" "$ROOT/tests/pinch_mutants.py" >/dev/null 2>&1 \
+    && printf "   ok   every planted break was caught\n" \
+    || FAILED="$FAILED mutants"
+else
+  # Said out loud, not skipped quietly. A check that vanishes without a word is
+  # the failure this repository's own notes keep coming back to.
+  printf "   ${BAD}NOT RUN${OFF}  node is not installed, so the page was never parsed\n"
+  FAILED="$FAILED node-missing"
+fi
+
 # Test 4 spends nothing: it fabricates its keys, because what it proves is that
 # what is on disk survives an install, not that a key works.
 bash "$ROOT/tests/test4_upgrade.sh" || FAILED="$FAILED test4"

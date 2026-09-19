@@ -5,12 +5,12 @@
 #   src/00_head.sh   9b27f46ee8bc
 #   src/30_transcribe.html   67e73826805d   vendored, engine swapped at build
 #   src/seed/                 47 cached previews
-#   src/10_app.py    9468a9442e28
+#   src/10_app.py    8cfdb2e80e53
 #   src/15_page.html 8968972cd977
 #   src/20_tail.sh   299ff8ca57a5
 #   src/41_reader.py     69280535340c
 #   src/42_voicesex.py   693670981a6d
-#   src/45_reader.html   0ac9fcbf6125
+#   src/45_reader.html   8bfe76111433
 #   src/46_marked.umd.js eaccee2fb9fb
 #   src/47_icon.svg      231dd5038e47
 #   src/voice_sex.json   35dcb92926b5
@@ -27,10 +27,10 @@
 # ledgers, and two ledgers that each think they own the daily budget are both
 # wrong by dinner time.
 #
-#   bash 29-google-tts-stt-v29.sh                 install
-#   bash 29-google-tts-stt-v29.sh --keys FILE     install, and take the keys out of FILE
-#   bash 29-google-tts-stt-v29.sh --test          install, then run the four tests
-#   bash 29-google-tts-stt-v29.sh --verify        check this file is whole, change nothing
+#   bash 30-google-tts-stt-v30.sh                 install
+#   bash 30-google-tts-stt-v30.sh --keys FILE     install, and take the keys out of FILE
+#   bash 30-google-tts-stt-v30.sh --test          install, then run the four tests
+#   bash 30-google-tts-stt-v30.sh --verify        check this file is whole, change nothing
 #
 # INSTALLING SPENDS NOTHING. The four tests make real calls against a real
 # ring, and a TTS account has ten requests a day, so they run when you ask for
@@ -53,8 +53,8 @@
 
 set -u
 
-GTT_VERSION="v29"
-GTT_FILE="29-google-tts-stt-v29.sh"
+GTT_VERSION="v30"
+GTT_FILE="30-google-tts-stt-v30.sh"
 GTT_REPO="markoboskoauroville/GOOGLE_TTS_STT"
 
 # --- the platform layer, and nothing below this block knows the platform ---
@@ -254,7 +254,7 @@ try:
 except Exception:
     PACIFIC = timezone(timedelta(hours=-8))
 
-VERSION = 29
+VERSION = 30
 PORT = int(os.environ.get("GTTS_PORT", "7311"))
 KEYFILE = os.environ.get("GEMINI_KEYS", os.path.expanduser("~/.gemini_keys"))
 HOME = os.path.expanduser("~/.google_tts_stt")
@@ -6686,7 +6686,28 @@ textarea::placeholder{color:var(--faint)}
 /* ---------- reader (the page follows the chosen theme) ---------- */
 .reader-scroll{flex:1; overflow-y:auto; padding:18px 16px 24px;
   background:var(--page); -webkit-overflow-scrolling:touch;
-  transition:background .25s}
+  transition:background .25s;
+  /* ONE FINGER PANS, TWO FINGERS ARE OURS.
+     This one word is what makes the pinch possible at all. Without it the
+     browser owns any two-finger gesture and magnifies the whole page, and
+     asking it to stop later - with preventDefault on the first touchmove -
+     is too late: by then Chrome has committed to a scroll and the events
+     arrive with cancelable already false. touch-action is the only way to
+     say so BEFORE the first finger lands. pan-y, not none, because the
+     ordinary one-finger scroll must keep its native feel. */
+  touch-action:pan-y}
+
+/* The number two fingers are changing, while they change it. It sits at the
+   top, clear of the hand, ignores touches, and leaves on its own. */
+.pinch-pill{position:fixed; left:50%; z-index:96; pointer-events:none;
+  top:calc(env(safe-area-inset-top, 0px) + 14px);
+  transform:translateX(-50%) scale(.96);
+  background:var(--panel); border:1px solid var(--line); color:var(--text);
+  border-radius:999px; padding:7px 16px; font-size:13px; font-weight:600;
+  letter-spacing:.04em; box-shadow:0 4px 18px rgba(0,0,0,.45);
+  opacity:0; transition:opacity .16s, transform .16s}
+.pinch-pill.on{opacity:1; transform:translateX(-50%) scale(1)}
+
 .reader-title{font-size:12px; letter-spacing:.08em; color:var(--faint);
   text-transform:uppercase; margin:0 0 14px}
 .doc{font-family:var(--read-font); font-size:var(--read);
@@ -6752,7 +6773,8 @@ body.wordhl .sent.paused .w.now{
 /* A fenced block scrolls sideways rather than forcing the whole page wide. */
 .doc.md pre{margin:.7em 0; padding:.7em .8em; background:var(--panel);
   border:1px solid var(--line); border-radius:8px;
-  overflow-x:auto; -webkit-overflow-scrolling:touch}
+  overflow-x:auto; -webkit-overflow-scrolling:touch;
+  touch-action:pan-x pan-y}
 .doc.md pre code{background:none; border:0; padding:0; font-size:.85em;
   white-space:pre}
 .doc.md img{max-width:100%; height:auto; border-radius:6px}
@@ -10252,13 +10274,217 @@ function applyGap(){
   setText("#gapVal", t); setText("#gapNum", t); setText("#gapNum2", t);
   try{ updateCounter(); }catch(e){}
 }
+/* A size that is not a number used to arrive exactly as it was found. The
+   reader's state file is written by the browser and read back with no
+   arithmetic in between, so a corrupted file, an older build, or somebody
+   with the console open could put a string in it - and a string made
+   --read into "NaNpx", which a browser discards WITHOUT SAYING SO. The text
+   then sat at the 21px in the stylesheet, the readout said NaN, and the
+   letter size could not be moved by the stepper or by a pinch, because every
+   sum starting at NaN ends at NaN. Nothing anywhere reported a fault.
+
+   So every route into ST.size goes past here first. parseFloat, because a
+   number that arrived as text is still a number; the NaN test written as
+   n === n, because that is the one comparison NaN fails; and the same two
+   limits the stepper uses, so the file can never hold a size the buttons
+   could not have produced. */
+function sizeOf(v, dflt){
+  const n = parseFloat(v);
+  return (n === n) ? Math.max(SIZE_MIN, Math.min(SIZE_MAX, n)) : dflt;
+}
+
+/* ST.size was a whole step for as long as a stepper was the only thing that
+   moved it. A pinch moves it continuously, so it is a real number now and
+   every consumer has to survive 7.3 as well as 7. The pixels are rounded to
+   a tenth: fine enough that growth looks smooth, coarse enough that two
+   frames a hair apart do not each pay for a reflow. The readouts still print
+   whole pixels, because nobody wants to read 23.4. */
 function applySize(){
-  const fs = 13 + ST.size*2;                 // 15..41 px
-  const col = 400 + ST.size*46;
+  const fs = Math.round((13 + ST.size*2)*10)/10;   // 15..41 px
+  const col = Math.round(400 + ST.size*46);
   document.documentElement.style.setProperty("--read", fs+"px");
   document.documentElement.style.setProperty("--col", col+"px");
-  const sv=$("#sizeVal"); if(sv) sv.textContent = fs;
-  const sv2=$("#sizeVal2"); if(sv2) sv2.textContent = fs;
+  const sv=$("#sizeVal"); if(sv) sv.textContent = Math.round(fs);
+  const sv2=$("#sizeVal2"); if(sv2) sv2.textContent = Math.round(fs);
+}
+
+/* ---------- PINCH: TWO FINGERS CHANGE THE LETTER SIZE ----------
+
+   This is NOT the browser's zoom, and the difference is the whole point.
+   Zoom magnifies the page as a picture: the line breaks stay where they
+   were, the column keeps its old width in old pixels, and the right-hand
+   edge of every line goes off the screen, so reading turns into dragging
+   sideways once per line. What two fingers do here is the A- / A+ stepper
+   from Settings, run continuously - the type grows and the text REFLOWS into
+   the same column, so nothing ever leaves the screen.
+
+   Three things had to be true before it felt like a gesture rather than a
+   trick.
+
+   THE BROWSER MUST BE TOLD FIRST. See touch-action on .reader-scroll above.
+
+   THE TEXT MUST STAY UNDER THE FINGERS. Growing type from the top of the
+   document pushes the line you were reading downward and off the bottom, and
+   the gesture becomes a hunt for your place. So the line under the middle of
+   the pinch is remembered before anything moves, and after every resize the
+   scroll is corrected so that line has not shifted a pixel. You resize
+   around the sentence you are looking at, which is the only one you care
+   about.
+
+   IT MUST NOT COST A SENTENCE. A tap in the reading area skips forward one
+   sentence, and letting go of a pinch can arrive as a click. Any click
+   within 400 ms of the end of a pinch is swallowed at the document, in the
+   capture phase, so it never reaches the tap handler at all - stopping it at
+   the scroller would be too late, because that handler is on the scroller.
+
+   Resizing does not touch the audio. The clip that is playing goes on
+   playing, and the highlight lands on the same words in their new places,
+   because the highlight has always been spans in the text rather than
+   coordinates on the screen. */
+const PINCH = { live:false, d0:1, size0:4, sc:null, anchor:null, anchorY:0,
+                pending:0, raf:0, guard:0, hideT:null };
+
+function pinchDist(t){
+  const dx = t[0].clientX - t[1].clientX, dy = t[0].clientY - t[1].clientY;
+  return Math.sqrt(dx*dx + dy*dy) || 1;     /* never zero: it is a divisor */
+}
+
+/* What is under the middle of the pinch, and how far down the window it sits.
+   elementFromPoint can hand back a word span, a paragraph, the .doc itself,
+   or nothing at all when the middle falls in the margin. Any of those is a
+   good enough anchor as long as it belongs to this scroller; when it is
+   none of them, the first child of the scroller is a stand-in that at least
+   keeps the top of the text still. */
+function pinchAnchor(sc, x, y){
+  let el = document.elementFromPoint(x, y);
+  if(!el || !sc.contains(el)) el = sc.firstElementChild;
+  PINCH.anchor  = el || null;
+  PINCH.anchorY = el ? el.getBoundingClientRect().top : 0;
+}
+
+/* Put the anchor back where it was. An element that has been re-rendered
+   under us is no longer in the document and reports a rectangle of zeroes,
+   which would throw the scroll to the top of the text - so notice that and
+   stop anchoring, rather than anchor to nothing. */
+function pinchKeepPlace(){
+  const el = PINCH.anchor, sc = PINCH.sc;
+  if(!el || !sc) return;
+  if(el.isConnected === false){ PINCH.anchor = null; return; }
+  sc.scrollTop += el.getBoundingClientRect().top - PINCH.anchorY;
+}
+
+function pinchPill(){
+  let p = document.getElementById("pinchPill");
+  if(!p){
+    p = document.createElement("div");
+    p.id = "pinchPill"; p.className = "pinch-pill";
+    document.body.appendChild(p);
+  }
+  return p;
+}
+function pinchShow(){
+  const p = pinchPill();
+  p.textContent = Math.round(13 + ST.size*2) + " px";
+  p.classList.add("on");
+  clearTimeout(PINCH.hideT); PINCH.hideT = null;
+}
+function pinchFade(){
+  const p = document.getElementById("pinchPill"); if(!p) return;
+  clearTimeout(PINCH.hideT);
+  PINCH.hideT = setTimeout(()=>{ p.classList.remove("on"); }, 700);
+}
+
+function pinchApply(size){
+  if(!(size === size)) return;              /* NaN, from a degenerate pinch */
+  ST.size = Math.max(SIZE_MIN, Math.min(SIZE_MAX, size));
+  applySize();
+  pinchKeepPlace();
+  pinchShow();
+}
+
+/* A long text reflows on every size change, and fingers deliver touchmove far
+   faster than a page can lay out. Only the newest size is worth anything, so
+   hold it and spend one layout per frame. */
+function pinchQueue(size){
+  PINCH.pending = size;
+  if(PINCH.raf) return;
+  PINCH.raf = requestAnimationFrame(()=>{
+    PINCH.raf = 0; pinchApply(PINCH.pending);
+  });
+}
+
+function wirePinch(){
+  document.addEventListener("touchstart", (e)=>{
+    if(e.touches.length !== 2) return;
+    const t = e.target;
+    const sc = (t && t.closest) ? t.closest(".reader-scroll") : null;
+    if(!sc) return;
+    /* Editing the Markdown source is typing, and two fingers in a text field
+       belong to the field and its own selection handles. */
+    if(document.body.classList.contains("mode-edit")) return;
+    PINCH.live  = true;
+    PINCH.sc    = sc;
+    PINCH.d0    = pinchDist(e.touches);
+    PINCH.size0 = ST.size;
+    pinchAnchor(sc, (e.touches[0].clientX + e.touches[1].clientX)/2,
+                    (e.touches[0].clientY + e.touches[1].clientY)/2);
+  }, true);
+
+  document.addEventListener("touchmove", (e)=>{
+    if(!PINCH.live || e.touches.length !== 2) return;
+    if(e.cancelable) e.preventDefault();
+    /* The ratio is measured against where the fingers STARTED, not against
+       the last frame. Frame to frame, the rounding of each step would
+       compound, and a slow pinch would end up somewhere different from a
+       fast one across the same distance. */
+    const fs0 = 13 + PINCH.size0*2;
+    pinchQueue(((fs0 * (pinchDist(e.touches) / PINCH.d0)) - 13) / 2);
+  }, {passive:false, capture:true});
+
+  const done = ()=>{
+    if(!PINCH.live) return;
+    PINCH.live = false;
+    /* A queued frame that never ran would lose the last of the gesture, so
+       spend it now rather than cancelling it. */
+    if(PINCH.raf){
+      cancelAnimationFrame(PINCH.raf); PINCH.raf = 0;
+      pinchApply(PINCH.pending);
+    }
+    PINCH.anchor = null; PINCH.sc = null;
+    PINCH.guard  = Date.now() + 400;
+    pinchFade();
+    persist();
+  };
+  /* Either finger leaving ends it. The one still down goes back to scrolling,
+     which is what it would have been doing on its own. */
+  document.addEventListener("touchend", done, true);
+  document.addEventListener("touchcancel", done, true);
+
+  /* The same gesture on a trackpad. A Mac reports a pinch as a wheel event
+     with ctrl held down - it is not held down, the system says so on the
+     pinch's behalf - and a desktop browser reads a real ctrl+wheel as zoom.
+     Both mean "resize this", and neither should scroll or zoom the page.
+     exp() rather than a fixed step, so the same roll of the fingers moves
+     the same proportion at 15 px as at 40. */
+  document.addEventListener("wheel", (e)=>{
+    if(!e.ctrlKey) return;
+    const t = e.target;
+    const sc = (t && t.closest) ? t.closest(".reader-scroll") : null;
+    if(!sc) return;
+    if(e.cancelable) e.preventDefault();
+    PINCH.sc = sc;
+    pinchAnchor(sc, e.clientX, e.clientY);
+    pinchApply((((13 + ST.size*2) * Math.exp(-e.deltaY/220)) - 13) / 2);
+    PINCH.anchor = null; PINCH.sc = null;
+    pinchFade();
+    persist();                 /* debounced 250 ms: a roll writes once */
+  }, {passive:false});
+
+  /* The swallowed click. Capture at the document runs before capture at the
+     scroller, so stopping it here means the tap handler never sees it. */
+  document.addEventListener("click", (e)=>{
+    if(Date.now() < PINCH.guard){ e.stopPropagation(); e.preventDefault(); }
+  }, true);
 }
 function applyFont(){
   document.documentElement.style.setProperty("--read-font", FONTS[ST.font]||FONTS.serif);
@@ -10365,7 +10591,11 @@ function step(kind, d){
                 Math.round((ST.lag + d*LAG_STEP)*100)/100));
     applyLag();
   } else if(kind==="size"){
-    ST.size = Math.max(SIZE_MIN, Math.min(SIZE_MAX, ST.size + d)); applySize();
+    /* A pinch can leave the size between two steps. A+ and A- put it back
+       on one: round first, then move, or the buttons would carry the
+       fraction forever and never land on the number they print. */
+    ST.size = Math.max(SIZE_MIN, Math.min(SIZE_MAX, Math.round(ST.size) + d));
+    applySize();
   } else if(kind==="lh"){
     ST.lineheight = Math.max(1, Math.min(5, ST.lineheight + d)); applySpacing();
   }
@@ -12193,6 +12423,10 @@ function bindV2(){
   $("#pasteTab").onclick=()=>{ showHome(); pasteFromClipboard(); };
   wireCenterTaps("#readerScroll", false);
   wireCenterTaps("#offReaderScroll", true);
+  /* One handler for both reading views and for the trackpad. It finds its own
+     scroller from the target, so a third reading surface would be covered by
+     the day it exists, without a line here. */
+  wirePinch();
   $("#libSearch").addEventListener("input", renderLibrary);
   $("#offSearch").addEventListener("input", renderOffline);
 
@@ -12343,7 +12577,7 @@ function boot(){
                (typeof st.lag === "number") ? st.lag : 0.0));
     ST.speed = Math.max(SPEED_MIN, Math.min(SPEED_MAX, ST.speed));
     ST.loop = !!st.loop;
-    ST.size = st.size||13; ST.autoplay = (st.autoplay!==false); ST.focus = !!st.focus;
+    ST.size = sizeOf(st.size, 13); ST.autoplay = (st.autoplay!==false); ST.focus = !!st.focus;
     ST.theme = THEMES.includes(st.theme) ? st.theme : "night";
     ST.font = FONTS[st.font] ? st.font : "sans";
     ST.lineheight = st.lineheight || 3;
